@@ -12,19 +12,42 @@ export function setupBot(storage: IStorage) {
 
   const bot = new TelegramBot(token, { polling: true });
 
-  bot.onText(/\/start/, async (msg) => {
+  bot.onText(/\/stats/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
-    const username = msg.from?.username;
-
     if (!telegramId) return;
 
-    let user = await storage.getUserByTelegramId(telegramId);
+    const user = await storage.getUserByTelegramId(telegramId);
     if (!user) {
-      user = await storage.createUser({ telegramId, username });
+      bot.sendMessage(chatId, "Сначала нажми /start");
+      return;
     }
 
-    bot.sendMessage(chatId, "Привет! Я помогу тебе считать калории. Отправь мне фото еды или напиши, что ты съел (например, 'яблоко 100г').");
+    const today = new Date();
+    const stats = await storage.getDailyStats(user.id, today);
+    
+    bot.sendMessage(chatId, `Твоя статистика за сегодня:\nКкал: ${stats.calories}\nБелки: ${stats.protein}г\nЖиры: ${stats.fat}г\nУглеводы: ${stats.carbs}г`);
+  });
+
+  bot.onText(/\/history/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from?.id.toString();
+    if (!telegramId) return;
+
+    const user = await storage.getUserByTelegramId(telegramId);
+    if (!user) return;
+
+    const logs = await storage.getFoodLogs(user.id);
+    if (logs.length === 0) {
+      bot.sendMessage(chatId, "История пуста.");
+      return;
+    }
+
+    const historyText = logs.slice(0, 10).map(l => 
+      `${l.date?.toLocaleDateString()}: ${l.foodName} (${l.calories} ккал)`
+    ).join('\n');
+
+    bot.sendMessage(chatId, `Последние записи:\n${historyText}`);
   });
 
   bot.on("message", async (msg) => {
