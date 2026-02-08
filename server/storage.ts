@@ -15,6 +15,7 @@ export interface IStorage {
     carbs: number;
   }>;
   getWeeklyStats(userId: number): Promise<{ date: string; calories: number }[]>;
+  getFoodLogsInRange(userId: number, startDate: Date, endDate: Date): Promise<FoodLog[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -78,6 +79,14 @@ export class DatabaseStorage implements IStorage {
       });
     }
     return stats;
+  }
+
+  async getFoodLogsInRange(userId: number, startDate: Date, endDate: Date): Promise<FoodLog[]> {
+    return db.select().from(foodLogs)
+      .where(
+        sql`${foodLogs.userId} = ${userId} AND ${foodLogs.date} >= ${startDate} AND ${foodLogs.date} <= ${endDate}`
+      )
+      .orderBy(foodLogs.date);
   }
 }
 

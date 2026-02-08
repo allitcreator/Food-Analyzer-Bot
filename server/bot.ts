@@ -1,4 +1,5 @@
 import TelegramBot from "node-telegram-bot-api";
+import ExcelJS from "exceljs";
 import { IStorage } from "./storage";
 import { analyzeFoodText, analyzeFoodImage } from "./openai";
 
@@ -11,6 +12,21 @@ export function setupBot(storage: IStorage) {
   }
 
   const bot = new TelegramBot(token, { polling: true });
+
+  bot.onText(/\/start/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from?.id.toString();
+    const username = msg.from?.username;
+
+    if (!telegramId) return;
+
+    let user = await storage.getUserByTelegramId(telegramId);
+    if (!user) {
+      user = await storage.createUser({ telegramId, username });
+    }
+
+    bot.sendMessage(chatId, "Привет! Я помогу тебе считать калории. Отправь мне фото еды или напиши, что ты съел (например, 'яблоко 100г').\n\nКоманды:\n/stats - статистика за сегодня\n/history - последние записи\n/export ДД.ММ.ГГГГ - ДД.ММ.ГГГГ - выгрузка в Excel");
+  });
 
   bot.onText(/\/stats/, async (msg) => {
     const chatId = msg.chat.id;
@@ -48,6 +64,60 @@ export function setupBot(storage: IStorage) {
     ).join('\n');
 
     bot.sendMessage(chatId, `Последние записи:\n${historyText}`);
+  });
+
+  bot.onText(/\/export (\d{2}\.\d{2}\.\d{4}) - (\d{2}\.\d{2}\.\d{4})/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from?.id.toString();
+    if (!telegramId || !match) return;
+
+    const user = await storage.getUserByTelegramId(telegramId);
+    if (!user) return;
+
+    const [_, startStr, endStr] = match;
+    const parseDate = (s: string) => {
+      const [d, m, y] = s.split('.').map(Number);
+      return new Date(y, m - 1, d);
+    };
+
+    const startDate = parseDate(startStr);
+    const endDate = parseDate(endStr);
+    endDate.setHours(23, 59, 59, 999);
+
+    const logs = await storage.getFoodLogsInRange(user.id, startDate, endDate);
+
+    if (logs.length === 0) {
+      bot.sendMessage(chatId, "За этот период записей нет.");
+      return;
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Nutrition Stats');
+
+    worksheet.columns = [
+      { header: 'Дата', key: 'date', width: 15 },
+      { header: 'Блюдо', key: 'food', width: 30 },
+      { header: 'Ккал', key: 'cal', width: 10 },
+      { header: 'Белки', key: 'prot', width: 10 },
+      { header: 'Жиры', key: 'fat', width: 10 },
+      { header: 'Углеводы', key: 'carb', width: 10 },
+      { header: 'Вес (г)', key: 'weight', width: 10 }
+    ];
+
+    logs.forEach(log => {
+      worksheet.addRow({
+        date: log.date?.toLocaleDateString(),
+        food: log.foodName,
+        cal: log.calories,
+        prot: log.protein,
+        fat: log.fat,
+        carb: log.carbs,
+        weight: log.weight
+      });
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    bot.sendDocument(chatId, Buffer.from(buffer), { filename: `stats_${startStr}_${endStr}.xlsx` });
   });
 
   bot.on("message", async (msg) => {
