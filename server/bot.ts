@@ -144,11 +144,11 @@ export function setupBot(storage: IStorage) {
           await storage.createFoodLog({
             userId: user.id,
             foodName: analysis.foodName,
-            calories: Number(analysis.calories) || 0,
-            protein: Number(analysis.protein) || 0,
-            fat: Number(analysis.fat) || 0,
-            carbs: Number(analysis.carbs) || 0,
-            weight: Number(analysis.weight) || 0,
+            calories: Math.round(Number(analysis.calories)) || 0,
+            protein: Math.round(Number(analysis.protein)) || 0,
+            fat: Math.round(Number(analysis.fat)) || 0,
+            carbs: Math.round(Number(analysis.carbs)) || 0,
+            weight: Math.round(Number(analysis.weight)) || 0,
             mealType: analysis.mealType || 'snack'
           });
           
@@ -189,11 +189,11 @@ export function setupBot(storage: IStorage) {
            await storage.createFoodLog({
             userId: user.id,
             foodName: analysis.foodName,
-            calories: Number(analysis.calories) || 0,
-            protein: Number(analysis.protein) || 0,
-            fat: Number(analysis.fat) || 0,
-            carbs: Number(analysis.carbs) || 0,
-            weight: Number(analysis.weight) || 0,
+            calories: Math.round(Number(analysis.calories)) || 0,
+            protein: Math.round(Number(analysis.protein)) || 0,
+            fat: Math.round(Number(analysis.fat)) || 0,
+            carbs: Math.round(Number(analysis.carbs)) || 0,
+            weight: Math.round(Number(analysis.weight)) || 0,
             mealType: analysis.mealType || 'snack'
           });
           
