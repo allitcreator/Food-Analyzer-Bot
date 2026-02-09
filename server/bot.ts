@@ -401,6 +401,33 @@ export function setupBot(storage: IStorage) {
     // Handle Voice
     if (msg.voice) {
       console.log("Voice received, processing...");
+      // Check if Telegram already transcribed it (Premium feature or some bots)
+      const telegramTranscript = (msg as any).voice.transcription?.text;
+      
+      if (telegramTranscript) {
+        console.log("Using Telegram's transcription:", telegramTranscript);
+        bot.sendMessage(chatId, `Текст: "${telegramTranscript}"\nАнализирую...`);
+        const analysis = await analyzeFoodText(telegramTranscript);
+        if (analysis && analysis.foodName) {
+          (bot as any).pendingLogs = (bot as any).pendingLogs || {};
+          (bot as any).pendingLogs[telegramId] = analysis;
+
+          bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\n\nДобавить в дневник?`, {
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: "✅ Да", callback_data: "confirm_yes" },
+                  { text: "❌ Нет", callback_data: "confirm_no" }
+                ]
+              ]
+            }
+          });
+        } else {
+          bot.sendMessage(chatId, "Не удалось распознать еду в вашем сообщении.");
+        }
+        return;
+      }
+
       bot.sendMessage(chatId, "Распознаю голос...");
       const fileId = msg.voice.file_id;
       try {
