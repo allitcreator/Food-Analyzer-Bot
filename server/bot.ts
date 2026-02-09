@@ -1,16 +1,7 @@
 import TelegramBot from "node-telegram-bot-api";
 import ExcelJS from "exceljs";
-import { jsPDF } from "jspdf";
-import "jspdf-autotable";
 import { IStorage } from "./storage";
 import { analyzeFoodText, analyzeFoodImage } from "./openai";
-
-// Add type definition for jspdf-autotable
-declare module "jspdf" {
-  interface jsPDF {
-    autoTable: (options: any) => jsPDF;
-  }
-}
 
 export function setupBot(storage: IStorage) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -102,99 +93,41 @@ export function setupBot(storage: IStorage) {
       return;
     }
 
-    // Ask for format
-    bot.sendMessage(chatId, "Выберите формат выгрузки:", {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "Excel (.xlsx)", callback_data: `export_xls_${startStr}_${endStr}` },
-            { text: "PDF (.pdf)", callback_data: `export_pdf_${startStr}_${endStr}` }
-          ]
-        ]
-      }
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Nutrition Stats');
+    worksheet.columns = [
+      { header: 'Дата', key: 'date', width: 15 },
+      { header: 'Блюдо', key: 'food', width: 30 },
+      { header: 'Ккал', key: 'cal', width: 10 },
+      { header: 'Белки', key: 'prot', width: 10 },
+      { header: 'Жиры', key: 'fat', width: 10 },
+      { header: 'Углеводы', key: 'carb', width: 10 },
+      { header: 'Вес (г)', key: 'weight', width: 10 }
+    ];
+
+    logs.forEach(log => {
+      worksheet.addRow({
+        date: log.date?.toLocaleDateString(),
+        food: log.foodName,
+        cal: log.calories,
+        prot: log.protein,
+        fat: log.fat,
+        carb: log.carbs,
+        weight: log.weight
+      });
     });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const filename = startStr === endStr ? `stats_${startStr}.xlsx` : `stats_${startStr}_${endStr}.xlsx`;
+    bot.sendDocument(chatId, Buffer.from(buffer as Buffer), {}, { filename, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   });
 
   bot.on("callback_query", async (query) => {
-    const chatId = query.message?.chat.id;
-    const telegramId = query.from?.id.toString();
-    if (!chatId || !telegramId || !query.data) return;
-
-    const user = await storage.getUserByTelegramId(telegramId);
-    if (!user) return;
-
-    if (query.data.startsWith("export_")) {
-      const parts = query.data.split("_");
-      const format = parts[1];
-      const startStr = parts[2];
-      const endStr = parts[3];
-
-      const parseDate = (s: string) => {
-        const [d, m, y] = s.split('.').map(Number);
-        return new Date(y, m - 1, d);
-      };
-
-      const startDate = parseDate(startStr);
-      const endDate = parseDate(endStr);
-      endDate.setHours(23, 59, 59, 999);
-
-      const logs = await storage.getFoodLogsInRange(user.id, startDate, endDate);
-
-      if (format === "xls") {
-        const workbook = new ExcelJS.Workbook();
-        const worksheet = workbook.addWorksheet('Nutrition Stats');
-        worksheet.columns = [
-          { header: 'Дата', key: 'date', width: 15 },
-          { header: 'Блюдо', key: 'food', width: 30 },
-          { header: 'Ккал', key: 'cal', width: 10 },
-          { header: 'Белки', key: 'prot', width: 10 },
-          { header: 'Жиры', key: 'fat', width: 10 },
-          { header: 'Углеводы', key: 'carb', width: 10 },
-          { header: 'Вес (г)', key: 'weight', width: 10 }
-        ];
-
-        logs.forEach(log => {
-          worksheet.addRow({
-            date: log.date?.toLocaleDateString(),
-            food: log.foodName,
-            cal: log.calories,
-            prot: log.protein,
-            fat: log.fat,
-            carb: log.carbs,
-            weight: log.weight
-          });
-        });
-
-        const buffer = await workbook.xlsx.writeBuffer();
-        const filename = startStr === endStr ? `stats_${startStr}.xlsx` : `stats_${startStr}_${endStr}.xlsx`;
-        bot.sendDocument(chatId, Buffer.from(buffer), {}, { filename, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      } else if (format === "pdf") {
-        const doc = new jsPDF();
-        doc.text(`Nutrition Stats: ${startStr}${startStr !== endStr ? ` - ${endStr}` : ''}`, 14, 15);
-        
-        const tableData = logs.map(log => [
-          log.date?.toLocaleDateString(),
-          log.foodName,
-          log.calories,
-          log.protein,
-          log.fat,
-          log.carbs,
-          log.weight
-        ]);
-
-        doc.autoTable({
-          startY: 20,
-          head: [['Date', 'Food', 'Calories', 'Protein', 'Fat', 'Carbs', 'Weight (g)']],
-          body: tableData,
-        });
-
-        const buffer = doc.output('arraybuffer');
-        const filename = startStr === endStr ? `stats_${startStr}.pdf` : `stats_${startStr}_${endStr}.pdf`;
-        bot.sendDocument(chatId, Buffer.from(buffer), {}, { filename, contentType: 'application/pdf' });
-      }
-      
-      bot.answerCallbackQuery(query.id);
-    }
+    // Keep callback query handler for other potential needs, but remove export logic if not needed
+    // or just leave as is if no other callback queries exist. 
+    // Since we only had export_xls and export_pdf, and we are removing the choice, 
+    // this handler might become redundant for exports.
+    bot.answerCallbackQuery(query.id);
   });
 
   bot.on("message", async (msg) => {
