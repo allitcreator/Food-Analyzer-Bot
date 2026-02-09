@@ -5,6 +5,7 @@ import { analyzeFoodText, analyzeFoodImage } from "./openai";
 
 export function setupBot(storage: IStorage) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
+  const ADMIN_USERNAME = "your_admin_username"; // Optionally set via env
 
   if (!token) {
     console.warn("TELEGRAM_BOT_TOKEN not set. Bot will not start.");
@@ -12,6 +13,20 @@ export function setupBot(storage: IStorage) {
   }
 
   const bot = new TelegramBot(token, { polling: true });
+
+  // Middleware-like check
+  const isUserAllowed = async (chatId: number, telegramId: string) => {
+    let user = await storage.getUserByTelegramId(telegramId);
+    if (!user) {
+      // First time starting
+      return null;
+    }
+    if (!user.isApproved && !user.isAdmin) {
+      bot.sendMessage(chatId, "Ваша заявка на рассмотрении у администратора.");
+      return false;
+    }
+    return user;
+  };
 
   bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
@@ -22,10 +37,62 @@ export function setupBot(storage: IStorage) {
 
     let user = await storage.getUserByTelegramId(telegramId);
     if (!user) {
-      user = await storage.createUser({ telegramId, username });
+      // Check if this should be the first admin (optional logic, but let's make it manual or based on username)
+      const isAdmin = username === ADMIN_USERNAME || (await storage.getAllUsers()).length === 0;
+      user = await storage.createUser({ 
+        telegramId, 
+        username, 
+        isApproved: isAdmin, // Admins are auto-approved
+        isAdmin: isAdmin 
+      });
+
+      if (isAdmin) {
+        bot.sendMessage(chatId, "Вы зарегистрированы как администратор.");
+      } else {
+        bot.sendMessage(chatId, "Ваша заявка отправлена администратору. Ожидайте подтверждения.");
+        // Notify admins
+        const allUsers = await storage.getAllUsers();
+        const admins = allUsers.filter(u => u.isAdmin);
+        for (const admin of admins) {
+          bot.sendMessage(admin.telegramId!, `Новый пользователь @${username} (ID: ${user.id}) хочет зайти.`, {
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: "✅ Одобрить", callback_data: `admin_approve_${user.id}` },
+                  { text: "❌ Отклонить", callback_data: `admin_reject_${user.id}` }
+                ]
+              ]
+            }
+          });
+        }
+      }
     }
 
-    bot.sendMessage(chatId, "Привет! Я помогу тебе считать калории. Отправь мне фото еды или напиши, что ты съел (например, 'яблоко 100г').\n\nКоманды:\n/stats - статистика за сегодня\n/history - последние записи\n/export ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ ] - выгрузка в Excel\n/clear ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ ] - очистка истории");
+    if (user.isApproved || user.isAdmin) {
+      bot.sendMessage(chatId, "Привет! Я помогу тебе считать калории. Отправь мне фото еды или напиши, что ты съел (например, 'яблоко 100г').\n\nКоманды:\n/stats - статистика за сегодня\n/history - последние записи\n/export ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ ] - выгрузка в Excel\n/clear ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ ] - очистка истории");
+    }
+  });
+
+  // Admin Commands
+  bot.onText(/\/users/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from?.id.toString();
+    if (!telegramId) return;
+
+    const user = await storage.getUserByTelegramId(telegramId);
+    if (!user?.isAdmin) return;
+
+    const allUsers = await storage.getAllUsers();
+    if (allUsers.length === 0) {
+      bot.sendMessage(chatId, "Пользователей нет.");
+      return;
+    }
+
+    let text = "Список пользователей:\n";
+    allUsers.forEach(u => {
+      text += `${u.id}: @${u.username || 'N/A'} [${u.isApproved ? '✅' : '⏳'}] ${u.isAdmin ? '(Admin)' : ''}\n`;
+    });
+    bot.sendMessage(chatId, text);
   });
 
   bot.onText(/\/stats/, async (msg) => {
@@ -33,11 +100,8 @@ export function setupBot(storage: IStorage) {
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
 
-    const user = await storage.getUserByTelegramId(telegramId);
-    if (!user) {
-      bot.sendMessage(chatId, "Сначала нажми /start");
-      return;
-    }
+    const user = await isUserAllowed(chatId, telegramId);
+    if (!user) return;
 
     const today = new Date();
     const stats = await storage.getDailyStats(user.id, today);
@@ -50,7 +114,7 @@ export function setupBot(storage: IStorage) {
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
 
-    const user = await storage.getUserByTelegramId(telegramId);
+    const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
 
     const logs = await storage.getFoodLogs(user.id);
@@ -77,7 +141,7 @@ export function setupBot(storage: IStorage) {
     const telegramId = msg.from?.id.toString();
     if (!telegramId || !match) return;
 
-    const user = await storage.getUserByTelegramId(telegramId);
+    const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
 
     const startStr = match[1];
@@ -133,7 +197,7 @@ export function setupBot(storage: IStorage) {
     const telegramId = msg.from?.id.toString();
     if (!telegramId || !match) return;
 
-    const user = await storage.getUserByTelegramId(telegramId);
+    const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
 
     const startStr = match[1];
@@ -194,6 +258,30 @@ export function setupBot(storage: IStorage) {
         chat_id: chatId,
         message_id: query.message?.message_id
       });
+    } else if (query.data.startsWith("admin_approve_")) {
+      if (!user.isAdmin) return;
+      const targetUserId = parseInt(query.data.split("_")[2]);
+      const targetUser = await storage.getUser(targetUserId);
+      if (targetUser) {
+        await storage.updateUser(targetUserId, { isApproved: true });
+        bot.editMessageText(`✅ Пользователь @${targetUser.username} одобрен.`, {
+          chat_id: chatId,
+          message_id: query.message?.message_id
+        });
+        bot.sendMessage(targetUser.telegramId!, "Ваша заявка одобрена! Теперь вы можете пользоваться ботом.");
+      }
+    } else if (query.data.startsWith("admin_reject_")) {
+      if (!user.isAdmin) return;
+      const targetUserId = parseInt(query.data.split("_")[2]);
+      const targetUser = await storage.getUser(targetUserId);
+      if (targetUser) {
+        await storage.deleteUser(targetUserId);
+        bot.editMessageText(`❌ Пользователь @${targetUser.username} отклонен и удален.`, {
+          chat_id: chatId,
+          message_id: query.message?.message_id
+        });
+        bot.sendMessage(targetUser.telegramId!, "Ваша заявка отклонена.");
+      }
     }
     
     bot.answerCallbackQuery(query.id);
@@ -206,10 +294,8 @@ export function setupBot(storage: IStorage) {
     if (!telegramId) return;
     if (msg.text?.startsWith('/')) return; // Ignore commands
 
-    let user = await storage.getUserByTelegramId(telegramId);
-    if (!user) {
-       user = await storage.createUser({ telegramId, username: msg.from?.username });
-    }
+    const user = await isUserAllowed(chatId, telegramId);
+    if (!user) return;
 
     // Handle Text
     if (msg.text) {

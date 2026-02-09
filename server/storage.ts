@@ -6,6 +6,9 @@ export interface IStorage {
   getUser(id: number): Promise<User | undefined>;
   getUserByTelegramId(telegramId: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  updateUser(id: number, data: Partial<User>): Promise<User>;
+  deleteUser(id: number): Promise<void>;
+  getAllUsers(): Promise<User[]>;
   createFoodLog(log: InsertFoodLog): Promise<FoodLog>;
   getFoodLogs(userId: number): Promise<FoodLog[]>;
   getDailyStats(userId: number, date: Date): Promise<{
@@ -34,6 +37,20 @@ export class DatabaseStorage implements IStorage {
   async createUser(user: InsertUser): Promise<User> {
     const [newUser] = await db.insert(users).values(user).returning();
     return newUser;
+  }
+
+  async updateUser(id: number, data: Partial<User>): Promise<User> {
+    const [updatedUser] = await db.update(users).set(data).where(eq(users.id, id)).returning();
+    return updatedUser;
+  }
+
+  async deleteUser(id: number): Promise<void> {
+    await db.delete(foodLogs).where(eq(foodLogs.userId, id));
+    await db.delete(users).where(eq(users.id, id));
+  }
+
+  async getAllUsers(): Promise<User[]> {
+    return db.select().from(users);
   }
 
   async createFoodLog(log: InsertFoodLog): Promise<FoodLog> {
