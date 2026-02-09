@@ -60,7 +60,7 @@ export async function analyzeFoodImage(imageBase64: string) {
         {
           role: "user",
           content: [
-            { type: "text", text: "Analyze this meal." },
+            { type: "text", text: "Analyze this meal. Provide a nutrition breakdown in JSON format." },
             {
               type: "image_url",
               image_url: {

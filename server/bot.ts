@@ -135,60 +135,75 @@ export function setupBot(storage: IStorage) {
 
     // Handle Text
     if (msg.text) {
+      console.log("Text received:", msg.text);
       bot.sendMessage(chatId, "Анализирую текст...");
-      const analysis = await analyzeFoodText(msg.text);
-      if (analysis && analysis.foodName) {
-        await storage.createFoodLog({
-          userId: user.id,
-          foodName: analysis.foodName,
-          calories: analysis.calories,
-          protein: analysis.protein,
-          fat: analysis.fat,
-          carbs: analysis.carbs,
-          weight: analysis.weight,
-          mealType: analysis.mealType || 'snack'
-        });
-        
-        bot.sendMessage(chatId, `Записал: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}`);
-      } else {
-        bot.sendMessage(chatId, "Не удалось распознать еду. Попробуй еще раз.");
-      }
-    }
-
-    // Handle Photo
-    if (msg.photo) {
-      bot.sendMessage(chatId, "Анализирую фото...");
-      const fileId = msg.photo[msg.photo.length - 1].file_id;
       try {
-        const fileLink = await bot.getFileLink(fileId);
-        
-        // Fetch the image
-        const response = await fetch(fileLink);
-        const arrayBuffer = await response.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        const base64 = buffer.toString('base64');
-
-        const analysis = await analyzeFoodImage(base64);
-        
+        const analysis = await analyzeFoodText(msg.text);
+        console.log("Text analysis result:", analysis);
         if (analysis && analysis.foodName) {
-           await storage.createFoodLog({
+          await storage.createFoodLog({
             userId: user.id,
             foodName: analysis.foodName,
-            calories: analysis.calories,
-            protein: analysis.protein,
-            fat: analysis.fat,
-            carbs: analysis.carbs,
-            weight: analysis.weight,
+            calories: Number(analysis.calories) || 0,
+            protein: Number(analysis.protein) || 0,
+            fat: Number(analysis.fat) || 0,
+            carbs: Number(analysis.carbs) || 0,
+            weight: Number(analysis.weight) || 0,
             mealType: analysis.mealType || 'snack'
           });
           
           bot.sendMessage(chatId, `Записал: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}`);
         } else {
-          bot.sendMessage(chatId, "Не удалось распознать еду на фото.");
+          bot.sendMessage(chatId, "Не удалось распознать еду. Попробуй описать точнее.");
         }
       } catch (err) {
+        console.error("Error processing text:", err);
+        bot.sendMessage(chatId, "Произошла ошибка при анализе текста.");
+      }
+    }
+
+    // Handle Photo
+    if (msg.photo) {
+      console.log("Photo received, processing...");
+      bot.sendMessage(chatId, "Анализирую фото...");
+      const fileId = msg.photo[msg.photo.length - 1].file_id;
+      try {
+        const file = await bot.getFile(fileId);
+        // Ensure token is available here
+        const botToken = process.env.TELEGRAM_BOT_TOKEN;
+        const fileLink = `https://api.telegram.org/file/bot${botToken}/${file.file_path}`;
+        console.log("File link generated:", fileLink);
+        
+        const imgResponse = await fetch(fileLink);
+        if (!imgResponse.ok) {
+           throw new Error(`Failed to fetch image: ${imgResponse.status} ${imgResponse.statusText}`);
+        }
+        const arrayBuffer = await imgResponse.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const base64 = buffer.toString('base64');
+
+        const analysis = await analyzeFoodImage(base64);
+        console.log("Vision analysis result:", analysis);
+        
+        if (analysis && analysis.foodName) {
+           await storage.createFoodLog({
+            userId: user.id,
+            foodName: analysis.foodName,
+            calories: Number(analysis.calories) || 0,
+            protein: Number(analysis.protein) || 0,
+            fat: Number(analysis.fat) || 0,
+            carbs: Number(analysis.carbs) || 0,
+            weight: Number(analysis.weight) || 0,
+            mealType: analysis.mealType || 'snack'
+          });
+          
+          bot.sendMessage(chatId, `Записал: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}`);
+        } else {
+          bot.sendMessage(chatId, "Не удалось распознать еду на фото. Попробуйте более четкий снимок.");
+        }
+      } catch (err: any) {
         console.error("Error processing photo:", err);
-        bot.sendMessage(chatId, "Произошла ошибка при обработке фото.");
+        bot.sendMessage(chatId, "Произошла ошибка при обработке фото. Проверьте размер файла или попробуйте позже.");
       }
     }
   });
