@@ -5,7 +5,7 @@ import { analyzeFoodText, analyzeFoodImage } from "./openai";
 
 export function setupBot(storage: IStorage) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  const ADMIN_USERNAME = "your_admin_username"; // Optionally set via env
+  const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID;
 
   if (!token) {
     console.warn("TELEGRAM_BOT_TOKEN not set. Bot will not start.");
@@ -18,10 +18,10 @@ export function setupBot(storage: IStorage) {
   const isUserAllowed = async (chatId: number, telegramId: string) => {
     let user = await storage.getUserByTelegramId(telegramId);
     if (!user) {
-      // First time starting
       return null;
     }
-    if (!user.isApproved && !user.isAdmin) {
+    const isAdmin = ADMIN_TELEGRAM_ID && telegramId === ADMIN_TELEGRAM_ID;
+    if (!user.isApproved && !user.isAdmin && !isAdmin) {
       bot.sendMessage(chatId, "Ваша заявка на рассмотрении у администратора.");
       return false;
     }
@@ -36,23 +36,23 @@ export function setupBot(storage: IStorage) {
     if (!telegramId) return;
 
     let user = await storage.getUserByTelegramId(telegramId);
+    const isGlobalAdmin = ADMIN_TELEGRAM_ID && telegramId === ADMIN_TELEGRAM_ID;
+
     if (!user) {
-      const allUsers = await storage.getAllUsers();
-      const isAdmin = username === ADMIN_USERNAME || allUsers.length === 0;
       user = await storage.createUser({ 
         telegramId, 
         username, 
-        isApproved: isAdmin, 
-        isAdmin: isAdmin 
+        isApproved: !!isGlobalAdmin, 
+        isAdmin: !!isGlobalAdmin 
       });
 
-      if (isAdmin) {
-        bot.sendMessage(chatId, "Вы зарегистрированы как администратор.");
+      if (isGlobalAdmin) {
+        bot.sendMessage(chatId, "Вы зарегистрированы как администратор (через секреты).");
       } else {
         bot.sendMessage(chatId, "Ваша заявка отправлена администратору. Ожидайте подтверждения.");
         // Notify admins
         const allUsers = await storage.getAllUsers();
-        const admins = allUsers.filter(u => u.isAdmin);
+        const admins = allUsers.filter(u => u.isAdmin || (ADMIN_TELEGRAM_ID && u.telegramId === ADMIN_TELEGRAM_ID));
         for (const admin of admins) {
           bot.sendMessage(admin.telegramId!, `Новый пользователь @${username} (ID: ${user.id}) хочет зайти.`, {
             reply_markup: {
@@ -66,9 +66,13 @@ export function setupBot(storage: IStorage) {
           });
         }
       }
+    } else if (isGlobalAdmin && !user.isAdmin) {
+      // Upgrade existing user to admin if their ID matches secrets
+      user = await storage.updateUser(user.id, { isAdmin: true, isApproved: true });
+      bot.sendMessage(chatId, "Ваш аккаунт обновлен до статуса администратора.");
     }
 
-    if (user.isApproved || user.isAdmin) {
+    if (user.isApproved || user.isAdmin || isGlobalAdmin) {
       bot.sendMessage(chatId, "Привет! Я помогу тебе считать калории. Отправь мне фото еды или напиши, что ты съел (например, 'яблоко 100г').\n\nКоманды:\n/stats - статистика за сегодня\n/history - последние записи\n/export ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ ] - выгрузка в Excel\n/clear ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ ] - очистка истории");
     }
   });
@@ -80,7 +84,8 @@ export function setupBot(storage: IStorage) {
     if (!telegramId) return;
 
     const user = await storage.getUserByTelegramId(telegramId);
-    if (!user?.isAdmin) return;
+    const isGlobalAdmin = ADMIN_TELEGRAM_ID && telegramId === ADMIN_TELEGRAM_ID;
+    if (!user?.isAdmin && !isGlobalAdmin) return;
 
     const allUsers = await storage.getAllUsers();
     if (allUsers.length === 0) {
@@ -90,7 +95,8 @@ export function setupBot(storage: IStorage) {
 
     let text = "Список пользователей:\n";
     allUsers.forEach(u => {
-      text += `${u.id}: @${u.username || 'N/A'} [${u.isApproved ? '✅' : '⏳'}] ${u.isAdmin ? '(Admin)' : ''}\n`;
+      const isUAdmin = u.isAdmin || (ADMIN_TELEGRAM_ID && u.telegramId === ADMIN_TELEGRAM_ID);
+      text += `${u.id}: @${u.username || 'N/A'} [${u.isApproved ? '✅' : '⏳'}] ${isUAdmin ? '(Admin)' : ''}\n`;
     });
     bot.sendMessage(chatId, text);
   });
