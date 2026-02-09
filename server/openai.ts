@@ -8,23 +8,21 @@ const openai = new OpenAI({
 export async function analyzeFoodText(text: string) {
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-5.2",
+      model: "gpt-4o",
       messages: [
         {
           role: "system",
-          content: `You are a nutritionist assistant. Analyze the food described in the text.
-          Return a JSON object with:
-          - foodName (string)
-          - calories (number, approx)
-          - protein (number, approx g)
-          - fat (number, approx g)
-          - carbs (number, approx g)
-          - weight (number, estimated grams)
-          - mealType (string: "breakfast", "lunch", "dinner", "snack")
-          
-          If the quantity is not specified, make a reasonable estimate for a standard serving.
-          If the text is a barcode number (just digits), try to identify the product.
-          `
+          content: `You are a nutrition expert. 
+          1. If the text is a barcode (digits), search for the specific product name and its exact nutrition facts (per serving or 100g).
+          2. If it's a food name, find the most accurate nutrition data for that specific item.
+          3. Return ONLY a JSON object with:
+          - foodName (string, exact product or dish name)
+          - calories (number)
+          - protein (number)
+          - fat (number)
+          - carbs (number)
+          - weight (number, grams)
+          - mealType (string: "breakfast", "lunch", "dinner", "snack")`
         },
         { role: "user", content: text }
       ],
@@ -45,9 +43,12 @@ export async function analyzeFoodImage(imageBase64: string) {
       messages: [
         {
           role: "system",
-          content: `You are a nutritionist assistant. Analyze the food in the image.
-          Return ONLY a JSON object with:
-          - foodName (string)
+          content: `You are a nutrition expert with vision capabilities.
+          1. Identify the exact food items or products in the image.
+          2. If a label or barcode is visible, use that for precision.
+          3. Look up exact or highly accurate nutrition facts for the identified food.
+          4. Return ONLY a JSON object with:
+          - foodName (string, exact name of the identified food/product)
           - calories (number)
           - protein (number)
           - fat (number)
@@ -58,7 +59,7 @@ export async function analyzeFoodImage(imageBase64: string) {
         {
           role: "user",
           content: [
-            { type: "text", text: "Identify the food and estimate nutrition." },
+            { type: "text", text: "Identify the food and provide its exact nutrition facts." },
             {
               type: "image_url",
               image_url: {
