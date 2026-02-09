@@ -37,12 +37,12 @@ export function setupBot(storage: IStorage) {
 
     let user = await storage.getUserByTelegramId(telegramId);
     if (!user) {
-      // Check if this should be the first admin (optional logic, but let's make it manual or based on username)
-      const isAdmin = username === ADMIN_USERNAME || (await storage.getAllUsers()).length === 0;
+      const allUsers = await storage.getAllUsers();
+      const isAdmin = username === ADMIN_USERNAME || allUsers.length === 0;
       user = await storage.createUser({ 
         telegramId, 
         username, 
-        isApproved: isAdmin, // Admins are auto-approved
+        isApproved: isAdmin, 
         isAdmin: isAdmin 
       });
 
