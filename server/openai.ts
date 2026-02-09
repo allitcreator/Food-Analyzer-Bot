@@ -41,26 +41,24 @@ export async function analyzeFoodText(text: string) {
 export async function analyzeFoodImage(imageBase64: string) {
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-5.2",
+      model: "gpt-4o",
       messages: [
         {
           role: "system",
           content: `You are a nutritionist assistant. Analyze the food in the image.
-          Return a JSON object with:
+          Return ONLY a JSON object with:
           - foodName (string)
-          - calories (number, approx)
-          - protein (number, approx g)
-          - fat (number, approx g)
-          - carbs (number, approx g)
-          - weight (number, estimated grams)
-          - mealType (string: "breakfast", "lunch", "dinner", "snack")
-          
-          Make a reasonable estimate for the portion size shown.`
+          - calories (number)
+          - protein (number)
+          - fat (number)
+          - carbs (number)
+          - weight (number, grams)
+          - mealType (string: "breakfast", "lunch", "dinner", "snack")`
         },
         {
           role: "user",
           content: [
-            { type: "text", text: "Analyze this meal. Provide a nutrition breakdown in JSON format." },
+            { type: "text", text: "Identify the food and estimate nutrition." },
             {
               type: "image_url",
               image_url: {
