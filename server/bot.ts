@@ -59,11 +59,17 @@ export function setupBot(storage: IStorage) {
       return;
     }
 
-    const historyText = logs.slice(0, 10).map(l => 
-      `${l.date?.toLocaleDateString()}: ${l.foodName} (${l.calories} ккал)`
-    ).join('\n');
-
-    bot.sendMessage(chatId, `Последние записи:\n${historyText}`);
+    bot.sendMessage(chatId, "Последние записи:");
+    
+    for (const l of logs.slice(0, 10)) {
+      bot.sendMessage(chatId, `${l.date?.toLocaleDateString()}: ${l.foodName} (${l.calories} ккал)`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "🗑 Удалить", callback_data: `delete_log_${l.id}` }]
+          ]
+        }
+      });
+    }
   });
 
   bot.onText(/\/export (\d{2}\.\d{2}\.\d{4})(?: - (\d{2}\.\d{2}\.\d{4}))?/, async (msg, match) => {
@@ -181,6 +187,13 @@ export function setupBot(storage: IStorage) {
         message_id: query.message?.message_id
       });
       if ((bot as any).pendingLogs) delete (bot as any).pendingLogs[telegramId];
+    } else if (query.data.startsWith("delete_log_")) {
+      const logId = parseInt(query.data.split("_")[2]);
+      await storage.deleteFoodLog(logId);
+      bot.editMessageText("🗑 Запись удалена", {
+        chat_id: chatId,
+        message_id: query.message?.message_id
+      });
     }
     
     bot.answerCallbackQuery(query.id);
