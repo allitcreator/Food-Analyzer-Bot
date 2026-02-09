@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import fs from "fs";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || "dummy",
@@ -50,8 +51,8 @@ export async function analyzeFoodImage(imageBase64: string) {
           2. If a label or barcode is visible, use that for precision.
           3. Look up exact or highly accurate nutrition facts for the identified food.
           4. Language rules:
-             - foodName: EXACT product name from the package in its original language.
-             - Analysis and all other text: Russian.
+          - foodName: EXACT product name from the package in its original language.
+          - Analysis and all other text: Russian.
           5. Return ONLY a JSON object with:
           - foodName (string, exact name from package in original language)
           - calories (number)
@@ -80,6 +81,24 @@ export async function analyzeFoodImage(imageBase64: string) {
     return JSON.parse(response.choices[0].message.content || "{}");
   } catch (error) {
     console.error("OpenAI Vision Analysis Error:", error);
+    return null;
+  }
+}
+
+export async function transcribeAudio(audioBuffer: Buffer) {
+  try {
+    const tempFile = `/tmp/voice_${Date.now()}.ogg`;
+    fs.writeFileSync(tempFile, audioBuffer);
+    
+    const response = await openai.audio.transcriptions.create({
+      file: fs.createReadStream(tempFile),
+      model: "whisper-1",
+    });
+
+    fs.unlinkSync(tempFile);
+    return response.text;
+  } catch (error) {
+    console.error("OpenAI Transcription Error:", error);
     return null;
   }
 }
