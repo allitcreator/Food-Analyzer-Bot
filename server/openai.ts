@@ -84,21 +84,3 @@ export async function analyzeFoodImage(imageBase64: string) {
     return null;
   }
 }
-
-export async function transcribeAudio(audioBuffer: Buffer) {
-  try {
-    const tempFile = `/tmp/voice_${Date.now()}.ogg`;
-    fs.writeFileSync(tempFile, audioBuffer);
-    
-    const response = await openai.audio.transcriptions.create({
-      file: fs.createReadStream(tempFile),
-      model: "whisper-1",
-    });
-
-    fs.unlinkSync(tempFile);
-    return response.text;
-  } catch (error) {
-    console.error("OpenAI Transcription Error:", error);
-    return null;
-  }
-}

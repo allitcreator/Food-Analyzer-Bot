@@ -1,7 +1,7 @@
 import TelegramBot from "node-telegram-bot-api";
 import ExcelJS from "exceljs";
 import { IStorage } from "./storage";
-import { analyzeFoodText, analyzeFoodImage, transcribeAudio } from "./openai";
+import { analyzeFoodText, analyzeFoodImage } from "./openai";
 
 export function setupBot(storage: IStorage) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -425,50 +425,8 @@ export function setupBot(storage: IStorage) {
         } else {
           bot.sendMessage(chatId, "Не удалось распознать еду в вашем сообщении.");
         }
-        return;
-      }
-
-      bot.sendMessage(chatId, "Распознаю голос...");
-      const fileId = msg.voice.file_id;
-      try {
-        const file = await bot.getFile(fileId);
-        const botToken = process.env.TELEGRAM_BOT_TOKEN;
-        const fileLink = `https://api.telegram.org/file/bot${botToken}/${file.file_path}`;
-        
-        const response = await fetch(fileLink);
-        if (!response.ok) throw new Error("Failed to download voice message");
-        const arrayBuffer = await response.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-
-        const transcript = await transcribeAudio(buffer);
-        console.log("Transcription result:", transcript);
-
-        if (transcript) {
-          bot.sendMessage(chatId, `Текст: "${transcript}"\nАнализирую...`);
-          const analysis = await analyzeFoodText(transcript);
-          if (analysis && analysis.foodName) {
-            (bot as any).pendingLogs = (bot as any).pendingLogs || {};
-            (bot as any).pendingLogs[telegramId] = analysis;
-
-            bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\n\nДобавить в дневник?`, {
-              reply_markup: {
-                inline_keyboard: [
-                  [
-                    { text: "✅ Да", callback_data: "confirm_yes" },
-                    { text: "❌ Нет", callback_data: "confirm_no" }
-                  ]
-                ]
-              }
-            });
-          } else {
-            bot.sendMessage(chatId, "Не удалось распознать еду в вашем сообщении.");
-          }
-        } else {
-          bot.sendMessage(chatId, "Не удалось распознать голос. Попробуйте говорить четче.");
-        }
-      } catch (err) {
-        console.error("Error processing voice:", err);
-        bot.sendMessage(chatId, "Произошла ошибка при обработке голосового сообщения.");
+      } else {
+        bot.sendMessage(chatId, "Для распознавания голоса требуется Telegram Premium или встроенная расшифровка.");
       }
     }
   });
