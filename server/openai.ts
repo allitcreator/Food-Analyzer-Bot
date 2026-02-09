@@ -40,10 +40,12 @@ export async function analyzeFoodImage(imageBase64: string) {
   try {
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
+      temperature: 0,
       messages: [
         {
           role: "system",
           content: `You are a nutrition expert with vision capabilities.
+          CRITICAL: You must be deterministic. If you see the same image, provide the same data.
           1. Identify the exact food items or products in the image.
           2. If a label or barcode is visible, use that for precision.
           3. Look up exact or highly accurate nutrition facts for the identified food.
