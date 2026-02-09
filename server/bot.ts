@@ -98,7 +98,13 @@ export function setupBot(storage: IStorage) {
       const isUAdmin = u.isAdmin || (ADMIN_TELEGRAM_ID && u.telegramId === ADMIN_TELEGRAM_ID);
       text += `${u.id}: @${u.username || 'N/A'} [${u.isApproved ? '✅' : '⏳'}] ${isUAdmin ? '(Admin)' : ''}\n`;
     });
-    bot.sendMessage(chatId, text);
+    bot.sendMessage(chatId, text, {
+      reply_markup: {
+        inline_keyboard: allUsers
+          .filter(u => u.telegramId !== telegramId) // Don't allow self-deletion
+          .map(u => [{ text: `❌ Удалить @${u.username || u.id}`, callback_data: `admin_delete_${u.id}` }])
+      }
+    });
   });
 
   bot.onText(/\/stats/, async (msg) => {
@@ -287,6 +293,18 @@ export function setupBot(storage: IStorage) {
           message_id: query.message?.message_id
         });
         bot.sendMessage(targetUser.telegramId!, "Ваша заявка отклонена.");
+      }
+    } else if (query.data.startsWith("admin_delete_")) {
+      if (!user.isAdmin) return;
+      const targetUserId = parseInt(query.data.split("_")[2]);
+      const targetUser = await storage.getUser(targetUserId);
+      if (targetUser) {
+        await storage.deleteUser(targetUserId);
+        bot.editMessageText(`🗑 Пользователь @${targetUser.username || targetUserId} полностью удален из системы.`, {
+          chat_id: chatId,
+          message_id: query.message?.message_id
+        });
+        bot.sendMessage(targetUser.telegramId!, "Ваш доступ к боту был аннулирован администратором.");
       }
     }
     
