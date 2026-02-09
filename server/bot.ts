@@ -295,10 +295,15 @@ export function setupBot(storage: IStorage) {
         bot.sendMessage(targetUser.telegramId!, "Ваша заявка отклонена.");
       }
     } else if (query.data.startsWith("admin_delete_")) {
-      if (!user.isAdmin) return;
       const targetUserId = parseInt(query.data.split("_")[2]);
       const targetUser = await storage.getUser(targetUserId);
       if (targetUser) {
+        const isTargetGlobalAdmin = ADMIN_TELEGRAM_ID && targetUser.telegramId === ADMIN_TELEGRAM_ID;
+        if (isTargetGlobalAdmin) {
+          bot.sendMessage(chatId, "Нельзя удалить главного администратора.");
+          bot.answerCallbackQuery(query.id);
+          return;
+        }
         await storage.deleteUser(targetUserId);
         bot.editMessageText(`🗑 Пользователь @${targetUser.username || targetUserId} полностью удален из системы.`, {
           chat_id: chatId,
