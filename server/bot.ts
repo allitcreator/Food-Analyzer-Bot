@@ -147,10 +147,42 @@ export function setupBot(storage: IStorage) {
   });
 
   bot.on("callback_query", async (query) => {
-    // Keep callback query handler for other potential needs, but remove export logic if not needed
-    // or just leave as is if no other callback queries exist. 
-    // Since we only had export_xls and export_pdf, and we are removing the choice, 
-    // this handler might become redundant for exports.
+    const chatId = query.message?.chat.id;
+    const telegramId = query.from?.id.toString();
+    if (!chatId || !telegramId || !query.data) return;
+
+    const user = await storage.getUserByTelegramId(telegramId);
+    if (!user) return;
+
+    if (query.data === "confirm_yes") {
+      const pending = (bot as any).pendingLogs?.[telegramId];
+      if (pending) {
+        await storage.createFoodLog({
+          userId: user.id,
+          foodName: pending.foodName,
+          calories: Math.round(Number(pending.calories)) || 0,
+          protein: Math.round(Number(pending.protein)) || 0,
+          fat: Math.round(Number(pending.fat)) || 0,
+          carbs: Math.round(Number(pending.carbs)) || 0,
+          weight: Math.round(Number(pending.weight)) || 0,
+          mealType: pending.mealType || 'snack'
+        });
+        bot.editMessageText(`✅ Добавлено: ${pending.foodName}`, {
+          chat_id: chatId,
+          message_id: query.message?.message_id
+        });
+        delete (bot as any).pendingLogs[telegramId];
+      } else {
+        bot.sendMessage(chatId, "Срок действия предложения истек или данные не найдены.");
+      }
+    } else if (query.data === "confirm_no") {
+      bot.editMessageText("❌ Отменено", {
+        chat_id: chatId,
+        message_id: query.message?.message_id
+      });
+      if ((bot as any).pendingLogs) delete (bot as any).pendingLogs[telegramId];
+    }
+    
     bot.answerCallbackQuery(query.id);
   });
 
@@ -163,7 +195,6 @@ export function setupBot(storage: IStorage) {
 
     let user = await storage.getUserByTelegramId(telegramId);
     if (!user) {
-       // Auto-register if not started
        user = await storage.createUser({ telegramId, username: msg.from?.username });
     }
 
@@ -175,18 +206,19 @@ export function setupBot(storage: IStorage) {
         const analysis = await analyzeFoodText(msg.text);
         console.log("Text analysis result:", analysis);
         if (analysis && analysis.foodName) {
-          await storage.createFoodLog({
-            userId: user.id,
-            foodName: analysis.foodName,
-            calories: Math.round(Number(analysis.calories)) || 0,
-            protein: Math.round(Number(analysis.protein)) || 0,
-            fat: Math.round(Number(analysis.fat)) || 0,
-            carbs: Math.round(Number(analysis.carbs)) || 0,
-            weight: Math.round(Number(analysis.weight)) || 0,
-            mealType: analysis.mealType || 'snack'
+          (bot as any).pendingLogs = (bot as any).pendingLogs || {};
+          (bot as any).pendingLogs[telegramId] = analysis;
+
+          bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\n\nДобавить в дневник?`, {
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: "✅ Да", callback_data: "confirm_yes" },
+                  { text: "❌ Нет", callback_data: "confirm_no" }
+                ]
+              ]
+            }
           });
-          
-          bot.sendMessage(chatId, `Записал: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}`);
         } else {
           bot.sendMessage(chatId, "Не удалось распознать еду. Попробуй описать точнее.");
         }
@@ -203,41 +235,38 @@ export function setupBot(storage: IStorage) {
       const fileId = msg.photo[msg.photo.length - 1].file_id;
       try {
         const file = await bot.getFile(fileId);
-        // Ensure token is available here
         const botToken = process.env.TELEGRAM_BOT_TOKEN;
         const fileLink = `https://api.telegram.org/file/bot${botToken}/${file.file_path}`;
-        console.log("File link generated:", fileLink);
         
         const imgResponse = await fetch(fileLink);
-        if (!imgResponse.ok) {
-           throw new Error(`Failed to fetch image: ${imgResponse.status} ${imgResponse.statusText}`);
-        }
+        if (!imgResponse.ok) throw new Error(`Failed to fetch image: ${imgResponse.status}`);
+        
         const arrayBuffer = await imgResponse.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        const base64 = buffer.toString('base64');
+        const base64 = Buffer.from(arrayBuffer).toString('base64');
 
         const analysis = await analyzeFoodImage(base64);
         console.log("Vision analysis result:", analysis);
         
         if (analysis && analysis.foodName) {
-           await storage.createFoodLog({
-            userId: user.id,
-            foodName: analysis.foodName,
-            calories: Math.round(Number(analysis.calories)) || 0,
-            protein: Math.round(Number(analysis.protein)) || 0,
-            fat: Math.round(Number(analysis.fat)) || 0,
-            carbs: Math.round(Number(analysis.carbs)) || 0,
-            weight: Math.round(Number(analysis.weight)) || 0,
-            mealType: analysis.mealType || 'snack'
+          (bot as any).pendingLogs = (bot as any).pendingLogs || {};
+          (bot as any).pendingLogs[telegramId] = analysis;
+
+          bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\n\nДобавить в дневник?`, {
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: "✅ Да", callback_data: "confirm_yes" },
+                  { text: "❌ Нет", callback_data: "confirm_no" }
+                ]
+              ]
+            }
           });
-          
-          bot.sendMessage(chatId, `Записал: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}`);
         } else {
           bot.sendMessage(chatId, "Не удалось распознать еду на фото. Попробуйте более четкий снимок.");
         }
       } catch (err: any) {
         console.error("Error processing photo:", err);
-        bot.sendMessage(chatId, "Произошла ошибка при обработке фото. Проверьте размер файла или попробуйте позже.");
+        bot.sendMessage(chatId, "Произошла ошибка при обработке фото.");
       }
     }
   });
