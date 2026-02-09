@@ -16,6 +16,7 @@ export interface IStorage {
   }>;
   getWeeklyStats(userId: number): Promise<{ date: string; calories: number }[]>;
   getFoodLogsInRange(userId: number, startDate: Date, endDate: Date): Promise<FoodLog[]>;
+  deleteFoodLogsInRange(userId: number, startDate: Date, endDate: Date): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -87,6 +88,13 @@ export class DatabaseStorage implements IStorage {
         sql`${foodLogs.userId} = ${userId} AND ${foodLogs.date} >= ${startDate} AND ${foodLogs.date} <= ${endDate}`
       )
       .orderBy(foodLogs.date);
+  }
+
+  async deleteFoodLogsInRange(userId: number, startDate: Date, endDate: Date): Promise<void> {
+    await db.delete(foodLogs)
+      .where(
+        sql`${foodLogs.userId} = ${userId} AND ${foodLogs.date} >= ${startDate} AND ${foodLogs.date} <= ${endDate}`
+      );
   }
 }
 

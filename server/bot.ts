@@ -25,7 +25,7 @@ export function setupBot(storage: IStorage) {
       user = await storage.createUser({ telegramId, username });
     }
 
-    bot.sendMessage(chatId, "Привет! Я помогу тебе считать калории. Отправь мне фото еды или напиши, что ты съел (например, 'яблоко 100г').\n\nКоманды:\n/stats - статистика за сегодня\n/history - последние записи\n/export ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ ] - выгрузка в Excel");
+    bot.sendMessage(chatId, "Привет! Я помогу тебе считать калории. Отправь мне фото еды или напиши, что ты съел (например, 'яблоко 100г').\n\nКоманды:\n/stats - статистика за сегодня\n/history - последние записи\n/export ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ ] - выгрузка в Excel\n/clear ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ ] - очистка истории");
   });
 
   bot.onText(/\/stats/, async (msg) => {
@@ -120,6 +120,30 @@ export function setupBot(storage: IStorage) {
     const buffer = await workbook.xlsx.writeBuffer();
     const filename = startStr === endStr ? `stats_${startStr}.xlsx` : `stats_${startStr}_${endStr}.xlsx`;
     bot.sendDocument(chatId, Buffer.from(buffer as Buffer), {}, { filename, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  });
+
+  bot.onText(/\/clear (\d{2}\.\d{2}\.\d{4})(?: - (\d{2}\.\d{2}\.\d{4}))?/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from?.id.toString();
+    if (!telegramId || !match) return;
+
+    const user = await storage.getUserByTelegramId(telegramId);
+    if (!user) return;
+
+    const startStr = match[1];
+    const endStr = match[2] || startStr;
+
+    const parseDate = (s: string) => {
+      const [d, m, y] = s.split('.').map(Number);
+      return new Date(y, m - 1, d);
+    };
+
+    const startDate = parseDate(startStr);
+    const endDate = parseDate(endStr);
+    endDate.setHours(23, 59, 59, 999);
+
+    await storage.deleteFoodLogsInRange(user.id, startDate, endDate);
+    bot.sendMessage(chatId, `История за период ${startStr}${startStr !== endStr ? ` - ${endStr}` : ''} успешно удалена.`);
   });
 
   bot.on("callback_query", async (query) => {
