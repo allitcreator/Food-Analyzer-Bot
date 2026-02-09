@@ -49,8 +49,11 @@ export async function analyzeFoodImage(imageBase64: string) {
           1. Identify the exact food items or products in the image.
           2. If a label or barcode is visible, use that for precision.
           3. Look up exact or highly accurate nutrition facts for the identified food.
-          4. Return ONLY a JSON object with:
-          - foodName (string, exact name of the identified food/product)
+          4. Language rules:
+             - foodName: EXACT product name from the package in its original language.
+             - Analysis and all other text: Russian.
+          5. Return ONLY a JSON object with:
+          - foodName (string, exact name from package in original language)
           - calories (number)
           - protein (number)
           - fat (number)
@@ -61,7 +64,7 @@ export async function analyzeFoodImage(imageBase64: string) {
         {
           role: "user",
           content: [
-            { type: "text", text: "Identify the food and provide its exact nutrition facts." },
+            { type: "text", text: "Identify the food and provide its exact nutrition facts. Write foodName in original language, but the rest of the analysis in Russian." },
             {
               type: "image_url",
               image_url: {
