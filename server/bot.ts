@@ -20,7 +20,7 @@ export function setupBot(storage: IStorage) {
     if (!user) {
       return null;
     }
-    const isAdmin = ADMIN_TELEGRAM_ID && telegramId === ADMIN_TELEGRAM_ID;
+    const isAdmin = ADMIN_TELEGRAM_ID && String(telegramId).trim() === String(ADMIN_TELEGRAM_ID).trim();
     if (!user.isApproved && !user.isAdmin && !isAdmin) {
       bot.sendMessage(chatId, "Ваша заявка на рассмотрении у администратора.");
       return false;
@@ -36,7 +36,7 @@ export function setupBot(storage: IStorage) {
     if (!telegramId) return;
 
     let user = await storage.getUserByTelegramId(telegramId);
-    const isGlobalAdmin = ADMIN_TELEGRAM_ID && telegramId === ADMIN_TELEGRAM_ID;
+    const isGlobalAdmin = ADMIN_TELEGRAM_ID && String(telegramId).trim() === String(ADMIN_TELEGRAM_ID).trim();
 
     if (!user) {
       user = await storage.createUser({ 
@@ -52,7 +52,7 @@ export function setupBot(storage: IStorage) {
         bot.sendMessage(chatId, "Ваша заявка отправлена администратору. Ожидайте подтверждения.");
         // Notify admins
         const allUsers = await storage.getAllUsers();
-        const admins = allUsers.filter(u => u.isAdmin || (ADMIN_TELEGRAM_ID && u.telegramId === ADMIN_TELEGRAM_ID));
+        const admins = allUsers.filter(u => u.isAdmin || (ADMIN_TELEGRAM_ID && String(u.telegramId).trim() === String(ADMIN_TELEGRAM_ID).trim()));
         for (const admin of admins) {
           bot.sendMessage(admin.telegramId!, `Новый пользователь @${username} (ID: ${user.id}) хочет зайти.`, {
             reply_markup: {
@@ -84,7 +84,7 @@ export function setupBot(storage: IStorage) {
     if (!telegramId) return;
 
     const user = await storage.getUserByTelegramId(telegramId);
-    const isGlobalAdmin = ADMIN_TELEGRAM_ID && telegramId === ADMIN_TELEGRAM_ID;
+    const isGlobalAdmin = ADMIN_TELEGRAM_ID && String(telegramId).trim() === String(ADMIN_TELEGRAM_ID).trim();
     if (!user?.isAdmin && !isGlobalAdmin) return;
 
     const allUsers = await storage.getAllUsers();
@@ -95,7 +95,7 @@ export function setupBot(storage: IStorage) {
 
     let text = "Список пользователей:\n";
     allUsers.forEach(u => {
-      const isUAdmin = u.isAdmin || (ADMIN_TELEGRAM_ID && u.telegramId === ADMIN_TELEGRAM_ID);
+      const isUAdmin = u.isAdmin || (ADMIN_TELEGRAM_ID && String(u.telegramId).trim() === String(ADMIN_TELEGRAM_ID).trim());
       text += `${u.id}: @${u.username || 'N/A'} [${u.isApproved ? '✅' : '⏳'}] ${isUAdmin ? '(Admin)' : ''}\n`;
     });
     bot.sendMessage(chatId, text, {
@@ -298,7 +298,7 @@ export function setupBot(storage: IStorage) {
       const targetUserId = parseInt(query.data.split("_")[2]);
       const targetUser = await storage.getUser(targetUserId);
       if (targetUser) {
-        const isTargetGlobalAdmin = ADMIN_TELEGRAM_ID && targetUser.telegramId === ADMIN_TELEGRAM_ID;
+        const isTargetGlobalAdmin = ADMIN_TELEGRAM_ID && String(targetUser.telegramId).trim() === String(ADMIN_TELEGRAM_ID).trim();
         if (isTargetGlobalAdmin) {
           bot.sendMessage(chatId, "Нельзя удалить главного администратора.");
           bot.answerCallbackQuery(query.id);
