@@ -400,9 +400,9 @@ export function setupBot(storage: IStorage) {
 
     // Handle Voice
     if (msg.voice) {
-      console.log("Voice received, processing...");
-      // Check if Telegram already transcribed it (Premium feature or some bots)
-      const telegramTranscript = (msg as any).voice.transcription?.text;
+      console.log("Voice message received:", JSON.stringify(msg.voice, null, 2));
+      // Check for transcription in various possible fields
+      const telegramTranscript = (msg as any).voice.transcription?.text || (msg as any).voice.text;
       
       if (telegramTranscript) {
         console.log("Using Telegram's transcription:", telegramTranscript);
@@ -426,7 +426,10 @@ export function setupBot(storage: IStorage) {
           bot.sendMessage(chatId, "Не удалось распознать еду в вашем сообщении.");
         }
       } else {
-        bot.sendMessage(chatId, "Для распознавания голоса требуется Telegram Premium или встроенная расшифровка.");
+        // If not found in the immediate message, maybe it comes as a separate update or field
+        // For now, let's log the full message to see where the text might be
+        console.log("Full message object:", JSON.stringify(msg, null, 2));
+        bot.sendMessage(chatId, "Голос получен, но текст расшифровки не найден. Убедитесь, что в настройках Telegram включена расшифровка или подождите пару секунд.");
       }
     }
   });
