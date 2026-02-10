@@ -283,7 +283,7 @@ export function setupBot(storage: IStorage) {
       pending.fat = Math.round(pending.fat * ratio);
       pending.carbs = Math.round(pending.carbs * ratio);
 
-      const unit = pending.foodName.toLowerCase().match(/(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт)/i) ? 'мл' : 'г';
+      const unit = pending.foodName.toLowerCase().match(/(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i) ? 'мл' : 'г';
       
       bot.editMessageText(`Распознано: ${pending.foodName}\nКкал: ${pending.calories} | Б: ${pending.protein} | Ж: ${pending.fat} | У: ${pending.carbs}\nОбъем: ${pending.weight}${unit}\n\nДобавить в дневник?`, {
         chat_id: chatId,
@@ -379,7 +379,7 @@ export function setupBot(storage: IStorage) {
           (bot as any).pendingLogs = (bot as any).pendingLogs || {};
           (bot as any).pendingLogs[telegramId] = analysis;
 
-          const unit = analysis.foodName.toLowerCase().match(/(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой)/i) ? 'мл' : 'г';
+          const unit = (analysis.foodName.toLowerCase().match(/(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i)) ? 'мл' : 'г';
 
           bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\n${unit === 'мл' ? 'Объем' : 'Вес'}: ${analysis.weight}${unit}\n\nДобавить в дневник?`, {
             reply_markup: {
@@ -431,7 +431,7 @@ export function setupBot(storage: IStorage) {
           (bot as any).pendingLogs = (bot as any).pendingLogs || {};
           (bot as any).pendingLogs[telegramId] = analysis;
 
-          const unit = analysis.foodName.toLowerCase().match(/(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой)/i) ? 'мл' : 'г';
+          const unit = (analysis.foodName.toLowerCase().match(/(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i)) ? 'мл' : 'г';
 
           bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\n${unit === 'мл' ? 'Объем' : 'Вес'}: ${analysis.weight}${unit}\n\nДобавить в дневник?`, {
             reply_markup: {
@@ -474,7 +474,7 @@ export function setupBot(storage: IStorage) {
           (bot as any).pendingLogs = (bot as any).pendingLogs || {};
           (bot as any).pendingLogs[telegramId] = analysis;
 
-          const unit = analysis.foodName.toLowerCase().match(/(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой)/i) ? 'мл' : 'г';
+          const unit = (analysis.foodName.toLowerCase().match(/(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i)) ? 'мл' : 'г';
 
           bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\n${unit === 'мл' ? 'Объем' : 'Вес'}: ${analysis.weight}${unit}\n\nДобавить в дневник?`, {
             reply_markup: {
