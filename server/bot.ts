@@ -283,7 +283,9 @@ export function setupBot(storage: IStorage) {
       pending.fat = Math.round(pending.fat * ratio);
       pending.carbs = Math.round(pending.carbs * ratio);
 
-      bot.editMessageText(`Распознано: ${pending.foodName}\nКкал: ${pending.calories} | Б: ${pending.protein} | Ж: ${pending.fat} | У: ${pending.carbs}\nВес: ${pending.weight}г\n\nДобавить в дневник?`, {
+      const unit = pending.foodName.toLowerCase().match(/(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой)/i) ? 'мл' : 'г';
+      
+      bot.editMessageText(`Распознано: ${pending.foodName}\nКкал: ${pending.calories} | Б: ${pending.protein} | Ж: ${pending.fat} | У: ${pending.carbs}\nОбъем: ${pending.weight}${unit}\n\nДобавить в дневник?`, {
         chat_id: chatId,
         message_id: query.message?.message_id,
         reply_markup: {
@@ -293,12 +295,12 @@ export function setupBot(storage: IStorage) {
               { text: "❌ Нет", callback_data: "confirm_no" }
             ],
             [
-              { text: "-50г", callback_data: "weight_minus_50" },
-              { text: "+50г", callback_data: "weight_plus_50" }
+              { text: `-50${unit}`, callback_data: "weight_minus_50" },
+              { text: `+50${unit}`, callback_data: "weight_plus_50" }
             ],
             [
-              { text: "-100г", callback_data: "weight_minus_100" },
-              { text: "+100г", callback_data: "weight_plus_100" }
+              { text: `-100${unit}`, callback_data: "weight_minus_100" },
+              { text: `+100${unit}`, callback_data: "weight_plus_100" }
             ]
           ]
         }
@@ -377,7 +379,9 @@ export function setupBot(storage: IStorage) {
           (bot as any).pendingLogs = (bot as any).pendingLogs || {};
           (bot as any).pendingLogs[telegramId] = analysis;
 
-          bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\nВес: ${analysis.weight}г\n\nДобавить в дневник?`, {
+          const unit = analysis.foodName.toLowerCase().match(/(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой)/i) ? 'мл' : 'г';
+
+          bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\n${unit === 'мл' ? 'Объем' : 'Вес'}: ${analysis.weight}${unit}\n\nДобавить в дневник?`, {
             reply_markup: {
               inline_keyboard: [
                 [
@@ -385,12 +389,12 @@ export function setupBot(storage: IStorage) {
                   { text: "❌ Нет", callback_data: "confirm_no" }
                 ],
                 [
-                  { text: "-50г", callback_data: "weight_minus_50" },
-                  { text: "+50г", callback_data: "weight_plus_50" }
+                  { text: `-50${unit}`, callback_data: "weight_minus_50" },
+                  { text: `+50${unit}`, callback_data: "weight_plus_50" }
                 ],
                 [
-                  { text: "-100г", callback_data: "weight_minus_100" },
-                  { text: "+100г", callback_data: "weight_plus_100" }
+                  { text: `-100${unit}`, callback_data: "weight_minus_100" },
+                  { text: `+100${unit}`, callback_data: "weight_plus_100" }
                 ]
               ]
             }
@@ -427,7 +431,9 @@ export function setupBot(storage: IStorage) {
           (bot as any).pendingLogs = (bot as any).pendingLogs || {};
           (bot as any).pendingLogs[telegramId] = analysis;
 
-          bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\nВес: ${analysis.weight}г\n\nДобавить в дневник?`, {
+          const unit = analysis.foodName.toLowerCase().match(/(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой)/i) ? 'мл' : 'г';
+
+          bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\n${unit === 'мл' ? 'Объем' : 'Вес'}: ${analysis.weight}${unit}\n\nДобавить в дневник?`, {
             reply_markup: {
               inline_keyboard: [
                 [
@@ -435,12 +441,12 @@ export function setupBot(storage: IStorage) {
                   { text: "❌ Нет", callback_data: "confirm_no" }
                 ],
                 [
-                  { text: "-50г", callback_data: "weight_minus_50" },
-                  { text: "+50г", callback_data: "weight_plus_50" }
+                  { text: `-50${unit}`, callback_data: "weight_minus_50" },
+                  { text: `+50${unit}`, callback_data: "weight_plus_50" }
                 ],
                 [
-                  { text: "-100г", callback_data: "weight_minus_100" },
-                  { text: "+100г", callback_data: "weight_plus_100" }
+                  { text: `-100${unit}`, callback_data: "weight_minus_100" },
+                  { text: `+100${unit}`, callback_data: "weight_plus_100" }
                 ]
               ]
             }
@@ -468,7 +474,9 @@ export function setupBot(storage: IStorage) {
           (bot as any).pendingLogs = (bot as any).pendingLogs || {};
           (bot as any).pendingLogs[telegramId] = analysis;
 
-          bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\nВес: ${analysis.weight}г\n\nДобавить в дневник?`, {
+          const unit = analysis.foodName.toLowerCase().match(/(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой)/i) ? 'мл' : 'г';
+
+          bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\n${unit === 'мл' ? 'Объем' : 'Вес'}: ${analysis.weight}${unit}\n\nДобавить в дневник?`, {
             reply_markup: {
               inline_keyboard: [
                 [
@@ -476,12 +484,12 @@ export function setupBot(storage: IStorage) {
                   { text: "❌ Нет", callback_data: "confirm_no" }
                 ],
                 [
-                  { text: "-50г", callback_data: "weight_minus_50" },
-                  { text: "+50г", callback_data: "weight_plus_50" }
+                  { text: `-50${unit}`, callback_data: "weight_minus_50" },
+                  { text: `+50${unit}`, callback_data: "weight_plus_50" }
                 ],
                 [
-                  { text: "-100г", callback_data: "weight_minus_100" },
-                  { text: "+100г", callback_data: "weight_plus_100" }
+                  { text: `-100${unit}`, callback_data: "weight_minus_100" },
+                  { text: `+100${unit}`, callback_data: "weight_plus_100" }
                 ]
               ]
             }
