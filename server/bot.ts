@@ -153,11 +153,15 @@ export function setupBot(storage: IStorage) {
     const today = new Date();
     const stats = await storage.getDailyStats(user.id, today);
 
+    const waterTotal = await storage.getDailyWater(user.id, today);
+    const waterGoal = 2500;
+    
     let text = `Твоя статистика за сегодня:\n`;
     text += `Ккал: ${stats.calories}${user.caloriesGoal ? ` / ${user.caloriesGoal}` : ''}\n`;
     text += `Белки: ${stats.protein}г${user.proteinGoal ? ` / ${user.proteinGoal}г` : ''}\n`;
     text += `Жиры: ${stats.fat}г${user.fatGoal ? ` / ${user.fatGoal}г` : ''}\n`;
     text += `Углеводы: ${stats.carbs}г${user.carbsGoal ? ` / ${user.carbsGoal}г` : ''}`;
+    text += `\nВода: ${waterTotal}мл / ${waterGoal}мл`;
 
     if (user.caloriesGoal) {
       const percent = Math.round((stats.calories / user.caloriesGoal) * 100);
@@ -165,6 +169,31 @@ export function setupBot(storage: IStorage) {
     }
 
     bot.sendMessage(chatId, text);
+  });
+
+  bot.onText(/\/water/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from?.id.toString();
+    if (!telegramId) return;
+
+    const user = await isUserAllowed(chatId, telegramId);
+    if (!user) return;
+
+    const today = new Date();
+    const waterTotal = await storage.getDailyWater(user.id, today);
+    const waterGoal = 2500;
+
+    bot.sendMessage(chatId, `Вода за сегодня: ${waterTotal}мл / ${waterGoal}мл\n\nСколько выпили?`, {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "150мл", callback_data: "water_150" },
+            { text: "250мл", callback_data: "water_250" },
+            { text: "500мл", callback_data: "water_500" }
+          ]
+        ]
+      }
+    });
   });
 
   const userStates: Record<string, { step: string; data: Partial<User> }> = {};
@@ -367,6 +396,26 @@ export function setupBot(storage: IStorage) {
       bot.editMessageText("🗑 Запись удалена", {
         chat_id: chatId,
         message_id: query.message?.message_id
+      });
+    } else if (query.data.startsWith("water_")) {
+      const amount = parseInt(query.data.split("_")[1]);
+      if (![150, 250, 500].includes(amount)) return;
+      if (!user.isApproved && user.telegramId !== process.env.ADMIN_TELEGRAM_ID) return;
+      await storage.logWater(user.id, amount);
+      const waterTotal = await storage.getDailyWater(user.id, new Date());
+      const waterGoal = 2500;
+      bot.editMessageText(`Записано +${amount}мл\n\nВода за сегодня: ${waterTotal}мл / ${waterGoal}мл\n\nСколько ещё выпили?`, {
+        chat_id: chatId,
+        message_id: query.message?.message_id,
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "150мл", callback_data: "water_150" },
+              { text: "250мл", callback_data: "water_250" },
+              { text: "500мл", callback_data: "water_500" }
+            ]
+          ]
+        }
       });
     } else if (query.data.startsWith("set_gender_")) {
       const gender = query.data.split("_")[2];

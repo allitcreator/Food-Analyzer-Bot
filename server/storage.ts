@@ -1,4 +1,4 @@
-import { users, foodLogs, type User, type InsertUser, type FoodLog, type InsertFoodLog } from "@shared/schema";
+import { users, foodLogs, waterLogs, type User, type InsertUser, type FoodLog, type InsertFoodLog } from "@shared/schema";
 import { db } from "./db";
 import { eq, sql, desc, gte, lt } from "drizzle-orm";
 
@@ -22,6 +22,8 @@ export interface IStorage {
   deleteFoodLogsInRange(userId: number, startDate: Date, endDate: Date): Promise<void>;
   deleteFoodLog(id: number): Promise<void>;
   calculateAndSetGoals(userId: number): Promise<User>;
+  logWater(userId: number, amount: number): Promise<void>;
+  getDailyWater(userId: number, date: Date): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -161,6 +163,22 @@ export class DatabaseStorage implements IStorage {
 
   async deleteFoodLog(id: number): Promise<void> {
     await db.delete(foodLogs).where(eq(foodLogs.id, id));
+  }
+
+  async logWater(userId: number, amount: number): Promise<void> {
+    await db.insert(waterLogs).values({ userId, amount });
+  }
+
+  async getDailyWater(userId: number, date: Date): Promise<number> {
+    const start = new Date(date);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(date);
+    end.setHours(23, 59, 59, 999);
+
+    const logs = await db.select().from(waterLogs)
+      .where(sql`${waterLogs.userId} = ${userId} AND ${waterLogs.date} >= ${start} AND ${waterLogs.date} <= ${end}`);
+
+    return logs.reduce((sum, l) => sum + l.amount, 0);
   }
 }
 

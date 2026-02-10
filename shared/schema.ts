@@ -37,8 +37,16 @@ export const foodLogs = pgTable("food_logs", {
   date: timestamp("date").defaultNow(),
 });
 
+export const waterLogs = pgTable("water_logs", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id),
+  amount: integer("amount").notNull(), // in ml
+  date: timestamp("date").defaultNow(),
+});
+
 export const usersRelations = relations(users, ({ many }) => ({
   logs: many(foodLogs),
+  waterLogs: many(waterLogs),
 }));
 
 export const foodLogsRelations = relations(foodLogs, ({ one }) => ({
@@ -48,13 +56,23 @@ export const foodLogsRelations = relations(foodLogs, ({ one }) => ({
   }),
 }));
 
+export const waterLogsRelations = relations(waterLogs, ({ one }) => ({
+  user: one(users, {
+    fields: [waterLogs.userId],
+    references: [users.id],
+  }),
+}));
+
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true });
 export const insertFoodLogSchema = createInsertSchema(foodLogs).omit({ id: true, date: true });
+export const insertWaterLogSchema = createInsertSchema(waterLogs).omit({ id: true, date: true });
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type FoodLog = typeof foodLogs.$inferSelect;
 export type InsertFoodLog = z.infer<typeof insertFoodLogSchema>;
+export type WaterLog = typeof waterLogs.$inferSelect;
+export type InsertWaterLog = z.infer<typeof insertWaterLogSchema>;
 
 export type CreateFoodLogRequest = InsertFoodLog;
 export type StatsResponse = {
