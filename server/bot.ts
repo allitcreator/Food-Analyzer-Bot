@@ -66,6 +66,9 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       bot.processUpdate(req.body);
       res.sendStatus(200);
     });
+  } else if (REPLIT_DEPLOYMENT_URL) {
+    console.log("Dev mode: skipping bot startup to avoid conflicts with production webhook.");
+    return;
   } else {
     bot = new TelegramBot(token);
     bot.deleteWebHook().then(() => {
