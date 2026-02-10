@@ -66,16 +66,18 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       bot.processUpdate(req.body);
       res.sendStatus(200);
     });
-  } else if (REPLIT_DEPLOYMENT_URL) {
-    console.log("Dev mode: skipping bot startup to avoid conflicts with production webhook.");
-    return;
   } else {
     bot = new TelegramBot(token);
-    bot.deleteWebHook().then(() => {
-      console.log("Webhook removed, starting polling...");
-      bot.startPolling();
+    bot.getWebHookInfo().then(info => {
+      if (info.url) {
+        console.log(`Production webhook is active (${info.url}). Skipping dev polling to avoid conflicts.`);
+        console.log("To test bot in dev, first shut down the published app.");
+      } else {
+        console.log("No webhook active, starting polling...");
+        bot.startPolling();
+      }
     }).catch(err => {
-      console.error("Failed to delete webhook, starting polling anyway:", err);
+      console.error("Failed to check webhook info, starting polling:", err);
       bot.startPolling();
     });
   }
