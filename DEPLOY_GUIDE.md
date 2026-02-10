@@ -68,15 +68,16 @@ if (useWebhook) {
 }
 
 // СТАЛО:
-import crypto from "crypto";
-
 const WEBHOOK_URL = process.env.WEBHOOK_URL; // например https://bot.example.com
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || crypto.randomBytes(32).toString("hex");
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 const useWebhook = !!WEBHOOK_URL && !!app;
 
 if (useWebhook) {
+  if (!WEBHOOK_SECRET) {
+    throw new Error("WEBHOOK_SECRET is required when WEBHOOK_URL is set. Generate one: openssl rand -hex 32");
+  }
   bot = new TelegramBot(token);
-  // Используем случайный путь вместо токена — токен в URL это риск утечки через логи
+  // Используем секретный путь вместо токена — токен в URL это риск утечки через логи
   const webhookPath = `/api/telegram-webhook/${WEBHOOK_SECRET}`;
   const webhookUrl = `${WEBHOOK_URL}${webhookPath}`;
   bot.setWebHook(webhookUrl).then(() => {
@@ -95,7 +96,7 @@ if (useWebhook) {
 }
 ```
 
-**Безопасность webhook:** путь использует `WEBHOOK_SECRET` вместо `TELEGRAM_BOT_TOKEN`. Токен в URL — риск утечки через логи Nginx/access.log. Если `WEBHOOK_SECRET` не задан, генерируется случайный при каждом запуске.
+**Безопасность webhook:** путь использует `WEBHOOK_SECRET` вместо `TELEGRAM_BOT_TOKEN`. Токен в URL — риск утечки через логи Nginx/access.log. Если `WEBHOOK_SECRET` не задан при наличии `WEBHOOK_URL`, бот упадёт с ошибкой — это защита от забытой переменной в проде.
 
 Webhook-путь: `POST /api/telegram-webhook/{WEBHOOK_SECRET}`
 
@@ -174,7 +175,8 @@ OPENAI_API_KEY=sk-ваш_ключ_openai
 ADMIN_TELEGRAM_ID=ваш_telegram_id
 WEBHOOK_URL=https://bot.example.com
 
-# Безопасность webhook (если не задан — генерируется случайный при каждом запуске)
+# Безопасность webhook (обязателен при использовании WEBHOOK_URL)
+# Сгенерировать: openssl rand -hex 32
 WEBHOOK_SECRET=случайная_строка_для_пути_webhook
 
 # Опциональные
