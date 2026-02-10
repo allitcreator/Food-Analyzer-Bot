@@ -47,8 +47,9 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     return;
   }
 
-  const REPLIT_DEPLOYMENT_URL = process.env.REPLIT_DEPLOYMENT_URL || process.env.REPLIT_DEV_DOMAIN;
-  const useWebhook = !!REPLIT_DEPLOYMENT_URL && !!app;
+  const isProduction = process.env.NODE_ENV === "production";
+  const REPLIT_DEPLOYMENT_URL = process.env.REPLIT_DEPLOYMENT_URL;
+  const useWebhook = isProduction && !!REPLIT_DEPLOYMENT_URL && !!app;
 
   let bot: TelegramBot;
 
@@ -66,7 +67,14 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       res.sendStatus(200);
     });
   } else {
-    bot = new TelegramBot(token, { polling: true });
+    bot = new TelegramBot(token);
+    bot.deleteWebHook().then(() => {
+      console.log("Webhook removed, starting polling...");
+      bot.startPolling();
+    }).catch(err => {
+      console.error("Failed to delete webhook, starting polling anyway:", err);
+      bot.startPolling();
+    });
   }
 
   // Middleware-like check
