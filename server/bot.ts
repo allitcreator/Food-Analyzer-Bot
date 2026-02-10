@@ -2,6 +2,7 @@ import TelegramBot from "node-telegram-bot-api";
 import ExcelJS from "exceljs";
 import { IStorage } from "./storage";
 import { analyzeFoodText, analyzeFoodImage } from "./openai";
+import { User } from "@shared/schema";
 
 export function setupBot(storage: IStorage) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
