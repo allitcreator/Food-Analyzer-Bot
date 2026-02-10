@@ -283,7 +283,7 @@ export function setupBot(storage: IStorage) {
       pending.fat = Math.round(pending.fat * ratio);
       pending.carbs = Math.round(pending.carbs * ratio);
 
-      const unit = pending.foodName.toLowerCase().match(/(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой)/i) ? 'мл' : 'г';
+      const unit = pending.foodName.toLowerCase().match(/(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт)/i) ? 'мл' : 'г';
       
       bot.editMessageText(`Распознано: ${pending.foodName}\nКкал: ${pending.calories} | Б: ${pending.protein} | Ж: ${pending.fat} | У: ${pending.carbs}\nОбъем: ${pending.weight}${unit}\n\nДобавить в дневник?`, {
         chat_id: chatId,
