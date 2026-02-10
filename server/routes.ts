@@ -11,7 +11,7 @@ export async function registerRoutes(
 ): Promise<Server> {
   
   // Start the bot
-  setupBot(storage);
+  setupBot(storage, app);
 
   // No web routes needed as per user request for "bot only"
   

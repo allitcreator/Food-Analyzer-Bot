@@ -38,7 +38,7 @@ function buildConfirmKeyboard(unit: string) {
   };
 }
 
-export function setupBot(storage: IStorage) {
+export function setupBot(storage: IStorage, app?: import("express").Express) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID;
 
@@ -47,7 +47,27 @@ export function setupBot(storage: IStorage) {
     return;
   }
 
-  const bot = new TelegramBot(token, { polling: true });
+  const REPLIT_DEPLOYMENT_URL = process.env.REPLIT_DEPLOYMENT_URL || process.env.REPLIT_DEV_DOMAIN;
+  const useWebhook = !!REPLIT_DEPLOYMENT_URL && !!app;
+
+  let bot: TelegramBot;
+
+  if (useWebhook) {
+    bot = new TelegramBot(token);
+    const webhookPath = `/api/telegram-webhook/${token}`;
+    const webhookUrl = `https://${REPLIT_DEPLOYMENT_URL}${webhookPath}`;
+    bot.setWebHook(webhookUrl).then(() => {
+      console.log("Telegram webhook set:", webhookUrl);
+    }).catch(err => {
+      console.error("Failed to set webhook:", err);
+    });
+    app.post(webhookPath, (req, res) => {
+      bot.processUpdate(req.body);
+      res.sendStatus(200);
+    });
+  } else {
+    bot = new TelegramBot(token, { polling: true });
+  }
 
   // Middleware-like check
   const isUserAllowed = async (chatId: number, telegramId: string) => {
