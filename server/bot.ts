@@ -249,7 +249,7 @@ export function setupBot(storage: IStorage) {
           weight: Math.round(Number(pending.weight)) || 0,
           mealType: pending.mealType || 'snack'
         });
-        bot.editMessageText(`✅ Добавлено: ${pending.foodName}`, {
+        bot.editMessageText(`✅ Добавлено: ${pending.foodName} (${pending.weight}г)`, {
           chat_id: chatId,
           message_id: query.message?.message_id
         });
@@ -263,6 +263,46 @@ export function setupBot(storage: IStorage) {
         message_id: query.message?.message_id
       });
       if ((bot as any).pendingLogs) delete (bot as any).pendingLogs[telegramId];
+    } else if (query.data.startsWith("weight_")) {
+      const pending = (bot as any).pendingLogs?.[telegramId];
+      if (!pending) return;
+
+      const action = query.data.split("_")[1];
+      const amount = parseInt(query.data.split("_")[2]);
+      
+      const oldWeight = pending.weight;
+      const newWeight = action === "plus" ? oldWeight + amount : Math.max(0, oldWeight - amount);
+      
+      if (newWeight === oldWeight) return;
+
+      // Recalculate nutrients based on new weight
+      const ratio = newWeight / oldWeight;
+      pending.weight = newWeight;
+      pending.calories = Math.round(pending.calories * ratio);
+      pending.protein = Math.round(pending.protein * ratio);
+      pending.fat = Math.round(pending.fat * ratio);
+      pending.carbs = Math.round(pending.carbs * ratio);
+
+      bot.editMessageText(`Распознано: ${pending.foodName}\nКкал: ${pending.calories} | Б: ${pending.protein} | Ж: ${pending.fat} | У: ${pending.carbs}\nВес: ${pending.weight}г\n\nДобавить в дневник?`, {
+        chat_id: chatId,
+        message_id: query.message?.message_id,
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "✅ Да", callback_data: "confirm_yes" },
+              { text: "❌ Нет", callback_data: "confirm_no" }
+            ],
+            [
+              { text: "-50г", callback_data: "weight_minus_50" },
+              { text: "+50г", callback_data: "weight_plus_50" }
+            ],
+            [
+              { text: "-100г", callback_data: "weight_minus_100" },
+              { text: "+100г", callback_data: "weight_plus_100" }
+            ]
+          ]
+        }
+      });
     } else if (query.data.startsWith("delete_log_")) {
       const logId = parseInt(query.data.split("_")[2]);
       await storage.deleteFoodLog(logId);
@@ -337,12 +377,20 @@ export function setupBot(storage: IStorage) {
           (bot as any).pendingLogs = (bot as any).pendingLogs || {};
           (bot as any).pendingLogs[telegramId] = analysis;
 
-          bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\n\nДобавить в дневник?`, {
+          bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\nВес: ${analysis.weight}г\n\nДобавить в дневник?`, {
             reply_markup: {
               inline_keyboard: [
                 [
                   { text: "✅ Да", callback_data: "confirm_yes" },
                   { text: "❌ Нет", callback_data: "confirm_no" }
+                ],
+                [
+                  { text: "-50г", callback_data: "weight_minus_50" },
+                  { text: "+50г", callback_data: "weight_plus_50" }
+                ],
+                [
+                  { text: "-100г", callback_data: "weight_minus_100" },
+                  { text: "+100г", callback_data: "weight_plus_100" }
                 ]
               ]
             }
@@ -379,12 +427,20 @@ export function setupBot(storage: IStorage) {
           (bot as any).pendingLogs = (bot as any).pendingLogs || {};
           (bot as any).pendingLogs[telegramId] = analysis;
 
-          bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\n\nДобавить в дневник?`, {
+          bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\nВес: ${analysis.weight}г\n\nДобавить в дневник?`, {
             reply_markup: {
               inline_keyboard: [
                 [
                   { text: "✅ Да", callback_data: "confirm_yes" },
                   { text: "❌ Нет", callback_data: "confirm_no" }
+                ],
+                [
+                  { text: "-50г", callback_data: "weight_minus_50" },
+                  { text: "+50г", callback_data: "weight_plus_50" }
+                ],
+                [
+                  { text: "-100г", callback_data: "weight_minus_100" },
+                  { text: "+100г", callback_data: "weight_plus_100" }
                 ]
               ]
             }
@@ -412,12 +468,20 @@ export function setupBot(storage: IStorage) {
           (bot as any).pendingLogs = (bot as any).pendingLogs || {};
           (bot as any).pendingLogs[telegramId] = analysis;
 
-          bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\n\nДобавить в дневник?`, {
+          bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\nВес: ${analysis.weight}г\n\nДобавить в дневник?`, {
             reply_markup: {
               inline_keyboard: [
                 [
                   { text: "✅ Да", callback_data: "confirm_yes" },
                   { text: "❌ Нет", callback_data: "confirm_no" }
+                ],
+                [
+                  { text: "-50г", callback_data: "weight_minus_50" },
+                  { text: "+50г", callback_data: "weight_plus_50" }
+                ],
+                [
+                  { text: "-100г", callback_data: "weight_minus_100" },
+                  { text: "+100г", callback_data: "weight_plus_100" }
                 ]
               ]
             }
