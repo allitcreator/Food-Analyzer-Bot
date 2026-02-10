@@ -297,11 +297,16 @@ export function setupBot(storage: IStorage) {
     });
   });
 
+  function getMoscowNow(): Date {
+    const now = new Date();
+    return new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Moscow' }));
+  }
+
   const reportSentKeys = new Set<string>();
   setInterval(async () => {
-    const now = new Date();
-    const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    const todayKey = now.toISOString().slice(0, 10);
+    const msk = getMoscowNow();
+    const currentTime = `${String(msk.getHours()).padStart(2, '0')}:${String(msk.getMinutes()).padStart(2, '0')}`;
+    const todayKey = `${msk.getFullYear()}-${String(msk.getMonth() + 1).padStart(2, '0')}-${String(msk.getDate()).padStart(2, '0')}`;
 
     Array.from(reportSentKeys).forEach(key => {
       if (!key.endsWith(`_${todayKey}`)) {
