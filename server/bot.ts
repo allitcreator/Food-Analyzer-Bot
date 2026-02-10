@@ -473,9 +473,9 @@ export function setupBot(storage: IStorage) {
           reply_markup: {
             inline_keyboard: [
               [{ text: "Сидячий (минимум движений)", callback_data: "set_activity_sedentary" }],
-              [{ text: "Легкий (1-3 раза в неделю)", callback_data: "set_activity_light" }],
-              [{ text: "Умеренный (3-5 раз в неделю)", callback_data: "set_activity_moderate" }],
-              [{ text: "Высокий (6-7 раз в неделю)", callback_data: "set_activity_active" }],
+              [{ text: "Легкий (тренировки 1-3 раза в неделю)", callback_data: "set_activity_light" }],
+              [{ text: "Умеренный (тренировки 3-5 раз в неделю)", callback_data: "set_activity_moderate" }],
+              [{ text: "Высокий (тренировки 6-7 раз в неделю)", callback_data: "set_activity_active" }],
               [{ text: "Очень высокий (тяж. работа/спорт)", callback_data: "set_activity_very_active" }]
             ]
           }
