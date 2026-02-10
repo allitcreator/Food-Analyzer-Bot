@@ -472,11 +472,11 @@ export function setupBot(storage: IStorage) {
         bot.sendMessage(chatId, "Ваш уровень активности:", {
           reply_markup: {
             inline_keyboard: [
-              [{ text: "Сидячий (минимум движений)", callback_data: "set_activity_sedentary" }],
-              [{ text: "Легкий (тренировки 1-3 раза в неделю)", callback_data: "set_activity_light" }],
-              [{ text: "Умеренный (тренировки 3-5 раз в неделю)", callback_data: "set_activity_moderate" }],
-              [{ text: "Высокий (тренировки 6-7 раз в неделю)", callback_data: "set_activity_active" }],
-              [{ text: "Очень высокий (тяж. работа/спорт)", callback_data: "set_activity_very_active" }]
+              [{ text: "Сидячий (мало шагов, нет спорта)", callback_data: "set_activity_sedentary" }],
+              [{ text: "Малоактивный (8-10к шагов, нет спорта)", callback_data: "set_activity_light" }],
+              [{ text: "Умеренный (шаги + 2-3 тренировки)", callback_data: "set_activity_moderate" }],
+              [{ text: "Активный (шаги + 4-5 тренировок)", callback_data: "set_activity_active" }],
+              [{ text: "Очень активный (тяж. спорт/труд)", callback_data: "set_activity_very_active" }]
             ]
           }
         });
