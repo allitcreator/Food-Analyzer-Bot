@@ -24,6 +24,8 @@ export interface IStorage {
   calculateAndSetGoals(userId: number): Promise<User>;
   logWater(userId: number, amount: number): Promise<void>;
   getDailyWater(userId: number, date: Date): Promise<number>;
+  getAllApprovedUsers(): Promise<User[]>;
+  updateUserReportTime(userId: number, time: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -179,6 +181,14 @@ export class DatabaseStorage implements IStorage {
       .where(sql`${waterLogs.userId} = ${userId} AND ${waterLogs.date} >= ${start} AND ${waterLogs.date} <= ${end}`);
 
     return logs.reduce((sum, l) => sum + l.amount, 0);
+  }
+
+  async getAllApprovedUsers(): Promise<User[]> {
+    return db.select().from(users).where(eq(users.isApproved, true));
+  }
+
+  async updateUserReportTime(userId: number, time: string): Promise<void> {
+    await db.update(users).set({ reportTime: time }).where(eq(users.id, userId));
   }
 }
 

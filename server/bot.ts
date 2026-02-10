@@ -1,7 +1,7 @@
 import TelegramBot from "node-telegram-bot-api";
 import ExcelJS from "exceljs";
 import { IStorage } from "./storage";
-import { analyzeFoodText, analyzeFoodImage } from "./openai";
+import { analyzeFoodText, analyzeFoodImage, generateEveningReport } from "./openai";
 import { User } from "@shared/schema";
 
 const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
@@ -73,6 +73,8 @@ export function setupBot(storage: IStorage) {
       "/history - Последние записи еды с возможностью удаления",
       "/export ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ] - Экспорт дневника в Excel",
       "/clear ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ] - Очистить записи за период",
+      "/report - Вечерний отчёт с рекомендациями ИИ (вручную)",
+      "/report_time - Настроить время автоматического отчёта",
       "/users - (Админ) Управление пользователями",
       "",
       "Отправьте текст с описанием еды или фото - бот распознает продукты и посчитает КБЖУ."
@@ -212,6 +214,94 @@ export function setupBot(storage: IStorage) {
       }
     });
   });
+
+  async function sendEveningReport(user: User) {
+    const today = new Date();
+    const stats = await storage.getDailyStats(user.id, today);
+    const foodLogs = await storage.getFoodLogsInRange(user.id, (() => { const d = new Date(today); d.setHours(0,0,0,0); return d; })(), (() => { const d = new Date(today); d.setHours(23,59,59,999); return d; })());
+    const waterTotal = await storage.getDailyWater(user.id, today);
+
+    const report = await generateEveningReport(
+      foodLogs.map(f => ({ foodName: f.foodName, calories: f.calories, protein: f.protein, fat: f.fat, carbs: f.carbs, weight: f.weight, foodScore: f.foodScore })),
+      { calories: stats.calories, protein: stats.protein, fat: stats.fat, carbs: stats.carbs },
+      { caloriesGoal: user.caloriesGoal, proteinGoal: user.proteinGoal, fatGoal: user.fatGoal, carbsGoal: user.carbsGoal },
+      waterTotal
+    );
+
+    if (report) {
+      let text = `Вечерний отчёт\n\n`;
+      text += `Итого за день: ${stats.calories} ккал | Б${stats.protein}г Ж${stats.fat}г У${stats.carbs}г\n`;
+      text += `Вода: ${waterTotal}мл / 2500мл\n\n`;
+      text += report;
+      bot.sendMessage(user.telegramId!, text);
+    }
+  }
+
+  bot.onText(/\/report$/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from?.id.toString();
+    if (!telegramId) return;
+
+    const user = await isUserAllowed(chatId, telegramId);
+    if (!user) return;
+
+    bot.sendMessage(chatId, "Готовлю отчёт за сегодня...");
+    await sendEveningReport(user);
+  });
+
+  bot.onText(/\/report_time/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from?.id.toString();
+    if (!telegramId) return;
+
+    const user = await isUserAllowed(chatId, telegramId);
+    if (!user) return;
+
+    bot.sendMessage(chatId, `Текущее время отчёта: ${user.reportTime || '21:00'}\n\nВыберите новое время:`, {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "19:00", callback_data: "rtime_19:00" },
+            { text: "20:00", callback_data: "rtime_20:00" },
+            { text: "21:00", callback_data: "rtime_21:00" }
+          ],
+          [
+            { text: "22:00", callback_data: "rtime_22:00" },
+            { text: "23:00", callback_data: "rtime_23:00" },
+            { text: "Выкл", callback_data: "rtime_off" }
+          ]
+        ]
+      }
+    });
+  });
+
+  const reportSentKeys = new Set<string>();
+  setInterval(async () => {
+    const now = new Date();
+    const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const todayKey = now.toISOString().slice(0, 10);
+
+    Array.from(reportSentKeys).forEach(key => {
+      if (!key.endsWith(`_${todayKey}`)) {
+        reportSentKeys.delete(key);
+      }
+    });
+
+    const allUsers = await storage.getAllApprovedUsers();
+    for (const user of allUsers) {
+      if (!user.reportTime || user.reportTime === 'off') continue;
+      if (user.reportTime !== currentTime) continue;
+      const userDayKey = `${user.id}_${todayKey}`;
+      if (reportSentKeys.has(userDayKey)) continue;
+
+      try {
+        reportSentKeys.add(userDayKey);
+        await sendEveningReport(user);
+      } catch (e) {
+        console.error(`Failed to send report to user ${user.id}:`, e);
+      }
+    }
+  }, 60000);
 
   const userStates: Record<string, { step: string; data: Partial<User> }> = {};
 
@@ -433,6 +523,14 @@ export function setupBot(storage: IStorage) {
             ]
           ]
         }
+      });
+    } else if (query.data.startsWith("rtime_")) {
+      const time = query.data.replace("rtime_", "");
+      await storage.updateUserReportTime(user.id, time);
+      const label = time === 'off' ? 'выключен' : time;
+      bot.editMessageText(`Вечерний отчёт: ${label}`, {
+        chat_id: chatId,
+        message_id: query.message?.message_id
       });
     } else if (query.data.startsWith("set_gender_")) {
       const gender = query.data.split("_")[2];

@@ -19,6 +19,7 @@ export const users = pgTable("users", {
   proteinGoal: integer("protein_goal"),
   fatGoal: integer("fat_goal"),
   carbsGoal: integer("carbs_goal"),
+  reportTime: text("report_time").default("21:00"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

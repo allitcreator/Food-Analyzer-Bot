@@ -41,6 +41,38 @@ export async function analyzeFoodText(text: string) {
   }
 }
 
+export async function generateEveningReport(foodItems: { foodName: string; calories: number; protein: number; fat: number; carbs: number; weight: number; foodScore?: number | null }[], totals: { calories: number; protein: number; fat: number; carbs: number }, goals: { caloriesGoal?: number | null; proteinGoal?: number | null; fatGoal?: number | null; carbsGoal?: number | null }, waterMl: number) {
+  try {
+    const foodList = foodItems.map(f => `${f.foodName} (${f.weight}г): ${f.calories} ккал, Б${f.protein} Ж${f.fat} У${f.carbs}${f.foodScore ? `, оценка ${f.foodScore}/10` : ''}`).join('\n');
+    const goalsText = goals.caloriesGoal ? `Цели: ${goals.caloriesGoal} ккал, Б${goals.proteinGoal}г, Ж${goals.fatGoal}г, У${goals.carbsGoal}г` : 'Цели не установлены';
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        {
+          role: "system",
+          content: `Ты нутрициолог. Проанализируй дневной рацион пользователя и дай краткий вечерний отчёт на русском языке.
+Структура ответа:
+1. Общая оценка дня (1-2 предложения)
+2. Что было хорошо (1-2 пункта)
+3. Что можно улучшить (1-2 пункта)
+4. Совет на завтра (1 предложение)
+Будь конкретен, дружелюбен и лаконичен. Используй факты из рациона. Не используй эмодзи.`
+        },
+        {
+          role: "user",
+          content: `Рацион за сегодня:\n${foodList || 'Ничего не записано'}\n\nИтого: ${totals.calories} ккал, Б${totals.protein}г, Ж${totals.fat}г, У${totals.carbs}г\nВода: ${waterMl}мл / 2500мл\n${goalsText}`
+        }
+      ]
+    });
+
+    return response.choices[0].message.content || null;
+  } catch (error) {
+    console.error("OpenAI Evening Report Error:", error);
+    return null;
+  }
+}
+
 export async function analyzeFoodImage(imageBase64: string) {
   try {
     const response = await openai.chat.completions.create({

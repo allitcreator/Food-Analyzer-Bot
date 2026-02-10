@@ -11,7 +11,9 @@ This project is a fullstack application with a Telegram bot for tracking nutriti
 - **Smart Units**: Liquids automatically measured in ml, solids in grams.
 - **Admin Whitelist**: User approval/rejection via ADMIN_TELEGRAM_ID secret.
 - **Excel Export**: Detailed breakdown by date, food name, and nutritional values.
-- **Database**: PostgreSQL for storing users and food logs.
+- **Water Tracking**: /water command with quick-add buttons (150ml/250ml/500ml), daily progress (goal: 2500ml).
+- **Evening Report**: AI-powered daily diet summary with recommendations, configurable notification time.
+- **Database**: PostgreSQL for storing users, food logs, and water logs.
 
 ## Setup
 1. **Telegram Token**: You need to create a bot via @BotFather in Telegram.
@@ -30,14 +32,18 @@ This project is a fullstack application with a Telegram bot for tracking nutriti
 - `/history` - Recent food logs with delete buttons
 - `/export DD.MM.YYYY [ - DD.MM.YYYY ]` - Export to Excel
 - `/clear DD.MM.YYYY [ - DD.MM.YYYY ]` - Clear history
+- `/water` - Water tracking with quick-add buttons
+- `/report` - Manual evening report with AI recommendations
+- `/report_time` - Set auto-report time (19:00-23:00 or off)
+- `/help` - List all commands
 - `/users` - Admin: manage users
 - Send photo - Analyze food in image
 - Send text - Analyze food description
 
 ## Key Architecture
 - **server/bot.ts**: Telegram bot logic, profile flow, food confirmation with weight buttons
-- **server/openai.ts**: GPT-4o prompts for text and vision food analysis (includes foodScore + nutritionAdvice)
+- **server/openai.ts**: GPT-4o prompts for text and vision food analysis (includes foodScore + nutritionAdvice), evening report generation
 - **server/storage.ts**: Database CRUD, Mifflin-St Jeor calorie calculation in calculateAndSetGoals()
-- **shared/schema.ts**: Drizzle schema for users (with profile fields & goals) and foodLogs (with foodScore & nutritionAdvice)
+- **shared/schema.ts**: Drizzle schema for users (with profile fields, goals & reportTime), foodLogs (with foodScore & nutritionAdvice), and waterLogs
 - **Helper functions**: getUnit(), buildConfirmMessage(), buildConfirmKeyboard() in bot.ts to avoid duplication
 - **Liquid detection**: LIQUID_PATTERN regex matches beverages for ml vs g display
