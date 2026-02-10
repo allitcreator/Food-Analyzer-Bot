@@ -398,9 +398,71 @@ export function setupBot(storage: IStorage) {
         await storage.updateUser(user.id, state.data);
         const updatedUser = await storage.calculateAndSetGoals(user.id);
         delete userStates[telegramId];
-        bot.editMessageText(`Профиль настроен!\n\nВаши нормы на день:\nКкал: ${updatedUser.caloriesGoal}\nБелки: ${updatedUser.proteinGoal}г\nЖиры: ${updatedUser.fatGoal}г\nУглеводы: ${updatedUser.carbsGoal}г`, {
+        bot.editMessageText(`Профиль настроен!\n\nВаши нормы на день:\nКкал: ${updatedUser.caloriesGoal}\nБелки: ${updatedUser.proteinGoal}г\nЖиры: ${updatedUser.fatGoal}г\nУглеводы: ${updatedUser.carbsGoal}г\n\nХотите скорректировать калории?`, {
+          chat_id: chatId,
+          message_id: query.message?.message_id,
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "-100 ккал", callback_data: "adj_cal_minus_100" },
+                { text: "+100 ккал", callback_data: "adj_cal_plus_100" }
+              ],
+              [
+                { text: "-250 ккал", callback_data: "adj_cal_minus_250" },
+                { text: "+250 ккал", callback_data: "adj_cal_plus_250" }
+              ],
+              [{ text: "Готово", callback_data: "adj_cal_done" }]
+            ]
+          }
+        });
+      }
+    } else if (query.data.startsWith("adj_cal_")) {
+      const action = query.data.replace("adj_cal_", "");
+      if (action === "done") {
+        const u = await storage.getUser(user.id);
+        bot.editMessageText(`Итоговые нормы на день:\nКкал: ${u?.caloriesGoal}\nБелки: ${u?.proteinGoal}г\nЖиры: ${u?.fatGoal}г\nУглеводы: ${u?.carbsGoal}г`, {
           chat_id: chatId,
           message_id: query.message?.message_id
+        });
+      } else {
+        const parts = action.split("_");
+        const direction = parts[0];
+        const amount = parseInt(parts[1]);
+        const currentUser = await storage.getUser(user.id);
+        if (!currentUser?.caloriesGoal) return;
+
+        const oldCal = currentUser.caloriesGoal;
+        const newCal = direction === "plus" ? oldCal + amount : Math.max(800, oldCal - amount);
+        if (newCal === oldCal) return;
+
+        const ratio = newCal / oldCal;
+        const newProtein = Math.round((currentUser.proteinGoal || 0) * ratio);
+        const newFat = Math.round((currentUser.fatGoal || 0) * ratio);
+        const newCarbs = Math.round((currentUser.carbsGoal || 0) * ratio);
+
+        await storage.updateUser(user.id, {
+          caloriesGoal: newCal,
+          proteinGoal: newProtein,
+          fatGoal: newFat,
+          carbsGoal: newCarbs
+        });
+
+        bot.editMessageText(`Ваши нормы на день:\nКкал: ${newCal}\nБелки: ${newProtein}г\nЖиры: ${newFat}г\nУглеводы: ${newCarbs}г\n\nХотите скорректировать калории?`, {
+          chat_id: chatId,
+          message_id: query.message?.message_id,
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "-100 ккал", callback_data: "adj_cal_minus_100" },
+                { text: "+100 ккал", callback_data: "adj_cal_plus_100" }
+              ],
+              [
+                { text: "-250 ккал", callback_data: "adj_cal_minus_250" },
+                { text: "+250 ккал", callback_data: "adj_cal_plus_250" }
+              ],
+              [{ text: "Готово", callback_data: "adj_cal_done" }]
+            ]
+          }
         });
       }
     } else if (query.data.startsWith("admin_approve_")) {
