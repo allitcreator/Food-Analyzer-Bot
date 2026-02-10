@@ -63,6 +63,23 @@ export function setupBot(storage: IStorage) {
     return user;
   };
 
+  bot.onText(/\/help/, async (msg) => {
+    const chatId = msg.chat.id;
+    const helpText = [
+      "/start - Начать работу с ботом",
+      "/profile - Настроить профиль (пол, возраст, вес, рост, активность, цель) и рассчитать норму КБЖУ",
+      "/stats - Статистика за сегодня: калории, БЖУ, вода",
+      "/water - Трекер воды: добавить выпитое за день",
+      "/history - Последние записи еды с возможностью удаления",
+      "/export ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ] - Экспорт дневника в Excel",
+      "/clear ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ] - Очистить записи за период",
+      "/users - (Админ) Управление пользователями",
+      "",
+      "Отправьте текст с описанием еды или фото - бот распознает продукты и посчитает КБЖУ."
+    ].join("\n");
+    bot.sendMessage(chatId, helpText);
+  });
+
   bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
