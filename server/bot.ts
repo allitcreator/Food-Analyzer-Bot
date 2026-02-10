@@ -117,8 +117,42 @@ export function setupBot(storage: IStorage) {
 
     const today = new Date();
     const stats = await storage.getDailyStats(user.id, today);
-    
-    bot.sendMessage(chatId, `Твоя статистика за сегодня:\nКкал: ${stats.calories}\nБелки: ${stats.protein}г\nЖиры: ${stats.fat}г\nУглеводы: ${stats.carbs}г`);
+
+    let text = `Твоя статистика за сегодня:\n`;
+    text += `Ккал: ${stats.calories}${user.caloriesGoal ? ` / ${user.caloriesGoal}` : ''}\n`;
+    text += `Белки: ${stats.protein}г${user.proteinGoal ? ` / ${user.proteinGoal}г` : ''}\n`;
+    text += `Жиры: ${stats.fat}г${user.fatGoal ? ` / ${user.fatGoal}г` : ''}\n`;
+    text += `Углеводы: ${stats.carbs}г${user.carbsGoal ? ` / ${user.carbsGoal}г` : ''}`;
+
+    if (user.caloriesGoal) {
+      const percent = Math.round((stats.calories / user.caloriesGoal) * 100);
+      text += `\n\nПрогресс по калориям: ${percent}%`;
+    }
+
+    bot.sendMessage(chatId, text);
+  });
+
+  const userStates: Record<string, { step: string; data: Partial<User> }> = {};
+
+  bot.onText(/\/profile/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from?.id.toString();
+    if (!telegramId) return;
+
+    const user = await isUserAllowed(chatId, telegramId);
+    if (!user) return;
+
+    userStates[telegramId] = { step: 'gender', data: {} };
+    bot.sendMessage(chatId, "Давайте настроим ваш профиль для расчета норм КБЖУ.\n\nВаш пол:", {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "Мужской", callback_data: "set_gender_male" },
+            { text: "Женский", callback_data: "set_gender_female" }
+          ]
+        ]
+      }
+    });
   });
 
   bot.onText(/\/history/, async (msg) => {
@@ -312,6 +346,41 @@ export function setupBot(storage: IStorage) {
         chat_id: chatId,
         message_id: query.message?.message_id
       });
+    } else if (query.data.startsWith("set_gender_")) {
+      const gender = query.data.split("_")[2];
+      userStates[telegramId] = { step: 'age', data: { gender } };
+      bot.editMessageText("Ваш возраст (полных лет):", { chat_id: chatId, message_id: query.message?.message_id });
+    } else if (query.data.startsWith("set_activity_")) {
+      const activity = query.data.split("_")[2];
+      const state = userStates[telegramId];
+      if (state) {
+        state.data.activityLevel = activity;
+        state.step = 'goal';
+        bot.editMessageText("Ваша цель:", {
+          chat_id: chatId,
+          message_id: query.message?.message_id,
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "Похудение", callback_data: "set_goal_lose" }],
+              [{ text: "Поддержание веса", callback_data: "set_goal_maintain" }],
+              [{ text: "Набор массы", callback_data: "set_goal_gain" }]
+            ]
+          }
+        });
+      }
+    } else if (query.data.startsWith("set_goal_")) {
+      const goal = query.data.split("_")[2];
+      const state = userStates[telegramId];
+      if (state) {
+        state.data.goal = goal;
+        await storage.updateUser(user.id, state.data);
+        const updatedUser = await (storage as any).calculateAndSetGoals(user.id);
+        delete userStates[telegramId];
+        bot.editMessageText(`Профиль настроен!\n\nВаши нормы на день:\nКкал: ${updatedUser.caloriesGoal}\nБелки: ${updatedUser.proteinGoal}г\nЖиры: ${updatedUser.fatGoal}г\nУглеводы: ${updatedUser.carbsGoal}г`, {
+          chat_id: chatId,
+          message_id: query.message?.message_id
+        });
+      }
     } else if (query.data.startsWith("admin_approve_")) {
       if (!user.isAdmin) return;
       const targetUserId = parseInt(query.data.split("_")[2]);
@@ -367,6 +436,52 @@ export function setupBot(storage: IStorage) {
 
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
+
+    // Handle Profile Flow
+    const state = userStates[telegramId];
+    if (state) {
+      const val = parseInt(msg.text || "");
+      if (state.step === 'age') {
+        if (isNaN(val) || val < 10 || val > 100) {
+          bot.sendMessage(chatId, "Введите корректный возраст (число от 10 до 100):");
+          return;
+        }
+        state.data.age = val;
+        state.step = 'weight';
+        bot.sendMessage(chatId, "Ваш текущий вес (кг):");
+        return;
+      }
+      if (state.step === 'weight') {
+        if (isNaN(val) || val < 30 || val > 250) {
+          bot.sendMessage(chatId, "Введите корректный вес (число от 30 до 250):");
+          return;
+        }
+        state.data.weight = val;
+        state.step = 'height';
+        bot.sendMessage(chatId, "Ваш рост (см):");
+        return;
+      }
+      if (state.step === 'height') {
+        if (isNaN(val) || val < 100 || val > 250) {
+          bot.sendMessage(chatId, "Введите корректный рост (число от 100 до 250):");
+          return;
+        }
+        state.data.height = val;
+        state.step = 'activity';
+        bot.sendMessage(chatId, "Ваш уровень активности:", {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "Сидячий (минимум движений)", callback_data: "set_activity_sedentary" }],
+              [{ text: "Легкий (1-3 раза в неделю)", callback_data: "set_activity_light" }],
+              [{ text: "Умеренный (3-5 раз в неделю)", callback_data: "set_activity_moderate" }],
+              [{ text: "Высокий (6-7 раз в неделю)", callback_data: "set_activity_active" }],
+              [{ text: "Очень высокий (тяж. работа/спорт)", callback_data: "set_activity_very_active" }]
+            ]
+          }
+        });
+        return;
+      }
+    }
 
     // Handle Text
     if (msg.text) {

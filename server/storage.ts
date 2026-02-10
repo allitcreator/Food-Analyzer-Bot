@@ -44,6 +44,49 @@ export class DatabaseStorage implements IStorage {
     return updatedUser;
   }
 
+  async calculateAndSetGoals(userId: number): Promise<User> {
+    const user = await this.getUser(userId);
+    if (!user || !user.weight || !user.height || !user.age || !user.gender || !user.activityLevel || !user.goal) {
+      return user!;
+    }
+
+    // Mifflin-St Jeor Equation
+    let bmr = (10 * user.weight) + (6.25 * user.height) - (5 * user.age);
+    if (user.gender === 'male') {
+      bmr += 5;
+    } else {
+      bmr -= 161;
+    }
+
+    const activityMultipliers: Record<string, number> = {
+      sedentary: 1.2,
+      light: 1.375,
+      moderate: 1.55,
+      active: 1.725,
+      very_active: 1.9
+    };
+
+    let calories = Math.round(bmr * (activityMultipliers[user.activityLevel] || 1.2));
+
+    if (user.goal === 'lose') {
+      calories -= 500;
+    } else if (user.goal === 'gain') {
+      calories += 500;
+    }
+
+    // 30% Protein, 30% Fat, 40% Carbs
+    const protein = Math.round((calories * 0.3) / 4);
+    const fat = Math.round((calories * 0.3) / 9);
+    const carbs = Math.round((calories * 0.4) / 4);
+
+    return this.updateUser(userId, {
+      caloriesGoal: calories,
+      proteinGoal: protein,
+      fatGoal: fat,
+      carbsGoal: carbs
+    });
+  }
+
   async deleteUser(id: number): Promise<void> {
     await db.delete(foodLogs).where(eq(foodLogs.userId, id));
     await db.delete(users).where(eq(users.id, id));
