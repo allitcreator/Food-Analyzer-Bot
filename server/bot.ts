@@ -249,7 +249,7 @@ export function setupBot(storage: IStorage) {
     await sendEveningReport(user);
   });
 
-  bot.onText(/\/report_time/, async (msg) => {
+  bot.onText(/\/report_time(?:\s+(.+))?/, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -257,7 +257,29 @@ export function setupBot(storage: IStorage) {
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
 
-    bot.sendMessage(chatId, `Текущее время отчёта: ${user.reportTime || '21:00'}\n\nВыберите новое время:`, {
+    const arg = match?.[1]?.trim();
+    if (arg) {
+      if (arg.toLowerCase() === 'off') {
+        await storage.updateUserReportTime(user.id, 'off');
+        bot.sendMessage(chatId, "Вечерний отчёт: выключен");
+        return;
+      }
+      const timeMatch = arg.match(/^(\d{1,2}):(\d{2})$/);
+      if (timeMatch) {
+        const h = parseInt(timeMatch[1]);
+        const m = parseInt(timeMatch[2]);
+        if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+          const time = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+          await storage.updateUserReportTime(user.id, time);
+          bot.sendMessage(chatId, `Вечерний отчёт: ${time}`);
+          return;
+        }
+      }
+      bot.sendMessage(chatId, "Неверный формат. Укажите время в формате ЧЧ:ММ или off.\nНапример: /report_time 20:30");
+      return;
+    }
+
+    bot.sendMessage(chatId, `Текущее время отчёта: ${user.reportTime || '21:00'}\n\nВыберите новое время или отправьте /report_time ЧЧ:ММ :`, {
       reply_markup: {
         inline_keyboard: [
           [
