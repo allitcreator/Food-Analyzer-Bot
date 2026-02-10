@@ -9,6 +9,16 @@ export const users = pgTable("users", {
   username: text("username"),
   isApproved: boolean("is_approved").default(false),
   isAdmin: boolean("is_admin").default(false),
+  age: integer("age"),
+  gender: text("gender"), // male, female
+  weight: integer("weight"), // in kg
+  height: integer("height"), // in cm
+  activityLevel: text("activity_level"), // sedentary, light, moderate, active, very_active
+  goal: text("goal"), // lose, maintain, gain
+  caloriesGoal: integer("calories_goal"),
+  proteinGoal: integer("protein_goal"),
+  fatGoal: integer("fat_goal"),
+  carbsGoal: integer("carbs_goal"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
