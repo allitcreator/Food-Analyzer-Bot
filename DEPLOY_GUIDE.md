@@ -49,18 +49,89 @@ const openai = new OpenAI({
 });
 ```
 
-### 2. Режим бота — polling вместо webhook
+### 2. Режим бота — webhook через свой домен
 
-В файле `server/bot.ts` упростить инициализацию бота. Найти блок с выбором webhook/polling и заменить на:
+В файле `server/bot.ts` заменить логику инициализации бота (строки ~50-83).
+
+Сейчас бот использует `REPLIT_DEPLOYMENT_URL` для webhook. Нужно заменить на `WEBHOOK_URL`:
 
 ```typescript
-const bot = new TelegramBot(token, { polling: true });
+// БЫЛО:
+const REPLIT_DEPLOYMENT_URL = process.env.REPLIT_DEPLOYMENT_URL;
+const useWebhook = isProduction && !!REPLIT_DEPLOYMENT_URL && !!app;
+
+if (useWebhook) {
+  bot = new TelegramBot(token);
+  const webhookPath = `/api/telegram-webhook/${token}`;
+  const webhookUrl = `https://${REPLIT_DEPLOYMENT_URL}${webhookPath}`;
+  ...
+}
+
+// СТАЛО:
+const WEBHOOK_URL = process.env.WEBHOOK_URL; // например https://bot.example.com
+const useWebhook = !!WEBHOOK_URL && !!app;
+
+if (useWebhook) {
+  bot = new TelegramBot(token);
+  const webhookPath = `/api/telegram-webhook/${token}`;
+  const webhookUrl = `${WEBHOOK_URL}${webhookPath}`;
+  bot.setWebHook(webhookUrl).then(() => {
+    console.log("Telegram webhook set:", webhookUrl);
+  }).catch(err => {
+    console.error("Failed to set webhook:", err);
+  });
+  app.post(webhookPath, (req, res) => {
+    bot.processUpdate(req.body);
+    res.sendStatus(200);
+  });
+} else {
+  // Fallback на polling для локальной разработки
+  bot = new TelegramBot(token, { polling: true });
+  console.log("Bot started in polling mode (no WEBHOOK_URL set)");
+}
 ```
 
-Удалить всю логику с `useWebhook`, `REPLIT_DEPLOYMENT_URL`, `getWebHookInfo`, `setWebHook`.
-Это позволит боту работать без домена и HTTPS.
+Webhook-путь: `POST /api/telegram-webhook/{TELEGRAM_BOT_TOKEN}`
 
-### 3. Keep-alive
+**Требования для webhook:**
+- Домен с HTTPS (Let's Encrypt через Certbot или Cloudflare)
+- Nginx как reverse proxy перед приложением
+
+### 3. Nginx конфигурация (reverse proxy + SSL)
+
+Создать файл `/etc/nginx/sites-available/bot`:
+
+```nginx
+server {
+    listen 80;
+    server_name bot.example.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name bot.example.com;
+
+    ssl_certificate /etc/letsencrypt/live/bot.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/bot.example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Получить SSL-сертификат:
+```bash
+sudo apt install certbot python3-certbot-nginx
+sudo certbot --nginx -d bot.example.com
+```
+
+### 4. Keep-alive
 
 В файле `server/routes.ts` удалить блок keep-alive (он нужен только для Replit Autoscale):
 
@@ -72,7 +143,7 @@ if (process.env.NODE_ENV === "production" && REPLIT_DEPLOYMENT_URL) {
 }
 ```
 
-### 4. Папка replit_integrations
+### 5. Папка replit_integrations
 
 Удалить `server/replit_integrations/` целиком — она не нужна вне Replit.
 Также удалить все импорты из неё, если они есть в `server/routes.ts`.
@@ -87,6 +158,7 @@ DATABASE_URL=postgresql://user:password@localhost:5432/calorie_bot
 TELEGRAM_BOT_TOKEN=ваш_токен_от_BotFather
 OPENAI_API_KEY=sk-ваш_ключ_openai
 ADMIN_TELEGRAM_ID=ваш_telegram_id
+WEBHOOK_URL=https://bot.example.com
 
 # Опциональные
 SESSION_SECRET=любая_случайная_строка
@@ -151,6 +223,7 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       ADMIN_TELEGRAM_ID: ${ADMIN_TELEGRAM_ID}
+      WEBHOOK_URL: ${WEBHOOK_URL}
       SESSION_SECRET: ${SESSION_SECRET}
       NODE_ENV: production
       PORT: 5000
