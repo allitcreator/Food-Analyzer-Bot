@@ -13,7 +13,18 @@ export async function registerRoutes(
   // Start the bot
   setupBot(storage, app);
 
-  // No web routes needed as per user request for "bot only"
-  
+  app.get("/api/health", (_req, res) => {
+    res.json({ status: "ok", timestamp: Date.now() });
+  });
+
+  const REPLIT_DEPLOYMENT_URL = process.env.REPLIT_DEPLOYMENT_URL;
+  if (process.env.NODE_ENV === "production" && REPLIT_DEPLOYMENT_URL) {
+    const keepAliveUrl = `https://${REPLIT_DEPLOYMENT_URL}/api/health`;
+    setInterval(() => {
+      fetch(keepAliveUrl).catch(() => {});
+    }, 4 * 60 * 1000);
+    console.log("Keep-alive ping enabled every 4 minutes");
+  }
+
   return httpServer;
 }
