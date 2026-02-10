@@ -617,8 +617,10 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       const state = userStates[telegramId];
       if (state) {
         state.data.goal = goal;
+        console.log(`Profile save for user ${user.id}:`, JSON.stringify(state.data));
         await storage.updateUser(user.id, state.data);
         const updatedUser = await storage.calculateAndSetGoals(user.id);
+        console.log(`Goals calculated for user ${user.id}:`, JSON.stringify({ caloriesGoal: updatedUser.caloriesGoal, proteinGoal: updatedUser.proteinGoal, fatGoal: updatedUser.fatGoal, carbsGoal: updatedUser.carbsGoal }));
         delete userStates[telegramId];
         bot.editMessageText(`Профиль настроен!\n\nВаши нормы на день:\nКкал: ${updatedUser.caloriesGoal}\nБелки: ${updatedUser.proteinGoal}г\nЖиры: ${updatedUser.fatGoal}г\nУглеводы: ${updatedUser.carbsGoal}г\n\nХотите скорректировать калории?`, {
           chat_id: chatId,
