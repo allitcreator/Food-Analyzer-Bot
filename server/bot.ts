@@ -320,7 +320,7 @@ export function setupBot(storage: IStorage) {
 
       const unit = pending.foodName.toLowerCase().match(/(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i) ? 'мл' : 'г';
       
-      bot.editMessageText(`Распознано: ${pending.foodName}\nКкал: ${pending.calories} | Б: ${pending.protein} | Ж: ${pending.fat} | У: ${pending.carbs}\nОбъем: ${pending.weight}${unit}\n\nДобавить в дневник?`, {
+      bot.editMessageText(`Распознано: ${pending.foodName}\nКкал: ${pending.calories} | Б: ${pending.protein} | Ж: ${pending.fat} | У: ${pending.carbs}\nОбъем: ${pending.weight}${unit}${pending.foodScore ? `\nОценка полезности: ${pending.foodScore}/10` : ''}${pending.nutritionAdvice ? `\n\n💡 Совет: ${pending.nutritionAdvice}` : ''}\n\nДобавить в дневник?`, {
         chat_id: chatId,
         message_id: query.message?.message_id,
         reply_markup: {
@@ -497,7 +497,7 @@ export function setupBot(storage: IStorage) {
 
           const unit = (analysis.foodName.toLowerCase().match(/(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i)) ? 'мл' : 'г';
 
-          bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\n${unit === 'мл' ? 'Объем' : 'Вес'}: ${analysis.weight}${unit}\n\nДобавить в дневник?`, {
+          bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\n${unit === 'мл' ? 'Объем' : 'Вес'}: ${analysis.weight}${unit}${analysis.foodScore ? `\nОценка полезности: ${analysis.foodScore}/10` : ''}${analysis.nutritionAdvice ? `\n\n💡 Совет: ${analysis.nutritionAdvice}` : ''}\n\nДобавить в дневник?`, {
             reply_markup: {
               inline_keyboard: [
                 [
@@ -549,7 +549,7 @@ export function setupBot(storage: IStorage) {
 
           const unit = (analysis.foodName.toLowerCase().match(/(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i)) ? 'мл' : 'г';
 
-          bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\n${unit === 'мл' ? 'Объем' : 'Вес'}: ${analysis.weight}${unit}\n\nДобавить в дневник?`, {
+          bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\n${unit === 'мл' ? 'Объем' : 'Вес'}: ${analysis.weight}${unit}${analysis.foodScore ? `\nОценка полезности: ${analysis.foodScore}/10` : ''}${analysis.nutritionAdvice ? `\n\n💡 Совет: ${analysis.nutritionAdvice}` : ''}\n\nДобавить в дневник?`, {
             reply_markup: {
               inline_keyboard: [
                 [
@@ -592,7 +592,7 @@ export function setupBot(storage: IStorage) {
 
           const unit = (analysis.foodName.toLowerCase().match(/(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i)) ? 'мл' : 'г';
 
-          bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\n${unit === 'мл' ? 'Объем' : 'Вес'}: ${analysis.weight}${unit}\n\nДобавить в дневник?`, {
+          bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\n${unit === 'мл' ? 'Объем' : 'Вес'}: ${analysis.weight}${unit}${analysis.foodScore ? `\nОценка полезности: ${analysis.foodScore}/10` : ''}${analysis.nutritionAdvice ? `\n\n💡 Совет: ${analysis.nutritionAdvice}` : ''}\n\nДобавить в дневник?`, {
             reply_markup: {
               inline_keyboard: [
                 [

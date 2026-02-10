@@ -30,8 +30,10 @@ export const foodLogs = pgTable("food_logs", {
   protein: integer("protein").notNull(),
   fat: integer("fat").notNull(),
   carbs: integer("carbs").notNull(),
-  weight: integer("weight").notNull(), // in grams
+  weight: integer("weight").notNull(), // in grams/ml
   mealType: text("meal_type").notNull(), // breakfast, lunch, dinner, snack
+  foodScore: integer("food_score"), // 1-10
+  nutritionAdvice: text("nutrition_advice"),
   date: timestamp("date").defaultNow(),
 });
 
