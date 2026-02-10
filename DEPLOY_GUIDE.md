@@ -68,15 +68,19 @@ if (useWebhook) {
 }
 
 // СТАЛО:
+import crypto from "crypto";
+
 const WEBHOOK_URL = process.env.WEBHOOK_URL; // например https://bot.example.com
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || crypto.randomBytes(32).toString("hex");
 const useWebhook = !!WEBHOOK_URL && !!app;
 
 if (useWebhook) {
   bot = new TelegramBot(token);
-  const webhookPath = `/api/telegram-webhook/${token}`;
+  // Используем случайный путь вместо токена — токен в URL это риск утечки через логи
+  const webhookPath = `/api/telegram-webhook/${WEBHOOK_SECRET}`;
   const webhookUrl = `${WEBHOOK_URL}${webhookPath}`;
   bot.setWebHook(webhookUrl).then(() => {
-    console.log("Telegram webhook set:", webhookUrl);
+    console.log("Telegram webhook set successfully");
   }).catch(err => {
     console.error("Failed to set webhook:", err);
   });
@@ -91,7 +95,9 @@ if (useWebhook) {
 }
 ```
 
-Webhook-путь: `POST /api/telegram-webhook/{TELEGRAM_BOT_TOKEN}`
+**Безопасность webhook:** путь использует `WEBHOOK_SECRET` вместо `TELEGRAM_BOT_TOKEN`. Токен в URL — риск утечки через логи Nginx/access.log. Если `WEBHOOK_SECRET` не задан, генерируется случайный при каждом запуске.
+
+Webhook-путь: `POST /api/telegram-webhook/{WEBHOOK_SECRET}`
 
 **Требования для webhook:**
 - Домен с HTTPS (Let's Encrypt через Certbot или Cloudflare)
@@ -114,6 +120,14 @@ server {
 
     ssl_certificate /etc/letsencrypt/live/bot.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/bot.example.com/privkey.pem;
+
+    # Telegram отправляет фото до 20 МБ
+    client_max_body_size 20M;
+
+    # Таймауты для обработки фото через OpenAI (может занять 10-30 сек)
+    proxy_read_timeout 120s;
+    proxy_send_timeout 120s;
+    proxy_connect_timeout 10s;
 
     location / {
         proxy_pass http://127.0.0.1:5000;
@@ -160,9 +174,13 @@ OPENAI_API_KEY=sk-ваш_ключ_openai
 ADMIN_TELEGRAM_ID=ваш_telegram_id
 WEBHOOK_URL=https://bot.example.com
 
+# Безопасность webhook (если не задан — генерируется случайный при каждом запуске)
+WEBHOOK_SECRET=случайная_строка_для_пути_webhook
+
 # Опциональные
 SESSION_SECRET=любая_случайная_строка
 NODE_ENV=production
+TZ=Europe/Moscow
 PORT=5000
 ```
 
@@ -170,6 +188,7 @@ PORT=5000
 - `TELEGRAM_BOT_TOKEN` — у @BotFather в Telegram
 - `OPENAI_API_KEY` — на https://platform.openai.com/api-keys
 - `ADMIN_TELEGRAM_ID` — отправить /start боту @userinfobot в Telegram
+- `WEBHOOK_SECRET` — сгенерировать: `openssl rand -hex 32`
 
 ## Установка и запуск
 
@@ -196,7 +215,55 @@ npm start
 
 ### Вариант B: Docker Compose
 
-Создать `docker-compose.yml`:
+Создать `Dockerfile`:
+
+```dockerfile
+FROM node:20-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+# db:push нельзя делать на этапе build — БД ещё недоступна.
+# Миграция запускается при старте контейнера через entrypoint.
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 5000
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["npm", "start"]
+```
+
+Создать `entrypoint.sh`:
+
+```bash
+#!/bin/sh
+set -e
+
+echo "Waiting for PostgreSQL..."
+# Ждём пока БД станет доступна (до 30 секунд)
+for i in $(seq 1 30); do
+  if node -e "
+    const { Client } = require('pg');
+    const c = new Client({ connectionString: process.env.DATABASE_URL });
+    c.connect().then(() => { c.end(); process.exit(0); }).catch(() => process.exit(1));
+  " 2>/dev/null; then
+    echo "PostgreSQL is ready"
+    break
+  fi
+  echo "Waiting for DB... ($i/30)"
+  sleep 1
+done
+
+echo "Running database migrations..."
+npx drizzle-kit push
+
+echo "Starting application..."
+exec "$@"
+```
+
+В `docker-compose.yml` добавить healthcheck для PostgreSQL:
 
 ```yaml
 version: '3.8'
@@ -208,42 +275,35 @@ services:
       POSTGRES_DB: calorie_bot
       POSTGRES_USER: bot
       POSTGRES_PASSWORD: your_secure_password
+      TZ: Europe/Moscow
     volumes:
       - pgdata:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bot -d calorie_bot"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   bot:
     build: .
     restart: always
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgresql://bot:your_secure_password@db:5432/calorie_bot
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       ADMIN_TELEGRAM_ID: ${ADMIN_TELEGRAM_ID}
       WEBHOOK_URL: ${WEBHOOK_URL}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET}
       SESSION_SECRET: ${SESSION_SECRET}
       NODE_ENV: production
+      TZ: Europe/Moscow
       PORT: 5000
 
 volumes:
   pgdata:
-```
-
-Создать `Dockerfile`:
-
-```dockerfile
-FROM node:20-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-RUN npm run build
-RUN npm run db:push
-EXPOSE 5000
-CMD ["npm", "start"]
 ```
 
 Запуск:
