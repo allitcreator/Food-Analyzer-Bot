@@ -21,6 +21,7 @@ export interface IStorage {
   getFoodLogsInRange(userId: number, startDate: Date, endDate: Date): Promise<FoodLog[]>;
   deleteFoodLogsInRange(userId: number, startDate: Date, endDate: Date): Promise<void>;
   deleteFoodLog(id: number): Promise<void>;
+  calculateAndSetGoals(userId: number): Promise<User>;
 }
 
 export class DatabaseStorage implements IStorage {

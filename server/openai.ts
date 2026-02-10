@@ -16,14 +16,18 @@ export async function analyzeFoodText(text: string) {
           content: `You are a nutrition expert. 
           1. If the text is a barcode (digits), search for the specific product name and its exact nutrition facts (per serving or 100g).
           2. If it's a food name, find the most accurate nutrition data for that specific item.
-          3. Return ONLY a JSON object with:
+          3. Rate the food's nutritional quality on a scale of 1-10 (10 = very healthy, 1 = very unhealthy). Consider: fiber, vitamins, added sugar, trans fats, processing level.
+          4. Provide a brief nutrition advice in Russian (1-2 sentences) about this food: what's good/bad about it, and a suggestion to improve the meal.
+          5. Return ONLY a JSON object with:
           - foodName (string, exact product or dish name)
           - calories (number)
           - protein (number)
           - fat (number)
           - carbs (number)
           - weight (number, grams)
-          - mealType (string: "breakfast", "lunch", "dinner", "snack")`
+          - mealType (string: "breakfast", "lunch", "dinner", "snack")
+          - foodScore (number, 1-10)
+          - nutritionAdvice (string, in Russian)`
         },
         { role: "user", content: text }
       ],
@@ -53,14 +57,18 @@ export async function analyzeFoodImage(imageBase64: string) {
           4. Language rules:
           - foodName: EXACT product name from the package in its original language.
           - Analysis and all other text: Russian.
-          5. Return ONLY a JSON object with:
+          5. Rate the food's nutritional quality on a scale of 1-10 (10 = very healthy, 1 = very unhealthy). Consider: fiber, vitamins, added sugar, trans fats, processing level.
+          6. Provide a brief nutrition advice in Russian (1-2 sentences) about this food: what's good/bad about it, and a suggestion to improve the meal.
+          7. Return ONLY a JSON object with:
           - foodName (string, exact name from package in original language)
           - calories (number)
           - protein (number)
           - fat (number)
           - carbs (number)
           - weight (number, grams)
-          - mealType (string: "breakfast", "lunch", "dinner", "snack")`
+          - mealType (string: "breakfast", "lunch", "dinner", "snack")
+          - foodScore (number, 1-10)
+          - nutritionAdvice (string, in Russian)`
         },
         {
           role: "user",

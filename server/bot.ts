@@ -4,6 +4,40 @@ import { IStorage } from "./storage";
 import { analyzeFoodText, analyzeFoodImage } from "./openai";
 import { User } from "@shared/schema";
 
+const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
+
+function getUnit(foodName: string): string {
+  return foodName.toLowerCase().match(LIQUID_PATTERN) ? 'мл' : 'г';
+}
+
+function buildConfirmMessage(analysis: any): string {
+  const unit = getUnit(analysis.foodName);
+  let msg = `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\n${unit === 'мл' ? 'Объем' : 'Вес'}: ${analysis.weight}${unit}`;
+  if (analysis.foodScore) msg += `\nОценка полезности: ${analysis.foodScore}/10`;
+  if (analysis.nutritionAdvice) msg += `\n\n${analysis.nutritionAdvice}`;
+  msg += `\n\nДобавить в дневник?`;
+  return msg;
+}
+
+function buildConfirmKeyboard(unit: string) {
+  return {
+    inline_keyboard: [
+      [
+        { text: "✅ Да", callback_data: "confirm_yes" },
+        { text: "❌ Нет", callback_data: "confirm_no" }
+      ],
+      [
+        { text: `-50${unit}`, callback_data: "weight_minus_50" },
+        { text: `+50${unit}`, callback_data: "weight_plus_50" }
+      ],
+      [
+        { text: `-100${unit}`, callback_data: "weight_minus_100" },
+        { text: `+100${unit}`, callback_data: "weight_plus_100" }
+      ]
+    ]
+  };
+}
+
 export function setupBot(storage: IStorage) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID;
@@ -274,6 +308,7 @@ export function setupBot(storage: IStorage) {
     if (query.data === "confirm_yes") {
       const pending = (bot as any).pendingLogs?.[telegramId];
       if (pending) {
+        const unit = getUnit(pending.foodName);
         await storage.createFoodLog({
           userId: user.id,
           foodName: pending.foodName,
@@ -282,9 +317,11 @@ export function setupBot(storage: IStorage) {
           fat: Math.round(Number(pending.fat)) || 0,
           carbs: Math.round(Number(pending.carbs)) || 0,
           weight: Math.round(Number(pending.weight)) || 0,
-          mealType: pending.mealType || 'snack'
+          mealType: pending.mealType || 'snack',
+          foodScore: pending.foodScore ? Math.round(Number(pending.foodScore)) : null,
+          nutritionAdvice: pending.nutritionAdvice || null
         });
-        bot.editMessageText(`✅ Добавлено: ${pending.foodName} (${pending.weight}г)`, {
+        bot.editMessageText(`✅ Добавлено: ${pending.foodName} (${pending.weight}${unit})`, {
           chat_id: chatId,
           message_id: query.message?.message_id
         });
@@ -306,7 +343,7 @@ export function setupBot(storage: IStorage) {
       const amount = parseInt(query.data.split("_")[2]);
       
       const oldWeight = pending.weight;
-      const newWeight = action === "plus" ? oldWeight + amount : Math.max(0, oldWeight - amount);
+      const newWeight = action === "plus" ? oldWeight + amount : Math.max(10, oldWeight - amount);
       
       if (newWeight === oldWeight) return;
 
@@ -318,27 +355,11 @@ export function setupBot(storage: IStorage) {
       pending.fat = Math.round(pending.fat * ratio);
       pending.carbs = Math.round(pending.carbs * ratio);
 
-      const unit = pending.foodName.toLowerCase().match(/(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i) ? 'мл' : 'г';
-      
-      bot.editMessageText(`Распознано: ${pending.foodName}\nКкал: ${pending.calories} | Б: ${pending.protein} | Ж: ${pending.fat} | У: ${pending.carbs}\nОбъем: ${pending.weight}${unit}${pending.foodScore ? `\nОценка полезности: ${pending.foodScore}/10` : ''}${pending.nutritionAdvice ? `\n\n💡 Совет: ${pending.nutritionAdvice}` : ''}\n\nДобавить в дневник?`, {
+      const unit = getUnit(pending.foodName);
+      bot.editMessageText(buildConfirmMessage(pending), {
         chat_id: chatId,
         message_id: query.message?.message_id,
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: "✅ Да", callback_data: "confirm_yes" },
-              { text: "❌ Нет", callback_data: "confirm_no" }
-            ],
-            [
-              { text: `-50${unit}`, callback_data: "weight_minus_50" },
-              { text: `+50${unit}`, callback_data: "weight_plus_50" }
-            ],
-            [
-              { text: `-100${unit}`, callback_data: "weight_minus_100" },
-              { text: `+100${unit}`, callback_data: "weight_plus_100" }
-            ]
-          ]
-        }
+        reply_markup: buildConfirmKeyboard(unit)
       });
     } else if (query.data.startsWith("delete_log_")) {
       const logId = parseInt(query.data.split("_")[2]);
@@ -375,7 +396,7 @@ export function setupBot(storage: IStorage) {
       if (state) {
         state.data.goal = goal;
         await storage.updateUser(user.id, state.data);
-        const updatedUser = await (storage as any).calculateAndSetGoals(user.id);
+        const updatedUser = await storage.calculateAndSetGoals(user.id);
         delete userStates[telegramId];
         bot.editMessageText(`Профиль настроен!\n\nВаши нормы на день:\nКкал: ${updatedUser.caloriesGoal}\nБелки: ${updatedUser.proteinGoal}г\nЖиры: ${updatedUser.fatGoal}г\nУглеводы: ${updatedUser.carbsGoal}г`, {
           chat_id: chatId,
@@ -495,25 +516,9 @@ export function setupBot(storage: IStorage) {
           (bot as any).pendingLogs = (bot as any).pendingLogs || {};
           (bot as any).pendingLogs[telegramId] = analysis;
 
-          const unit = (analysis.foodName.toLowerCase().match(/(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i)) ? 'мл' : 'г';
-
-          bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\n${unit === 'мл' ? 'Объем' : 'Вес'}: ${analysis.weight}${unit}${analysis.foodScore ? `\nОценка полезности: ${analysis.foodScore}/10` : ''}${analysis.nutritionAdvice ? `\n\n💡 Совет: ${analysis.nutritionAdvice}` : ''}\n\nДобавить в дневник?`, {
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  { text: "✅ Да", callback_data: "confirm_yes" },
-                  { text: "❌ Нет", callback_data: "confirm_no" }
-                ],
-                [
-                  { text: `-50${unit}`, callback_data: "weight_minus_50" },
-                  { text: `+50${unit}`, callback_data: "weight_plus_50" }
-                ],
-                [
-                  { text: `-100${unit}`, callback_data: "weight_minus_100" },
-                  { text: `+100${unit}`, callback_data: "weight_plus_100" }
-                ]
-              ]
-            }
+          const unit = getUnit(analysis.foodName);
+          bot.sendMessage(chatId, buildConfirmMessage(analysis), {
+            reply_markup: buildConfirmKeyboard(unit)
           });
         } else {
           bot.sendMessage(chatId, "Не удалось распознать еду. Попробуй описать точнее.");
@@ -547,25 +552,9 @@ export function setupBot(storage: IStorage) {
           (bot as any).pendingLogs = (bot as any).pendingLogs || {};
           (bot as any).pendingLogs[telegramId] = analysis;
 
-          const unit = (analysis.foodName.toLowerCase().match(/(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i)) ? 'мл' : 'г';
-
-          bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\n${unit === 'мл' ? 'Объем' : 'Вес'}: ${analysis.weight}${unit}${analysis.foodScore ? `\nОценка полезности: ${analysis.foodScore}/10` : ''}${analysis.nutritionAdvice ? `\n\n💡 Совет: ${analysis.nutritionAdvice}` : ''}\n\nДобавить в дневник?`, {
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  { text: "✅ Да", callback_data: "confirm_yes" },
-                  { text: "❌ Нет", callback_data: "confirm_no" }
-                ],
-                [
-                  { text: `-50${unit}`, callback_data: "weight_minus_50" },
-                  { text: `+50${unit}`, callback_data: "weight_plus_50" }
-                ],
-                [
-                  { text: `-100${unit}`, callback_data: "weight_minus_100" },
-                  { text: `+100${unit}`, callback_data: "weight_plus_100" }
-                ]
-              ]
-            }
+          const unit = getUnit(analysis.foodName);
+          bot.sendMessage(chatId, buildConfirmMessage(analysis), {
+            reply_markup: buildConfirmKeyboard(unit)
           });
         } else {
           bot.sendMessage(chatId, "Не удалось распознать еду на фото. Попробуйте более четкий снимок.");
@@ -590,25 +579,9 @@ export function setupBot(storage: IStorage) {
           (bot as any).pendingLogs = (bot as any).pendingLogs || {};
           (bot as any).pendingLogs[telegramId] = analysis;
 
-          const unit = (analysis.foodName.toLowerCase().match(/(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i)) ? 'мл' : 'г';
-
-          bot.sendMessage(chatId, `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\n${unit === 'мл' ? 'Объем' : 'Вес'}: ${analysis.weight}${unit}${analysis.foodScore ? `\nОценка полезности: ${analysis.foodScore}/10` : ''}${analysis.nutritionAdvice ? `\n\n💡 Совет: ${analysis.nutritionAdvice}` : ''}\n\nДобавить в дневник?`, {
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  { text: "✅ Да", callback_data: "confirm_yes" },
-                  { text: "❌ Нет", callback_data: "confirm_no" }
-                ],
-                [
-                  { text: `-50${unit}`, callback_data: "weight_minus_50" },
-                  { text: `+50${unit}`, callback_data: "weight_plus_50" }
-                ],
-                [
-                  { text: `-100${unit}`, callback_data: "weight_minus_100" },
-                  { text: `+100${unit}`, callback_data: "weight_plus_100" }
-                ]
-              ]
-            }
+          const unit = getUnit(analysis.foodName);
+          bot.sendMessage(chatId, buildConfirmMessage(analysis), {
+            reply_markup: buildConfirmKeyboard(unit)
           });
         } else {
           bot.sendMessage(chatId, "Не удалось распознать еду в вашем сообщении.");
