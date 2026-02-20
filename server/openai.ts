@@ -61,7 +61,7 @@ export async function generateEveningReport(foodItems: { foodName: string; calor
         },
         {
           role: "user",
-          content: `Рацион за сегодня:\n${foodList || 'Ничего не записано'}\n\nИтого: ${totals.calories} ккал, Б${totals.protein}г, Ж${totals.fat}г, У${totals.carbs}г\nВода: ${waterMl}мл / 2500мл\n${goalsText}`
+          content: `Рацион за сегодня:\n${foodList || 'Ничего не записано'}\n\nИтого: ${totals.calories} ккал, Б${totals.protein}г, Ж${totals.fat}г, У${totals.carbs}г\n${goalsText}`
         }
       ]
     });
