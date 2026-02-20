@@ -801,7 +801,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       if (waterMatch) {
         const amount = parseInt(waterMatch[1] || waterMatch[2]);
         if (amount > 0 && amount <= 5000) {
-          await storage.addWater(user.id, amount);
+          await storage.logWater(user.id, amount);
           const waterTotal = await storage.getDailyWater(user.id, new Date());
           const waterGoal = 2500;
           bot.sendMessage(chatId, `Записано +${amount}мл воды\n\nВода за сегодня: ${waterTotal}мл / ${waterGoal}мл`);
