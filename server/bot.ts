@@ -416,7 +416,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     }
   }, 60000);
 
-  const userStates: Record<string, { step: string; data: Partial<User> }> = {};
+  const userStates: Record<string, { step: string; data: Partial<User> & { reminderMeal?: string } }> = {};
 
   bot.onText(/\/profile/, async (msg) => {
     const chatId = msg.chat.id;
@@ -663,17 +663,24 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
           lunch: [["12:00", "13:00", "14:00", "15:00"]],
           dinner: [["18:00", "19:00", "20:00", "21:00"]],
         };
-        bot.editMessageText(`Настройка напоминания: ${MEAL_LABELS[meal]}\n\nВыберите время:`, {
+        bot.editMessageText(`Настройка напоминания: ${MEAL_LABELS[meal]}\n\nВыберите время или нажмите "Своё время":`, {
           chat_id: chatId,
           message_id: query.message?.message_id,
           reply_markup: {
             inline_keyboard: [
               ...defaults[meal].map(row => row.map(t => ({ text: t, callback_data: `rmset_${meal}_${t}` }))),
-              [{ text: "Выкл", callback_data: `rmset_${meal}_off` }]
+              [{ text: "Своё время", callback_data: `rmcustom_${meal}` }, { text: "Выкл", callback_data: `rmset_${meal}_off` }]
             ]
           }
         });
       }
+    } else if (query.data.startsWith("rmcustom_")) {
+      const meal = query.data.replace("rmcustom_", "") as 'breakfast' | 'lunch' | 'dinner';
+      userStates[telegramId] = { step: 'reminder_time', data: { reminderMeal: meal } };
+      bot.editMessageText(`Введите время для напоминания "${MEAL_LABELS[meal]}" в формате ЧЧ:ММ\nНапример: 07:30`, {
+        chat_id: chatId,
+        message_id: query.message?.message_id
+      });
     } else if (query.data.startsWith("rmset_")) {
       const parts = query.data.replace("rmset_", "").split("_");
       const meal = parts[0] as 'breakfast' | 'lunch' | 'dinner';
@@ -842,6 +849,24 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     // Handle Profile Flow
     const state = userStates[telegramId];
     if (state) {
+      if (state.step === 'reminder_time') {
+        const timeMatch = (msg.text || '').trim().match(/^(\d{1,2}):(\d{2})$/);
+        if (timeMatch) {
+          const h = parseInt(timeMatch[1]);
+          const m = parseInt(timeMatch[2]);
+          if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+            const time = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+            const meal = state.data.reminderMeal as 'breakfast' | 'lunch' | 'dinner';
+            await storage.updateUserReminder(user.id, meal, time);
+            delete userStates[telegramId];
+            bot.sendMessage(chatId, `${MEAL_LABELS[meal]}: ${time}`);
+            return;
+          }
+        }
+        bot.sendMessage(chatId, "Неверный формат. Введите время в формате ЧЧ:ММ, например: 07:30");
+        return;
+      }
+
       const val = parseInt(msg.text || "");
       if (state.step === 'age') {
         if (isNaN(val) || val < 10 || val > 100) {
