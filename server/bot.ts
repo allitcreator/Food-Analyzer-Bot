@@ -6,6 +6,8 @@ import { User } from "@shared/schema";
 
 const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
 
+const WATER_TEXT_PATTERN = /^(?:(?:вод[аыу]?\s+(\d+)\s*(?:мл)?)|(?:(\d+)\s*(?:мл)?\s+вод[аыу]?))$/i;
+
 function getUnit(foodName: string): string {
   return foodName.toLowerCase().match(LIQUID_PATTERN) ? 'мл' : 'г';
 }
@@ -795,6 +797,18 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
 
     // Handle Text
     if (msg.text) {
+      const waterMatch = msg.text.trim().match(WATER_TEXT_PATTERN);
+      if (waterMatch) {
+        const amount = parseInt(waterMatch[1] || waterMatch[2]);
+        if (amount > 0 && amount <= 5000) {
+          await storage.addWater(user.id, amount);
+          const waterTotal = await storage.getDailyWater(user.id, new Date());
+          const waterGoal = 2500;
+          bot.sendMessage(chatId, `Записано +${amount}мл воды\n\nВода за сегодня: ${waterTotal}мл / ${waterGoal}мл`);
+          return;
+        }
+      }
+
       console.log("Text received:", msg.text);
       bot.sendMessage(chatId, "Анализирую текст...");
       try {
