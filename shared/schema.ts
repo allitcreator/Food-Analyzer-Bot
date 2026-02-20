@@ -20,6 +20,9 @@ export const users = pgTable("users", {
   fatGoal: integer("fat_goal"),
   carbsGoal: integer("carbs_goal"),
   reportTime: text("report_time").default("21:00"),
+  breakfastReminder: text("breakfast_reminder").default("off"),
+  lunchReminder: text("lunch_reminder").default("off"),
+  dinnerReminder: text("dinner_reminder").default("off"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
