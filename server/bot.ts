@@ -369,7 +369,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
   const reportSentKeys = new Set<string>();
   const reminderSentKeys = new Set<string>();
 
-  setInterval(async () => {
+  async function checkScheduledNotifications() {
     const msk = getMoscowNow();
     const currentTime = `${String(msk.getHours()).padStart(2, '0')}:${String(msk.getMinutes()).padStart(2, '0')}`;
     const todayKey = `${msk.getFullYear()}-${String(msk.getMonth() + 1).padStart(2, '0')}-${String(msk.getDate()).padStart(2, '0')}`;
@@ -383,12 +383,12 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
 
     const allUsers = await storage.getAllApprovedUsers();
     for (const user of allUsers) {
-      if (!user.reportTime || user.reportTime === 'off') {
-      } else if (user.reportTime === currentTime) {
+      if (user.reportTime && user.reportTime !== 'off' && user.reportTime === currentTime) {
         const userDayKey = `${user.id}_report_${todayKey}`;
         if (!reportSentKeys.has(userDayKey)) {
           try {
             reportSentKeys.add(userDayKey);
+            console.log(`Sending evening report to user ${user.id} at ${currentTime}`);
             await sendEveningReport(user);
           } catch (e) {
             console.error(`Failed to send report to user ${user.id}:`, e);
@@ -408,13 +408,17 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
         if (reminderSentKeys.has(key)) continue;
         reminderSentKeys.add(key);
         try {
+          console.log(`Sending ${meal} reminder to user ${user.id} at ${currentTime}`);
           bot.sendMessage(user.telegramId!, `Время записать ${MEAL_LABELS[meal]?.toLowerCase()}! Отправьте текст или фото еды.`);
         } catch (e) {
           console.error(`Failed to send ${meal} reminder to user ${user.id}:`, e);
         }
       }
     }
-  }, 60000);
+  }
+
+  setTimeout(() => checkScheduledNotifications(), 5000);
+  setInterval(checkScheduledNotifications, 60000);
 
   const userStates: Record<string, { step: string; data: Partial<User> & { reminderMeal?: string } }> = {};
 
