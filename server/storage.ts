@@ -26,6 +26,7 @@ export interface IStorage {
   getDailyWater(userId: number, date: Date): Promise<number>;
   getAllApprovedUsers(): Promise<User[]>;
   updateUserReportTime(userId: number, time: string): Promise<void>;
+  updateUserReminder(userId: number, meal: 'breakfast' | 'lunch' | 'dinner', time: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -189,6 +190,11 @@ export class DatabaseStorage implements IStorage {
 
   async updateUserReportTime(userId: number, time: string): Promise<void> {
     await db.update(users).set({ reportTime: time }).where(eq(users.id, userId));
+  }
+
+  async updateUserReminder(userId: number, meal: 'breakfast' | 'lunch' | 'dinner', time: string): Promise<void> {
+    const field = meal === 'breakfast' ? 'breakfastReminder' : meal === 'lunch' ? 'lunchReminder' : 'dinnerReminder';
+    await db.update(users).set({ [field]: time }).where(eq(users.id, userId));
   }
 }
 

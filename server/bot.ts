@@ -110,6 +110,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       "/clear ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ] - Очистить записи за период",
       "/report - Вечерний отчёт с рекомендациями ИИ (вручную)",
       "/report_time - Настроить время автоматического отчёта",
+      "/reminders - Напоминания о приёмах пищи (завтрак, обед, ужин)",
       "/users - (Админ) Управление пользователями",
       "",
       "Отправьте текст с описанием еды или фото - бот распознает продукты и посчитает КБЖУ."
@@ -332,35 +333,85 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     });
   });
 
+  const MEAL_LABELS: Record<string, string> = { breakfast: 'Завтрак', lunch: 'Обед', dinner: 'Ужин' };
+
+  bot.onText(/\/reminders/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from?.id.toString();
+    if (!telegramId) return;
+
+    const user = await isUserAllowed(chatId, telegramId);
+    if (!user) return;
+
+    const br = user.breakfastReminder || 'off';
+    const lu = user.lunchReminder || 'off';
+    const di = user.dinnerReminder || 'off';
+
+    const formatTime = (t: string) => t === 'off' ? 'выкл' : t;
+
+    bot.sendMessage(chatId, `Напоминания о приёмах пищи:\n\nЗавтрак: ${formatTime(br)}\nОбед: ${formatTime(lu)}\nУжин: ${formatTime(di)}\n\nВыберите, что настроить:`, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: `Завтрак (${formatTime(br)})`, callback_data: "rmnd_breakfast" }],
+          [{ text: `Обед (${formatTime(lu)})`, callback_data: "rmnd_lunch" }],
+          [{ text: `Ужин (${formatTime(di)})`, callback_data: "rmnd_dinner" }],
+          [{ text: "Выключить все", callback_data: "rmnd_all_off" }]
+        ]
+      }
+    });
+  });
+
   function getMoscowNow(): Date {
     const now = new Date();
     return new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Moscow' }));
   }
 
   const reportSentKeys = new Set<string>();
+  const reminderSentKeys = new Set<string>();
+
   setInterval(async () => {
     const msk = getMoscowNow();
     const currentTime = `${String(msk.getHours()).padStart(2, '0')}:${String(msk.getMinutes()).padStart(2, '0')}`;
     const todayKey = `${msk.getFullYear()}-${String(msk.getMonth() + 1).padStart(2, '0')}-${String(msk.getDate()).padStart(2, '0')}`;
 
     Array.from(reportSentKeys).forEach(key => {
-      if (!key.endsWith(`_${todayKey}`)) {
-        reportSentKeys.delete(key);
-      }
+      if (!key.endsWith(`_${todayKey}`)) reportSentKeys.delete(key);
+    });
+    Array.from(reminderSentKeys).forEach(key => {
+      if (!key.endsWith(`_${todayKey}`)) reminderSentKeys.delete(key);
     });
 
     const allUsers = await storage.getAllApprovedUsers();
     for (const user of allUsers) {
-      if (!user.reportTime || user.reportTime === 'off') continue;
-      if (user.reportTime !== currentTime) continue;
-      const userDayKey = `${user.id}_${todayKey}`;
-      if (reportSentKeys.has(userDayKey)) continue;
+      if (!user.reportTime || user.reportTime === 'off') {
+      } else if (user.reportTime === currentTime) {
+        const userDayKey = `${user.id}_report_${todayKey}`;
+        if (!reportSentKeys.has(userDayKey)) {
+          try {
+            reportSentKeys.add(userDayKey);
+            await sendEveningReport(user);
+          } catch (e) {
+            console.error(`Failed to send report to user ${user.id}:`, e);
+          }
+        }
+      }
 
-      try {
-        reportSentKeys.add(userDayKey);
-        await sendEveningReport(user);
-      } catch (e) {
-        console.error(`Failed to send report to user ${user.id}:`, e);
+      const meals: Array<{ field: string | null | undefined; meal: string }> = [
+        { field: user.breakfastReminder, meal: 'breakfast' },
+        { field: user.lunchReminder, meal: 'lunch' },
+        { field: user.dinnerReminder, meal: 'dinner' },
+      ];
+
+      for (const { field, meal } of meals) {
+        if (!field || field === 'off' || field !== currentTime) continue;
+        const key = `${user.id}_${meal}_${todayKey}`;
+        if (reminderSentKeys.has(key)) continue;
+        reminderSentKeys.add(key);
+        try {
+          bot.sendMessage(user.telegramId!, `Время записать ${MEAL_LABELS[meal]?.toLowerCase()}! Отправьте текст или фото еды.`);
+        } catch (e) {
+          console.error(`Failed to send ${meal} reminder to user ${user.id}:`, e);
+        }
       }
     }
   }, 60000);
@@ -591,6 +642,45 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       await storage.updateUserReportTime(user.id, time);
       const label = time === 'off' ? 'выключен' : time;
       bot.editMessageText(`Вечерний отчёт: ${label}`, {
+        chat_id: chatId,
+        message_id: query.message?.message_id
+      });
+    } else if (query.data.startsWith("rmnd_")) {
+      const action = query.data.replace("rmnd_", "");
+
+      if (action === 'all_off') {
+        await storage.updateUserReminder(user.id, 'breakfast', 'off');
+        await storage.updateUserReminder(user.id, 'lunch', 'off');
+        await storage.updateUserReminder(user.id, 'dinner', 'off');
+        bot.editMessageText("Все напоминания выключены.", {
+          chat_id: chatId,
+          message_id: query.message?.message_id
+        });
+      } else if (['breakfast', 'lunch', 'dinner'].includes(action)) {
+        const meal = action as 'breakfast' | 'lunch' | 'dinner';
+        const defaults: Record<string, string[][]> = {
+          breakfast: [["07:00", "08:00", "09:00", "10:00"]],
+          lunch: [["12:00", "13:00", "14:00", "15:00"]],
+          dinner: [["18:00", "19:00", "20:00", "21:00"]],
+        };
+        bot.editMessageText(`Настройка напоминания: ${MEAL_LABELS[meal]}\n\nВыберите время:`, {
+          chat_id: chatId,
+          message_id: query.message?.message_id,
+          reply_markup: {
+            inline_keyboard: [
+              ...defaults[meal].map(row => row.map(t => ({ text: t, callback_data: `rmset_${meal}_${t}` }))),
+              [{ text: "Выкл", callback_data: `rmset_${meal}_off` }]
+            ]
+          }
+        });
+      }
+    } else if (query.data.startsWith("rmset_")) {
+      const parts = query.data.replace("rmset_", "").split("_");
+      const meal = parts[0] as 'breakfast' | 'lunch' | 'dinner';
+      const time = parts[1];
+      await storage.updateUserReminder(user.id, meal, time);
+      const label = time === 'off' ? 'выкл' : time;
+      bot.editMessageText(`${MEAL_LABELS[meal]}: ${label}`, {
         chat_id: chatId,
         message_id: query.message?.message_id
       });

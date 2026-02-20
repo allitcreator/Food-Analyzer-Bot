@@ -11,8 +11,9 @@ This project is a fullstack application with a Telegram bot for tracking nutriti
 - **Smart Units**: Liquids automatically measured in ml, solids in grams.
 - **Admin Whitelist**: User approval/rejection via ADMIN_TELEGRAM_ID secret.
 - **Excel Export**: Detailed breakdown by date, food name, and nutritional values.
-- **Water Tracking**: /water command with quick-add buttons (150ml/250ml/500ml), daily progress (goal: 2500ml).
-- **Evening Report**: AI-powered daily diet summary with recommendations, configurable notification time.
+- **Water Tracking**: /water command with quick-add buttons (150ml/250ml/500ml), daily progress (goal: 2500ml). Also auto-detects "вода 330мл" text messages.
+- **Meal Reminders**: Configurable reminders for breakfast/lunch/dinner via /reminders command with per-meal time selection.
+- **Evening Report**: AI-powered daily diet summary with recommendations (food only, no water), configurable notification time.
 - **Database**: PostgreSQL for storing users, food logs, and water logs.
 
 ## Setup
@@ -35,6 +36,7 @@ This project is a fullstack application with a Telegram bot for tracking nutriti
 - `/water` - Water tracking with quick-add buttons
 - `/report` - Manual evening report with AI recommendations
 - `/report_time` - Set auto-report time (19:00-23:00 or off)
+- `/reminders` - Configure meal reminders (breakfast/lunch/dinner)
 - `/help` - List all commands
 - `/users` - Admin: manage users
 - Send photo - Analyze food in image
