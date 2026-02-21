@@ -251,11 +251,19 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     });
   });
 
-  async function sendEveningReport(user: User) {
+  async function sendEveningReport(user: User, manual = false) {
     const today = new Date();
     const stats = await storage.getDailyStats(user.id, today);
     const foodLogs = await storage.getFoodLogsInRange(user.id, (() => { const d = new Date(today); d.setHours(0,0,0,0); return d; })(), (() => { const d = new Date(today); d.setHours(23,59,59,999); return d; })());
+
+    if (foodLogs.length === 0 && !manual) return;
+
     const waterTotal = await storage.getDailyWater(user.id, today);
+
+    if (foodLogs.length === 0) {
+      bot.sendMessage(user.telegramId!, "За сегодня нет записей о еде. Отчёт не сформирован.");
+      return;
+    }
 
     const report = await generateEveningReport(
       foodLogs.map(f => ({ foodName: f.foodName, calories: f.calories, protein: f.protein, fat: f.fat, carbs: f.carbs, weight: f.weight, foodScore: f.foodScore })),
@@ -282,7 +290,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     if (!user) return;
 
     bot.sendMessage(chatId, "Готовлю отчёт за сегодня...");
-    await sendEveningReport(user);
+    await sendEveningReport(user, true);
   });
 
   bot.onText(/\/report_time(?:\s+(.+))?/, async (msg, match) => {
