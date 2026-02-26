@@ -118,6 +118,22 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     bot.sendMessage(chatId, helpText);
   });
 
+  const userStates: Record<string, { step: string; data: Partial<User> & { reminderMeal?: string } }> = {};
+
+  function startProfileFlow(chatId: number, telegramId: string) {
+    userStates[telegramId] = { step: 'gender', data: {} };
+    bot.sendMessage(chatId, "Давайте настроим ваш профиль для расчета норм КБЖУ.\n\nВаш пол:", {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "Мужской", callback_data: "set_gender_male" },
+            { text: "Женский", callback_data: "set_gender_female" }
+          ]
+        ]
+      }
+    });
+  }
+
   bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
@@ -163,7 +179,13 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     }
 
     if (user.isApproved || user.isAdmin || isGlobalAdmin) {
-      bot.sendMessage(chatId, "Привет! Я помогу тебе считать калории. Отправь мне фото еды или напиши, что ты съел (например, 'яблоко 100г').\n\nКоманды:\n/stats - статистика за сегодня\n/history - последние записи\n/export ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ ] - выгрузка в Excel\n/clear ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ ] - очистка истории");
+      const hasProfile = user.age && user.weight && user.height;
+      if (hasProfile) {
+        bot.sendMessage(chatId, "Привет! Я помогу тебе считать калории. Отправь мне фото еды или напиши, что ты съел (например, 'яблоко 100г').\n\nКоманды:\n/stats - статистика за сегодня\n/history - последние записи\n/export ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ ] - выгрузка в Excel\n/clear ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ ] - очистка истории");
+      } else {
+        bot.sendMessage(chatId, "Привет! Я помогу тебе считать калории.\n\nДля начала давайте настроим ваш профиль, чтобы рассчитать персональные нормы КБЖУ.");
+        setTimeout(() => startProfileFlow(chatId, telegramId), 500);
+      }
     }
   });
 
@@ -428,8 +450,6 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
   setTimeout(() => checkScheduledNotifications(), 5000);
   setInterval(checkScheduledNotifications, 60000);
 
-  const userStates: Record<string, { step: string; data: Partial<User> & { reminderMeal?: string } }> = {};
-
   bot.onText(/\/profile/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
@@ -438,17 +458,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
 
-    userStates[telegramId] = { step: 'gender', data: {} };
-    bot.sendMessage(chatId, "Давайте настроим ваш профиль для расчета норм КБЖУ.\n\nВаш пол:", {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "Мужской", callback_data: "set_gender_male" },
-            { text: "Женский", callback_data: "set_gender_female" }
-          ]
-        ]
-      }
-    });
+    startProfileFlow(chatId, telegramId);
   });
 
   bot.onText(/\/history/, async (msg) => {
