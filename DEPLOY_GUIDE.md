@@ -1,12 +1,13 @@
 # Инструкция для переноса Calorie Tracker Bot на свою VM
 
 ## Стек технологий
+
 - **Runtime:** Node.js 20+
 - **Язык:** TypeScript
 - **Серверная часть:** Express
 - **База данных:** PostgreSQL
 - **ORM:** Drizzle ORM
-- **AI:** OpenAI GPT-4o (текстовый анализ + распознавание фото)
+- **AI:** OpenAI GPT-4o (фото), GPT-4o-mini (текст, отчёты)
 - **Telegram:** node-telegram-bot-api
 - **Сборка:** Vite + esbuild
 
@@ -15,8 +16,8 @@
 ```
 ├── server/
 │   ├── index.ts          # Точка входа, Express сервер
-│   ├── bot.ts            # Telegram бот (команды, обработчики, планировщик отчётов)
-│   ├── openai.ts         # OpenAI: анализ текста, фото, вечерний отчёт
+│   ├── bot.ts            # Telegram бот: команды, профиль, еда, вода, напоминания, отчёты
+│   ├── openai.ts         # OpenAI: анализ текста (4o-mini), фото (4o), вечерний отчёт (4o-mini)
 │   ├── storage.ts        # CRUD операции, расчёт КБЖУ (Mifflin-St Jeor)
 │   ├── routes.ts         # API роуты + запуск бота
 │   ├── db.ts             # Подключение к PostgreSQL через Drizzle
@@ -24,7 +25,7 @@
 │   └── static.ts         # Раздача статики в продакшене
 ├── shared/
 │   └── schema.ts         # Drizzle схема БД (users, foodLogs, waterLogs)
-├── client/               # React фронтенд (опционально)
+├── client/               # React фронтенд (страница статуса бота)
 ├── drizzle.config.ts     # Конфигурация Drizzle Kit
 ├── package.json
 └── tsconfig.json
@@ -51,7 +52,7 @@ const openai = new OpenAI({
 
 ### 2. Режим бота — webhook через свой домен
 
-В файле `server/bot.ts` заменить логику инициализации бота (строки ~50-83).
+В файле `server/bot.ts` заменить логику инициализации бота.
 
 Сейчас бот использует `REPLIT_DEPLOYMENT_URL` для webhook. Нужно заменить на `WEBHOOK_URL`:
 
@@ -146,6 +147,13 @@ sudo apt install certbot python3-certbot-nginx
 sudo certbot --nginx -d bot.example.com
 ```
 
+Активировать конфиг и перезапустить Nginx:
+```bash
+sudo ln -s /etc/nginx/sites-available/bot /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
 ### 4. Keep-alive
 
 В файле `server/routes.ts` удалить блок keep-alive (он нужен только для Replit Autoscale):
@@ -158,10 +166,13 @@ if (process.env.NODE_ENV === "production" && REPLIT_DEPLOYMENT_URL) {
 }
 ```
 
-### 5. Папка replit_integrations
+### 5. Папки Replit Integrations
 
-Удалить `server/replit_integrations/` целиком — она не нужна вне Replit.
-Также удалить все импорты из неё, если они есть в `server/routes.ts`.
+Удалить эти каталоги — они не нужны вне Replit:
+- `server/replit_integrations/`
+- `client/replit_integrations/`
+
+Также удалить все импорты из них, если они есть в `server/routes.ts`.
 
 ## Переменные окружения
 
@@ -198,21 +209,35 @@ PORT=5000
 
 ```bash
 # 1. Установить Node.js 20+ и PostgreSQL
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash -
+sudo apt install -y nodejs postgresql
 
 # 2. Создать базу данных
-createdb calorie_bot
+sudo -u postgres createdb calorie_bot
+sudo -u postgres psql -c "CREATE USER bot WITH PASSWORD 'your_password';"
+sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE calorie_bot TO bot;"
 
-# 3. Установить зависимости
+# 3. Клонировать проект и установить зависимости
+git clone <your-repo-url> calorie-bot
+cd calorie-bot
 npm install
 
-# 4. Применить схему БД
+# 4. Создать .env файл (см. раздел выше)
+
+# 5. Применить схему БД
 npm run db:push
 
-# 5. Собрать проект
+# 6. Собрать проект
 npm run build
 
-# 6. Запустить
+# 7. Запустить
 npm start
+
+# 8. (Опционально) Запуск через PM2 для автоперезапуска
+npm install -g pm2
+pm2 start dist/index.cjs --name calorie-bot
+pm2 save
+pm2 startup
 ```
 
 ### Вариант B: Docker Compose
@@ -244,7 +269,6 @@ CMD ["npm", "start"]
 set -e
 
 echo "Waiting for PostgreSQL..."
-# Ждём пока БД станет доступна (до 30 секунд)
 for i in $(seq 1 30); do
   if node -e "
     const { Client } = require('pg');
@@ -265,7 +289,7 @@ echo "Starting application..."
 exec "$@"
 ```
 
-В `docker-compose.yml` добавить healthcheck для PostgreSQL:
+Создать `docker-compose.yml`:
 
 ```yaml
 version: '3.8'
@@ -312,38 +336,57 @@ volumes:
 ```bash
 # Создать .env с токенами (без DATABASE_URL — он задан в docker-compose)
 docker compose up -d
+
+# Проверить логи
+docker compose logs -f bot
 ```
 
 ## Скрипты package.json
 
-- `npm run dev` — разработка (TypeScript + Vite hot reload)
-- `npm run build` — сборка в `dist/`
-- `npm start` — запуск продакшена из `dist/`
-- `npm run db:push` — применить схему Drizzle к БД
+| Скрипт | Описание |
+|--------|----------|
+| `npm run dev` | Разработка (TypeScript + Vite hot reload) |
+| `npm run build` | Сборка в `dist/` |
+| `npm start` | Запуск продакшена из `dist/` |
+| `npm run db:push` | Применить схему Drizzle к БД |
 
-## Команды бота
+## Функции бота
 
-- `/start` — Регистрация
-- `/profile` — Настройка профиля (возраст, вес, рост, активность, цель)
-- `/stats` — Статистика за сегодня
-- `/history` — Последние записи с кнопками удаления
-- `/water` — Трекинг воды (кнопки 150/250/500 мл, цель 2500 мл)
-- `/report` — Вечерний AI-отчёт вручную
-- `/report_time` — Настройка автоотчёта (HH:MM или off)
-- `/export ДД.ММ.ГГГГ` — Экспорт в Excel
-- `/clear ДД.ММ.ГГГГ` — Очистка записей
-- `/users` — Управление пользователями (только для админа)
-- `/help` — Список команд
-- Отправить фото — AI распознает еду
-- Отправить текст — AI проанализирует описание еды
+### Команды
+| Команда | Описание |
+|---------|----------|
+| `/start` | Регистрация + автоматическая настройка профиля |
+| `/profile` | Повторная настройка профиля (пол, возраст, вес, рост, активность, цель) |
+| `/stats` | Статистика за сегодня с прогрессом к персональным целям |
+| `/history` | Последние записи с кнопками удаления |
+| `/water` | Трекинг воды (кнопки 150/250/500 мл, цель 2500 мл) |
+| `/report` | Вечерний AI-отчёт вручную (сообщит, если записей нет) |
+| `/report_time HH:MM` | Настройка автоотчёта (19:00-23:00 или `off`) |
+| `/reminders` | Настройка напоминаний о приёмах пищи (завтрак/обед/ужин) |
+| `/export ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ ]` | Экспорт в Excel |
+| `/clear ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ ]` | Очистка записей |
+| `/users` | Управление пользователями (только админ) |
+| `/help` | Список команд |
+
+### Взаимодействие без команд
+- **Фото** — AI распознает еду на изображении (GPT-4o)
+- **Текст** — AI анализирует описание еды (GPT-4o-mini)
+- **"вода 330мл"** — авто-распознавание воды из текстовых сообщений
+
+### Особенности поведения
+- Профиль запускается автоматически после `/start`, если не заполнен
+- Вечерний автоотчёт пропускается, если за день нет записей о еде
+- Ручной `/report` сообщает об отсутствии записей вместо пустого отчёта
+- Напоминания срабатывают один раз в день на каждый приём пищи
+- Данные о воде не включаются в AI-анализ вечернего отчёта
 
 ## Схема базы данных
 
 ### users
-Профили, цели КБЖУ, время отчёта
+Профиль пользователя, рассчитанные цели КБЖУ, настройки напоминаний и отчётов
 
 ### food_logs
-Записи о еде: название, КБЖУ, вес, оценка полезности (1-10), совет
+Записи о еде: название, калории, БЖУ, вес (г/мл), тип приёма пищи, оценка полезности (1-10), совет
 
 ### water_logs
 Записи о воде: количество в мл, дата
@@ -351,8 +394,10 @@ docker compose up -d
 ## Важные особенности кода
 
 - **Mifflin-St Jeor** — расчёт калорий в `storage.ts` → `calculateAndSetGoals()`
-- **Оценка еды** — GPT-4o выставляет foodScore 1-10 и даёт nutritionAdvice
+- **AI-модели** — GPT-4o для фото (vision), GPT-4o-mini для текста и отчётов (экономия)
+- **Оценка еды** — AI выставляет foodScore 1-10 и даёт nutritionAdvice на русском
 - **Жидкости vs твёрдое** — LIQUID_PATTERN в `bot.ts` определяет мл или г
 - **Вечерний отчёт** — планировщик в `bot.ts` проверяет каждую минуту по московскому времени (UTC+3)
 - **Excel экспорт** — через библиотеку `exceljs`
 - **Подтверждение еды** — inline кнопки для корректировки веса перед сохранением
+- **Профиль при старте** — `startProfileFlow()` вызывается из `/start`, если age/weight/height не заполнены
