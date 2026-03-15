@@ -11,7 +11,7 @@ export const users = pgTable("users", {
   isAdmin: boolean("is_admin").default(false),
   age: integer("age"),
   gender: text("gender"), // male, female
-  weight: integer("weight"), // in kg (profile weight, updated when logging)
+  weight: integer("weight"), // in kg (profile weight)
   height: integer("height"), // in cm
   activityLevel: text("activity_level"), // sedentary, light, moderate, active, very_active
   goal: text("goal"), // lose, maintain, gain
@@ -26,6 +26,7 @@ export const users = pgTable("users", {
   noLogReminderTime: text("no_log_reminder_time").default("off"),
   weightReminderTime: text("weight_reminder_time").default("off"),
   weightReminderDays: text("weight_reminder_days").default(""), // "1,3,5" = Mon,Wed,Fri (JS getDay: 0=Sun)
+  showMicronutrients: boolean("show_micronutrients").default(false), // toggle micronutrient display
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -41,6 +42,11 @@ export const foodLogs = pgTable("food_logs", {
   mealType: text("meal_type").notNull(), // breakfast, lunch, dinner, snack
   foodScore: integer("food_score"), // 1-10
   nutritionAdvice: text("nutrition_advice"),
+  // Micronutrients (optional, stored always when AI returns them)
+  fiber: real("fiber"),         // g
+  sugar: real("sugar"),         // g
+  sodium: real("sodium"),       // mg
+  saturatedFat: real("saturated_fat"), // g
   date: timestamp("date").defaultNow(),
 });
 

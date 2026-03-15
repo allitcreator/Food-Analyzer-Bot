@@ -83,6 +83,10 @@ async function buildDailyProgress(storage: IStorage, userId: number, user: User)
   text += `   🍞 У: ${stats.carbs}г`;
   if (user.carbsGoal) text += ` / ${user.carbsGoal}г`;
 
+  if (user.showMicronutrients && (stats.fiber > 0 || stats.sugar > 0 || stats.sodium > 0 || stats.saturatedFat > 0)) {
+    text += `\n🔬 Микро: 🌾${stats.fiber.toFixed(1)}г  🍬${stats.sugar.toFixed(1)}г  🧂${Math.round(stats.sodium)}мг  🧈нас.${stats.saturatedFat.toFixed(1)}г`;
+  }
+
   return text;
 }
 
@@ -176,6 +180,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     { command: "goal",           description: "Быстро изменить цель (похудение/поддержание/набор)" },
     { command: "profile",        description: "Настроить профиль полностью" },
     { command: "editprofile",    description: "Редактировать поля профиля по одному" },
+    { command: "settings",       description: "Настройки (микронутриенты и др.)" },
     { command: "help",           description: "Список всех команд" },
   ]).catch(err => console.error("setMyCommands error:", err));
 
@@ -213,6 +218,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       "👤 *Профиль и цели*",
       "/profile — Настроить профиль полностью",
       "/editprofile — Редактировать поля профиля по одному",
+      "/settings — Настройки (микронутриенты и др.)",
       "/goal — Быстро изменить цель (похудение / поддержание / набор)",
       "",
       "🤖 *ИИ-ассистент*",
@@ -497,6 +503,17 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     text += `🧈 Жиры:     ${stats.fat}г${user.fatGoal ? ` / ${user.fatGoal}г` : ''}\n`;
     text += `🍞 Углеводы: ${stats.carbs}г${user.carbsGoal ? ` / ${user.carbsGoal}г` : ''}`;
 
+    if (user.showMicronutrients) {
+      const hasMicro = stats.fiber > 0 || stats.sugar > 0 || stats.sodium > 0 || stats.saturatedFat > 0;
+      text += `\n\n🔬 Микронутриенты:\n`;
+      text += hasMicro
+        ? `🌾 Клетчатка:  ${stats.fiber.toFixed(1)}г${stats.fiber > 0 ? '' : '  (нет данных)'}\n`
+        + `🍬 Сахар:      ${stats.sugar.toFixed(1)}г\n`
+        + `🧂 Натрий:     ${Math.round(stats.sodium)} мг\n`
+        + `🧈 Нас. жиры:  ${stats.saturatedFat.toFixed(1)}г`
+        : `(нет данных — логируй еду сегодня)`;
+    }
+
     bot.sendMessage(chatId, text);
   });
 
@@ -655,6 +672,28 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       }
     });
   }
+
+  // ─── /settings ────────────────────────────────────────────────────────────
+  bot.onText(/\/settings/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from?.id.toString();
+    if (!telegramId) return;
+    const user = await isUserAllowed(chatId, telegramId);
+    if (!user) return;
+
+    const on = user.showMicronutrients;
+    bot.sendMessage(chatId,
+      `⚙️ *Настройки*\n\n🔬 Микронутриенты (клетчатка, сахар, натрий, нас. жиры): *${on ? 'Включены ✅' : 'Выключены ❌'}*\n\nПри включении ИИ будет дополнительно рассчитывать клетчатку, сахар, натрий и насыщенные жиры для каждого продукта.`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [[
+            { text: on ? '❌ Выключить микронутриенты' : '✅ Включить микронутриенты', callback_data: 'toggle_micro' }
+          ]]
+        }
+      }
+    );
+  });
 
   // ─── /editprofile ─────────────────────────────────────────────────────────
   bot.onText(/\/editprofile/, async (msg) => {
@@ -1126,7 +1165,11 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
           weight: Math.round(Number(pending.weight)) || 0,
           mealType: pending.mealType || 'snack',
           foodScore: pending.foodScore ? Math.round(Number(pending.foodScore)) : null,
-          nutritionAdvice: pending.nutritionAdvice || null
+          nutritionAdvice: pending.nutritionAdvice || null,
+          fiber: pending.fiber != null ? Number(pending.fiber) : null,
+          sugar: pending.sugar != null ? Number(pending.sugar) : null,
+          sodium: pending.sodium != null ? Number(pending.sodium) : null,
+          saturatedFat: pending.saturatedFat != null ? Number(pending.saturatedFat) : null,
         });
         const progress = await buildDailyProgress(storage, user.id, user);
         bot.editMessageText(`✅ Добавлено: ${pending.foodName} (${pending.weight}${unit})${progress}`, {
@@ -1162,6 +1205,10 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       pending.protein = Math.round(pending.protein * ratio);
       pending.fat = Math.round(pending.fat * ratio);
       pending.carbs = Math.round(pending.carbs * ratio);
+      if (pending.fiber != null) pending.fiber = Math.round(pending.fiber * ratio * 10) / 10;
+      if (pending.sugar != null) pending.sugar = Math.round(pending.sugar * ratio * 10) / 10;
+      if (pending.sodium != null) pending.sodium = Math.round(pending.sodium * ratio);
+      if (pending.saturatedFat != null) pending.saturatedFat = Math.round(pending.saturatedFat * ratio * 10) / 10;
 
       const unit = getUnit(pending.foodName);
       bot.editMessageText(buildConfirmMessage(pending), {
@@ -1190,6 +1237,10 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
             mealType: item.mealType || 'snack',
             foodScore: item.foodScore ? Math.round(Number(item.foodScore)) : null,
             nutritionAdvice: item.nutritionAdvice || null,
+            fiber: item.fiber != null ? Number(item.fiber) : null,
+            sugar: item.sugar != null ? Number(item.sugar) : null,
+            sodium: item.sodium != null ? Number(item.sodium) : null,
+            saturatedFat: item.saturatedFat != null ? Number(item.saturatedFat) : null,
           });
           savedCount++;
         } catch (e) {
@@ -1236,6 +1287,10 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       item.protein = Math.round(item.protein * ratio);
       item.fat = Math.round(item.fat * ratio);
       item.carbs = Math.round(item.carbs * ratio);
+      if (item.fiber != null) item.fiber = Math.round(item.fiber * ratio * 10) / 10;
+      if (item.sugar != null) item.sugar = Math.round(item.sugar * ratio * 10) / 10;
+      if (item.sodium != null) item.sodium = Math.round(item.sodium * ratio);
+      if (item.saturatedFat != null) item.saturatedFat = Math.round(item.saturatedFat * ratio * 10) / 10;
       const unit = item.foodName.toLowerCase().match(LIQUID_PATTERN) ? 'мл' : 'г';
       bot.editMessageText(buildMultiItemEditorText(item, idx, items.length), {
         chat_id: chatId,
@@ -1645,6 +1700,28 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       }
     }
     
+    // ─── toggle_micro ─────────────────────────────────────────────────────
+    if (query.data === "toggle_micro") {
+      const newVal = !user.showMicronutrients;
+      await storage.updateUser(user.id, { showMicronutrients: newVal });
+      const statusText = newVal ? 'Включены ✅' : 'Выключены ❌';
+      bot.editMessageText(
+        `⚙️ *Настройки*\n\n🔬 Микронутриенты (клетчатка, сахар, натрий, нас. жиры): *${statusText}*\n\nПри включении ИИ будет дополнительно рассчитывать клетчатку, сахар, натрий и насыщенные жиры для каждого продукта.`,
+        {
+          chat_id: chatId,
+          message_id: query.message?.message_id,
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [[
+              { text: newVal ? '❌ Выключить микронутриенты' : '✅ Включить микронутриенты', callback_data: 'toggle_micro' }
+            ]]
+          }
+        }
+      );
+      bot.answerCallbackQuery(query.id, { text: newVal ? '✅ Микронутриенты включены' : '❌ Микронутриенты выключены' });
+      return;
+    }
+
     bot.answerCallbackQuery(query.id);
   });
 

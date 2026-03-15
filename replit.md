@@ -19,6 +19,7 @@ Fullstack nutrition tracking application centered around a Telegram bot. Users l
 - Barcode scanning via Open Food Facts API (GPT-4o detects barcode → Open Food Facts lookup)
 - Meal reminders (breakfast/lunch/dinner) + no-log reminder if no entries by a set time
 - Evening AI-powered diet reports, Excel export, admin whitelist system
+- **Micronutrients** (user-controlled toggle via `/settings`): fiber, sugar, sodium, saturated fat — estimated by AI per food item, shown in `/stats` and daily progress; scales with weight adjustments
 
 ## User Preferences
 
@@ -59,10 +60,12 @@ Preferred communication style: Simple, everyday language.
 - Computed: caloriesGoal, proteinGoal, fatGoal, carbsGoal
 - Notifications: reportTime, breakfastReminder, lunchReminder, dinnerReminder, noLogReminderTime
 - Weight reminders: weightReminderTime (HH:MM|off), weightReminderDays ("1,3,5" = Mon,Wed,Fri; "" = all days)
+- showMicronutrients (boolean, default false) — user toggle for fiber/sugar/sodium/saturatedFat display
 
 **foodLogs** table:
 - userId (FK), foodName, calories, protein, fat, carbs, weight (g/ml), mealType
 - foodScore (1–10), nutritionAdvice, date
+- fiber (g, nullable), sugar (g, nullable), sodium (mg, nullable), saturatedFat (g, nullable) — micronutrients
 
 **weightLogs** table:
 - userId (FK), weight (real, kg with decimals e.g. 85.3), date

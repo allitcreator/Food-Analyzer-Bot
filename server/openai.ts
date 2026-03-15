@@ -27,6 +27,7 @@ Split the message into individual food items/dishes. For each item:
 2. Find accurate nutrition data per the specified or estimated portion.
 3. Rate nutritional quality 1-10 (10 = very healthy, 1 = very unhealthy).
 4. Write a brief nutrition advice in Russian (1-2 sentences).
+5. Estimate micronutrients based on typical composition.
 
 Return ONLY a JSON object with a single key "items" containing an array. Each element:
 - foodName (string)
@@ -38,6 +39,10 @@ Return ONLY a JSON object with a single key "items" containing an array. Each el
 - mealType ("breakfast" | "lunch" | "dinner" | "snack")
 - foodScore (number, 1-10)
 - nutritionAdvice (string, Russian)
+- fiber (number, grams — dietary fiber)
+- sugar (number, grams — total sugars)
+- sodium (number, milligrams)
+- saturatedFat (number, grams)
 
 Example output: {"items": [{...}, {...}]}`
         },
@@ -67,6 +72,11 @@ export interface FoodItem {
   mealType: string;
   foodScore?: number;
   nutritionAdvice?: string;
+  // Micronutrients (optional — AI returns best estimate)
+  fiber?: number;        // g
+  sugar?: number;        // g
+  sodium?: number;       // mg
+  saturatedFat?: number; // g
 }
 
 export async function generateEveningReport(foodItems: { foodName: string; calories: number; protein: number; fat: number; carbs: number; weight: number; foodScore?: number | null }[], totals: { calories: number; protein: number; fat: number; carbs: number }, goals: { caloriesGoal?: number | null; proteinGoal?: number | null; fatGoal?: number | null; carbsGoal?: number | null }) {
@@ -271,16 +281,21 @@ export async function analyzeFoodImage(imageBase64: string) {
           - Analysis and all other text: Russian.
           5. Rate the food's nutritional quality on a scale of 1-10 (10 = very healthy, 1 = very unhealthy). Consider: fiber, vitamins, added sugar, trans fats, processing level.
           6. Provide a brief nutrition advice in Russian (1-2 sentences) about this food: what's good/bad about it, and a suggestion to improve the meal.
-          7. Return ONLY a JSON object with:
+          7. Estimate micronutrients based on typical composition or label.
+          8. Return ONLY a JSON object with:
           - foodName (string, exact name from package in original language)
           - calories (number)
-          - protein (number)
-          - fat (number)
-          - carbs (number)
+          - protein (number, grams)
+          - fat (number, grams)
+          - carbs (number, grams)
           - weight (number, grams)
           - mealType (string: "breakfast", "lunch", "dinner", "snack")
           - foodScore (number, 1-10)
-          - nutritionAdvice (string, in Russian)`
+          - nutritionAdvice (string, in Russian)
+          - fiber (number, grams — dietary fiber)
+          - sugar (number, grams — total sugars)
+          - sodium (number, milligrams)
+          - saturatedFat (number, grams)`
         },
         {
           role: "user",

@@ -116,7 +116,11 @@ export class DatabaseStorage implements IStorage {
       protein: acc.protein + log.protein,
       fat: acc.fat + log.fat,
       carbs: acc.carbs + log.carbs,
-    }), { calories: 0, protein: 0, fat: 0, carbs: 0 });
+      fiber: acc.fiber + (log.fiber ?? 0),
+      sugar: acc.sugar + (log.sugar ?? 0),
+      sodium: acc.sodium + (log.sodium ?? 0),
+      saturatedFat: acc.saturatedFat + (log.saturatedFat ?? 0),
+    }), { calories: 0, protein: 0, fat: 0, carbs: 0, fiber: 0, sugar: 0, sodium: 0, saturatedFat: 0 });
   }
 
   async getWeeklyStats(userId: number) {
