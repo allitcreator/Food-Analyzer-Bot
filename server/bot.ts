@@ -11,6 +11,37 @@ function getUnit(foodName: string): string {
   return foodName.toLowerCase().match(LIQUID_PATTERN) ? 'мл' : 'г';
 }
 
+function progressBar(current: number, goal: number, length = 10): string {
+  const ratio = Math.min(current / goal, 1);
+  const filled = Math.round(ratio * length);
+  const empty = length - filled;
+  return `[${('█'.repeat(filled) + '░'.repeat(empty))}] ${Math.round(ratio * 100)}%`;
+}
+
+async function buildDailyProgress(storage: IStorage, userId: number, user: User): Promise<string> {
+  const today = new Date();
+  const stats = await storage.getDailyStats(userId, today);
+
+  let text = `\n\n📊 Прогресс за сегодня:\n`;
+
+  if (user.caloriesGoal) {
+    const remaining = Math.max(0, user.caloriesGoal - stats.calories);
+    text += `🔥 ${stats.calories} / ${user.caloriesGoal} ккал  ${progressBar(stats.calories, user.caloriesGoal)}`;
+    text += remaining > 0 ? `  (осталось ${remaining})` : `  ⚠️ норма превышена`;
+  } else {
+    text += `🔥 Калории: ${stats.calories} ккал`;
+  }
+
+  text += `\n💪 Б: ${stats.protein}г`;
+  if (user.proteinGoal) text += ` / ${user.proteinGoal}г`;
+  text += `   🧈 Ж: ${stats.fat}г`;
+  if (user.fatGoal) text += ` / ${user.fatGoal}г`;
+  text += `   🍞 У: ${stats.carbs}г`;
+  if (user.carbsGoal) text += ` / ${user.carbsGoal}г`;
+
+  return text;
+}
+
 function buildConfirmMessage(analysis: any): string {
   const unit = getUnit(analysis.foodName);
   let msg = `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\n${unit === 'мл' ? 'Объем' : 'Вес'}: ${analysis.weight}${unit}`;
@@ -307,15 +338,6 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
 
     const today = new Date();
     const stats = await storage.getDailyStats(user.id, today);
-
-    function progressBar(current: number, goal: number, length = 10): string {
-      const ratio = Math.min(current / goal, 1);
-      const filled = Math.round(ratio * length);
-      const empty = length - filled;
-      const bar = '█'.repeat(filled) + '░'.repeat(empty);
-      const percent = Math.round(ratio * 100);
-      return `[${bar}] ${percent}%`;
-    }
 
     let text = `📊 Статистика за сегодня\n\n`;
 
@@ -648,7 +670,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
           foodScore: pending.foodScore ? Math.round(Number(pending.foodScore)) : null,
           nutritionAdvice: pending.nutritionAdvice || null
         });
-        bot.editMessageText(`✅ Добавлено: ${pending.foodName} (${pending.weight}${unit})`, {
+        const progress = await buildDailyProgress(storage, user.id, user);
+        bot.editMessageText(`✅ Добавлено: ${pending.foodName} (${pending.weight}${unit})${progress}`, {
           chat_id: chatId,
           message_id: query.message?.message_id
         });
@@ -716,7 +739,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
         }
       }
       const totalCal = items.reduce((s, i) => s + i.calories, 0);
-      bot.editMessageText(`✅ Сохранено ${savedCount} из ${items.length} позиций\n📊 Итого: ${totalCal} ккал`, {
+      const progress = await buildDailyProgress(storage, user.id, user);
+      bot.editMessageText(`✅ Сохранено ${savedCount} из ${items.length} позиций  (+${totalCal} ккал)${progress}`, {
         chat_id: chatId,
         message_id: query.message?.message_id
       });
