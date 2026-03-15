@@ -103,8 +103,14 @@ Single-item flow still uses `(bot as any).pendingLogs[telegramId]` with weight a
 - `node-telegram-bot-api` — Telegram bot client
 - `exceljs` — Excel export
 - `openai` — GPT-4o, GPT-4o-mini, Whisper-1
+- `pdfkit` — PDF generation with charts; fonts via `dejavu-fonts-ttf` npm package (Cyrillic support)
+- `dejavu-fonts-ttf` — DejaVu Sans TTF fonts with full Cyrillic support for PDFKit
 - `express` + `express-session` + `connect-pg-simple` — HTTP server and sessions
 - `react` + `vite` + `tailwindcss` + `shadcn/ui` — frontend
 - `@tanstack/react-query` — client-side data fetching
 - `date-fns` — date formatting
 - `zod` — runtime validation
+
+### PDF Font Path Resolution
+The PDF generator (`server/pdf.ts`) uses DejaVu Sans from the `dejavu-fonts-ttf` npm package.
+Font path is resolved via `createRequire(import.meta.url)` + `require.resolve("dejavu-fonts-ttf/package.json")` — this is required because `server/pdf.ts` runs as an ES module where `__dirname` is not available.

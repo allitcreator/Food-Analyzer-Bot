@@ -158,6 +158,27 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     });
   }
 
+  // Register bot commands in Telegram menu
+  bot.setMyCommands([
+    { command: "stats",          description: "Статистика за сегодня + серия дней 🔥" },
+    { command: "week",           description: "Разбивка по дням за 7 дней" },
+    { command: "month",          description: "Статистика за месяц с графиками" },
+    { command: "history",        description: "Последние записи питания" },
+    { command: "pdf",            description: "PDF-отчёт с графиками" },
+    { command: "export",         description: "Excel-экспорт (дата или диапазон)" },
+    { command: "clear",          description: "Удалить записи за дату или диапазон" },
+    { command: "weight",         description: "Записать вес / посмотреть историю" },
+    { command: "weightreminder", description: "Напоминание взвешиваться" },
+    { command: "ask",            description: "Вопрос ИИ-тренеру-нутрициологу" },
+    { command: "report",         description: "Вечерний ИИ-отчёт (вручную)" },
+    { command: "report_time",    description: "Время авто-отчёта" },
+    { command: "reminders",      description: "Настроить напоминания о приёмах пищи" },
+    { command: "goal",           description: "Быстро изменить цель (похудение/поддержание/набор)" },
+    { command: "profile",        description: "Настроить профиль полностью" },
+    { command: "editprofile",    description: "Редактировать поля профиля по одному" },
+    { command: "help",           description: "Список всех команд" },
+  ]).catch(err => console.error("setMyCommands error:", err));
+
   // Middleware-like check
   const isUserAllowed = async (chatId: number, telegramId: string) => {
     let user = await storage.getUserByTelegramId(telegramId);
@@ -175,39 +196,41 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
   bot.onText(/\/help/, async (msg) => {
     const chatId = msg.chat.id;
     const helpText = [
-      "📋 Команды бота:\n",
-      "🍽 Питание:",
+      "📋 *Команды бота*\n",
+      "🍽 *Питание и статистика*",
       "/stats — Статистика за сегодня + серия дней 🔥",
       "/week — Разбивка по дням за 7 дней",
-      "/month — Статистика за месяц",
-      "/history — Последние записи еды",
-      "/export ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ] — Excel-экспорт",
-      "/clear ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ] — Удалить записи",
-      "/pdf — PDF-отчёт с графиками",
+      "/month — Статистика за месяц с графиками",
+      "/history — Последние записи питания",
+      "/pdf — PDF-отчёт с графиками за месяц",
+      "/export ДД.ММ.ГГГГ \\[ - ДД.ММ.ГГГГ\\] — Excel-экспорт",
+      "/clear ДД.ММ.ГГГГ \\[ - ДД.ММ.ГГГГ\\] — Удалить записи",
       "",
-      "⚖️ Вес:",
-      "/weight [кг] — Записать вес или посмотреть историю",
+      "⚖️ *Вес*",
+      "/weight \\[кг\\] — Записать вес / посмотреть историю и тренд",
       "/weightreminder — Настроить напоминание взвешиваться",
       "",
-      "👤 Профиль:",
+      "👤 *Профиль и цели*",
       "/profile — Настроить профиль полностью",
-      "/editprofile — Редактировать отдельные поля профиля",
-      "/goal — Быстро изменить цель",
+      "/editprofile — Редактировать поля профиля по одному",
+      "/goal — Быстро изменить цель (похудение / поддержание / набор)",
       "",
-      "🤖 ИИ:",
-      "/ask [вопрос] — Вопрос тренеру-нутрициологу",
-      "/report — Вечерний ИИ-отчёт (вручную)",
-      "/report_time — Время авто-отчёта",
+      "🤖 *ИИ-ассистент*",
+      "/ask \\[вопрос\\] — Вопрос тренеру-нутрициологу с контекстом дня",
+      "/report — Вечерний ИИ-анализ питания (вручную)",
+      "/report\\_time — Время авто-отчёта",
       "",
-      "⏰ Напоминания:",
-      "/reminders — Приёмы пищи + напоминание «нет записей»",
+      "⏰ *Напоминания*",
+      "/reminders — Завтрак / обед / ужин + «нет записей»",
       "/weightreminder — Напоминание взвеситься",
       "",
-      "/users — (Админ) Управление пользователями",
+      "🔧 *Админ*",
+      "/users — Управление пользователями",
       "",
-      "Отправьте текст, фото, голосовое или штрихкод — бот распознает и посчитает КБЖУ."
+      "💬 *Распознавание еды*",
+      "Отправьте текст, фото блюда, голосовое сообщение или фото штрихкода — бот распознает и посчитает КБЖУ автоматически."
     ].join("\n");
-    bot.sendMessage(chatId, helpText);
+    bot.sendMessage(chatId, helpText, { parse_mode: "Markdown" });
   });
 
   bot.onText(/\/ask(?:\s+(.+))?/, async (msg, match) => {
