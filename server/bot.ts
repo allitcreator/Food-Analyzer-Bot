@@ -1,7 +1,8 @@
 import TelegramBot from "node-telegram-bot-api";
 import ExcelJS from "exceljs";
 import { IStorage } from "./storage";
-import { analyzeFoodText, analyzeFoodImage, generateEveningReport, transcribeVoice, askCoach, detectBarcode, FoodItem } from "./openai";
+import { analyzeFoodText, analyzeFoodImage, generateEveningReport, transcribeVoice, askCoach, detectBarcode, generateWeightAnalysis, FoodItem } from "./openai";
+import { generateMonthlyPDF, extractTopFoods } from "./pdf";
 import { User } from "@shared/schema";
 
 const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
@@ -175,18 +176,33 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     const chatId = msg.chat.id;
     const helpText = [
       "📋 Команды бота:\n",
-      "/start — Начать работу с ботом",
-      "/profile — Настроить профиль (пол, возраст, вес, рост, активность, цель)",
-      "/goal — Быстро изменить цель (похудение / поддержание / набор)",
+      "🍽 Питание:",
       "/stats — Статистика за сегодня + серия дней 🔥",
-      "/week — Разбивка питания по дням за последние 7 дней",
-      "/history — Последние записи еды с возможностью удаления",
-      "/export ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ] — Экспорт дневника в Excel",
-      "/clear ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ] — Очистить записи за период",
-      "/report — Вечерний отчёт с рекомендациями ИИ (вручную)",
-      "/report_time — Настроить время автоматического отчёта",
-      "/reminders — Напоминания: завтрак, обед, ужин, «нет записей»",
-      "/ask [вопрос] — Вопрос личному тренеру-нутрициологу",
+      "/week — Разбивка по дням за 7 дней",
+      "/month — Статистика за месяц",
+      "/history — Последние записи еды",
+      "/export ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ] — Excel-экспорт",
+      "/clear ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ] — Удалить записи",
+      "/pdf — PDF-отчёт с графиками",
+      "",
+      "⚖️ Вес:",
+      "/weight [кг] — Записать вес или посмотреть историю",
+      "/weightreminder — Настроить напоминание взвешиваться",
+      "",
+      "👤 Профиль:",
+      "/profile — Настроить профиль полностью",
+      "/editprofile — Редактировать отдельные поля профиля",
+      "/goal — Быстро изменить цель",
+      "",
+      "🤖 ИИ:",
+      "/ask [вопрос] — Вопрос тренеру-нутрициологу",
+      "/report — Вечерний ИИ-отчёт (вручную)",
+      "/report_time — Время авто-отчёта",
+      "",
+      "⏰ Напоминания:",
+      "/reminders — Приёмы пищи + напоминание «нет записей»",
+      "/weightreminder — Напоминание взвеситься",
+      "",
       "/users — (Админ) Управление пользователями",
       "",
       "Отправьте текст, фото, голосовое или штрихкод — бот распознает и посчитает КБЖУ."
@@ -522,6 +538,219 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     });
   });
 
+  // ─── /weight ──────────────────────────────────────────────────────────────
+  bot.onText(/\/weight(?:\s+(.+))?/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from?.id.toString();
+    if (!telegramId) return;
+    const user = await isUserAllowed(chatId, telegramId);
+    if (!user) return;
+
+    const arg = match?.[1]?.trim();
+
+    if (arg) {
+      const val = parseFloat(arg.replace(',', '.'));
+      if (isNaN(val) || val < 20 || val > 500) {
+        bot.sendMessage(chatId, "Укажите корректный вес в кг, например: /weight 74.5");
+        return;
+      }
+      await storage.logWeight(user.id, Math.round(val * 10) / 10);
+      await storage.updateUser(user.id, { weight: Math.round(val) });
+
+      const logs = await storage.getWeightLogs(user.id, 7);
+      const sorted = [...logs].sort((a, b) => new Date(a.date!).getTime() - new Date(b.date!).getTime());
+      let deltaStr = '';
+      if (sorted.length >= 2) {
+        const delta = sorted[sorted.length - 1].weight - sorted[0].weight;
+        deltaStr = `\n(${delta > 0 ? '+' : ''}${delta.toFixed(1)} кг за ${sorted.length} замеров)`;
+      }
+      bot.sendMessage(chatId, `⚖️ Вес записан: ${val.toFixed(1)} кг${deltaStr}`);
+    } else {
+      const logs = await storage.getWeightLogs(user.id, 10);
+      if (logs.length === 0) {
+        bot.sendMessage(chatId,
+          "Нет записей о весе.\n\nЗапишите: /weight 75.0\n\nНастроить напоминание взвешиваться: /weightreminder");
+        return;
+      }
+      const sorted = [...logs].sort((a, b) => new Date(a.date!).getTime() - new Date(b.date!).getTime());
+      const lines = sorted.map(l => {
+        const d = new Date(l.date!);
+        const dl = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`;
+        return `${dl}: ${l.weight.toFixed(1)} кг`;
+      });
+      const first = sorted[0].weight, last = sorted[sorted.length - 1].weight;
+      const delta = last - first;
+      const deltaStr = (delta > 0 ? '+' : '') + delta.toFixed(1) + ' кг';
+      const trend = delta < -0.1 ? '📉' : delta > 0.1 ? '📈' : '➡️';
+      bot.sendMessage(chatId, `⚖️ История веса:\n\n${lines.join('\n')}\n\n${trend} Изменение: ${deltaStr}`, {
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '📊 Недельный анализ', callback_data: 'weight_analysis' },
+            { text: '⏰ Напоминание', callback_data: 'weight_reminder_setup' }
+          ]]
+        }
+      });
+    }
+  });
+
+  // ─── /weightreminder ──────────────────────────────────────────────────────
+  bot.onText(/\/weightreminder/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from?.id.toString();
+    if (!telegramId) return;
+    const user = await isUserAllowed(chatId, telegramId);
+    if (!user) return;
+    sendWeightReminderSetup(chatId, user);
+  });
+
+  function sendWeightReminderSetup(chatId: number, user: User) {
+    const t = user.weightReminderTime || 'off';
+    const days = user.weightReminderDays ? user.weightReminderDays.split(',').filter(Boolean).map(Number) : [];
+    const DAY_NAMES = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+    const daysStr = days.length > 0 ? days.map(d => DAY_NAMES[d]).join(', ') : 'все дни';
+    const timeStr = t === 'off' ? 'выкл' : t;
+    bot.sendMessage(chatId,
+      `⚖️ Напоминание взвеситься:\nВремя: ${timeStr}\nДни: ${daysStr}\n\nВыберите время:`, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '07:00', callback_data: 'wrem_t_07:00' }, { text: '08:00', callback_data: 'wrem_t_08:00' }, { text: '09:00', callback_data: 'wrem_t_09:00' }],
+          [{ text: 'Своё время', callback_data: 'wrem_t_custom' }, { text: 'Выкл', callback_data: 'wrem_t_off' }],
+          [{ text: '━━ Дни недели ━━', callback_data: 'wrem_ignore' }],
+          [
+            { text: `Пн${days.includes(1) ? '✓' : ''}`, callback_data: 'wrem_d_1' },
+            { text: `Вт${days.includes(2) ? '✓' : ''}`, callback_data: 'wrem_d_2' },
+            { text: `Ср${days.includes(3) ? '✓' : ''}`, callback_data: 'wrem_d_3' },
+            { text: `Чт${days.includes(4) ? '✓' : ''}`, callback_data: 'wrem_d_4' },
+          ],
+          [
+            { text: `Пт${days.includes(5) ? '✓' : ''}`, callback_data: 'wrem_d_5' },
+            { text: `Сб${days.includes(6) ? '✓' : ''}`, callback_data: 'wrem_d_6' },
+            { text: `Вс${days.includes(0) ? '✓' : ''}`, callback_data: 'wrem_d_0' },
+            { text: 'Каждый день', callback_data: 'wrem_d_all' },
+          ]
+        ]
+      }
+    });
+  }
+
+  // ─── /editprofile ─────────────────────────────────────────────────────────
+  bot.onText(/\/editprofile/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from?.id.toString();
+    if (!telegramId) return;
+    const user = await isUserAllowed(chatId, telegramId);
+    if (!user) return;
+
+    const ACT_LABEL: Record<string, string> = {
+      sedentary: 'Сидячий', light: 'Лёгкая', moderate: 'Умеренная', active: 'Активный', very_active: 'Очень активный'
+    };
+    const GOAL_LABEL: Record<string, string> = { lose: 'Похудение', maintain: 'Поддержание', gain: 'Набор' };
+
+    bot.sendMessage(chatId,
+      `Редактирование профиля:\n\nВозраст: ${user.age ?? '—'}\nВес: ${user.weight ?? '—'} кг\nРост: ${user.height ?? '—'} см\nАктивность: ${user.activityLevel ? ACT_LABEL[user.activityLevel] : '—'}\nЦель: ${user.goal ? GOAL_LABEL[user.goal] : '—'}\nНорма калорий: ${user.caloriesGoal ?? '—'}\n\nЧто изменить?`, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: `🎂 Возраст (${user.age ?? '—'})`, callback_data: 'ep_age' }, { text: `⚖️ Вес (${user.weight ?? '—'} кг)`, callback_data: 'ep_weight' }],
+          [{ text: `📏 Рост (${user.height ?? '—'} см)`, callback_data: 'ep_height' }, { text: `⚡ Активность`, callback_data: 'ep_activity' }],
+          [{ text: `🎯 Цель`, callback_data: 'ep_goal' }, { text: `🔥 Калории вручную`, callback_data: 'ep_calories' }],
+          [{ text: '♻️ Пересчитать нормы', callback_data: 'ep_recalc' }]
+        ]
+      }
+    });
+  });
+
+  // ─── /month ───────────────────────────────────────────────────────────────
+  bot.onText(/\/month/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from?.id.toString();
+    if (!telegramId) return;
+    const user = await isUserAllowed(chatId, telegramId);
+    if (!user) return;
+
+    bot.sendMessage(chatId, "Собираю статистику за месяц...");
+    const weeks = await storage.getMonthlyStats(user.id);
+
+    const totalDays = weeks.reduce((s, w) => s + w.days, 0);
+    if (totalDays === 0) {
+      bot.sendMessage(chatId, "Нет данных за последний месяц. Начни записывать еду!");
+      return;
+    }
+
+    const overall = weeks.filter(w => w.days > 0);
+    const avgCal = Math.round(overall.reduce((s, w) => s + w.calories, 0) / overall.length);
+    const avgProt = Math.round(overall.reduce((s, w) => s + w.protein, 0) / overall.length);
+    const avgFat = Math.round(overall.reduce((s, w) => s + w.fat, 0) / overall.length);
+    const avgCarbs = Math.round(overall.reduce((s, w) => s + w.carbs, 0) / overall.length);
+
+    const goalCalMsg = user.caloriesGoal
+      ? (avgCal >= user.caloriesGoal * 0.9 && avgCal <= user.caloriesGoal * 1.1
+        ? '✅ В норме' : avgCal < user.caloriesGoal * 0.9 ? '⬇️ Ниже нормы' : '⬆️ Выше нормы')
+      : '';
+
+    const weekLines = weeks.map(w =>
+      w.days === 0
+        ? `📅 ${w.weekLabel}: нет данных`
+        : `📅 ${w.weekLabel} (${w.days}д): ${w.calories} ккал | Б${w.protein} Ж${w.fat} У${w.carbs}`
+    ).join('\n');
+
+    const msg2 = [
+      `📅 Статистика за месяц:\n`,
+      weekLines,
+      `\n📊 В среднем в день:`,
+      `Калории: ${avgCal} ккал ${goalCalMsg}`,
+      `Белки: ${avgProt}г | Жиры: ${avgFat}г | Углеводы: ${avgCarbs}г`,
+      `\n📆 Дней залогировано: ${totalDays} из 28`,
+      user.caloriesGoal ? `🎯 Ваша норма: ${user.caloriesGoal} ккал` : '',
+    ].filter(Boolean).join('\n');
+
+    bot.sendMessage(chatId, msg2, {
+      reply_markup: {
+        inline_keyboard: [[{ text: '📄 Скачать PDF-отчёт', callback_data: 'generate_pdf' }]]
+      }
+    });
+  });
+
+  // ─── /pdf ─────────────────────────────────────────────────────────────────
+  bot.onText(/\/pdf/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from?.id.toString();
+    if (!telegramId) return;
+    const user = await isUserAllowed(chatId, telegramId);
+    if (!user) return;
+    await sendPDFReport(chatId, user);
+  });
+
+  async function sendPDFReport(chatId: number, user: User) {
+    bot.sendMessage(chatId, "Генерирую PDF-отчёт...");
+    try {
+      const today = new Date();
+      const monthStart = new Date(today); monthStart.setDate(today.getDate() - 27); monthStart.setHours(0, 0, 0, 0);
+      monthStart.setHours(0, 0, 0, 0);
+
+      const [weeklyStats, dailyStats, allLogs, weightLogs] = await Promise.all([
+        storage.getMonthlyStats(user.id),
+        storage.getWeeklyFullStats(user.id),
+        storage.getFoodLogsInRange(user.id, monthStart, today),
+        storage.getWeightLogs(user.id, 30),
+      ]);
+
+      const sortedWeightLogs = [...weightLogs].sort((a, b) => new Date(a.date!).getTime() - new Date(b.date!).getTime());
+      const topFoods = extractTopFoods(allLogs);
+      const pdfBuffer = generateMonthlyPDF(user, weeklyStats, dailyStats, sortedWeightLogs, topFoods);
+
+      const monthName = today.toLocaleString('ru-RU', { month: 'long', year: 'numeric' });
+      await bot.sendDocument(chatId, pdfBuffer, {
+        caption: `📄 Отчёт о питании — ${monthName}`
+      }, {
+        filename: `nutrition_report_${today.toISOString().slice(0, 7)}.pdf`,
+        contentType: 'application/pdf'
+      });
+    } catch (err) {
+      console.error("PDF generation error:", err);
+      bot.sendMessage(chatId, "Не удалось сгенерировать отчёт. Попробуйте позже.");
+    }
+  }
+
   async function sendEveningReport(user: User, manual = false) {
     const today = new Date();
     const stats = await storage.getDailyStats(user.id, today);
@@ -705,6 +934,26 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
             }
           } catch (e) {
             console.error(`Failed to send no-log reminder to user ${user.id}:`, e);
+          }
+        }
+      }
+
+      // Weight reminder: fires on matching time + allowed day of week
+      if (user.weightReminderTime && user.weightReminderTime !== 'off' && user.weightReminderTime === currentTime) {
+        const todayDow = msk.getDay(); // 0=Sun,1=Mon,...,6=Sat
+        const allowedDays = user.weightReminderDays
+          ? user.weightReminderDays.split(',').filter(Boolean).map(Number)
+          : [];
+        const dayOk = allowedDays.length === 0 || allowedDays.includes(todayDow);
+        if (dayOk) {
+          const key = `${user.id}_weight_${todayKey}`;
+          if (!reminderSentKeys.has(key)) {
+            reminderSentKeys.add(key);
+            try {
+              bot.sendMessage(user.telegramId!, `⚖️ Время взвеситься! Запишите вес: /weight 75.0`);
+            } catch (e) {
+              console.error(`Failed to send weight reminder to user ${user.id}:`, e);
+            }
           }
         }
       }
@@ -1199,6 +1448,137 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
         `✅ Цель изменена: ${goalLabelMap[goalKey]}\n\nНормы на день:\nКкал: ${recalculated.caloriesGoal}\nБелки: ${recalculated.proteinGoal}г\nЖиры: ${recalculated.fatGoal}г\nУглеводы: ${recalculated.carbsGoal}г`,
         { chat_id: chatId, message_id: query.message?.message_id }
       );
+
+    // ─── Weight analysis ────────────────────────────────────────────────────
+    } else if (query.data === 'weight_analysis') {
+      bot.answerCallbackQuery(query.id, { text: 'Анализирую...' });
+      const wLogs = await storage.getWeightLogs(user.id, 7);
+      const weekStats = await storage.getWeeklyFullStats(user.id);
+      if (wLogs.length < 2) {
+        bot.sendMessage(chatId, "Нужно хотя бы 2 замера веса для анализа. Записывайте вес командой /weight 75.0");
+        return;
+      }
+      const analysis = await generateWeightAnalysis(wLogs, weekStats, user);
+      if (analysis) {
+        bot.sendMessage(chatId, `📊 Анализ веса за неделю:\n\n${analysis}`);
+      } else {
+        bot.sendMessage(chatId, "Не удалось сформировать анализ. Попробуйте позже.");
+      }
+
+    } else if (query.data === 'weight_reminder_setup') {
+      const freshUser = await storage.getUser(user.id);
+      if (freshUser) sendWeightReminderSetup(chatId, freshUser);
+
+    // ─── Weight reminder time ───────────────────────────────────────────────
+    } else if (query.data.startsWith('wrem_t_')) {
+      const val = query.data.replace('wrem_t_', '');
+      if (val === 'custom') {
+        userStates[telegramId] = { step: 'weight_reminder_time', data: {} };
+        bot.editMessageText('Введите время в формате ЧЧ:ММ, например: 07:30', {
+          chat_id: chatId, message_id: query.message?.message_id
+        });
+      } else {
+        await storage.updateUser(user.id, { weightReminderTime: val });
+        const label = val === 'off' ? 'выкл' : val;
+        bot.editMessageText(`⚖️ Напоминание взвеситься: ${label}`, {
+          chat_id: chatId, message_id: query.message?.message_id
+        });
+      }
+
+    // ─── Weight reminder days ───────────────────────────────────────────────
+    } else if (query.data === 'wrem_ignore') {
+      bot.answerCallbackQuery(query.id);
+
+    } else if (query.data === 'wrem_d_all') {
+      await storage.updateUser(user.id, { weightReminderDays: '' });
+      const freshUser = await storage.getUser(user.id);
+      if (freshUser) {
+        bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: query.message?.message_id });
+        bot.sendMessage(chatId, '✅ Напоминание будет каждый день');
+      }
+
+    } else if (query.data.startsWith('wrem_d_')) {
+      const dayStr = query.data.replace('wrem_d_', '');
+      const day = parseInt(dayStr);
+      const freshUser = await storage.getUser(user.id);
+      if (!freshUser) return;
+      const days = freshUser.weightReminderDays ? freshUser.weightReminderDays.split(',').filter(Boolean).map(Number) : [];
+      const idx = days.indexOf(day);
+      if (idx >= 0) days.splice(idx, 1); else days.push(day);
+      await storage.updateUser(user.id, { weightReminderDays: days.sort().join(',') });
+      const updated = await storage.getUser(user.id);
+      if (updated) sendWeightReminderSetup(chatId, updated);
+
+    // ─── Generate PDF ───────────────────────────────────────────────────────
+    } else if (query.data === 'generate_pdf') {
+      bot.answerCallbackQuery(query.id, { text: 'Генерирую PDF...' });
+      await sendPDFReport(chatId, user);
+
+    // ─── Edit Profile ───────────────────────────────────────────────────────
+    } else if (query.data.startsWith('ep_')) {
+      const field = query.data.replace('ep_', '');
+
+      if (field === 'age') {
+        userStates[telegramId] = { step: 'ep_age', data: {} };
+        bot.editMessageText('Введите ваш возраст (лет):', { chat_id: chatId, message_id: query.message?.message_id });
+
+      } else if (field === 'weight') {
+        userStates[telegramId] = { step: 'ep_weight', data: {} };
+        bot.editMessageText('Введите ваш текущий вес (кг), например: 74.5', { chat_id: chatId, message_id: query.message?.message_id });
+
+      } else if (field === 'height') {
+        userStates[telegramId] = { step: 'ep_height', data: {} };
+        bot.editMessageText('Введите ваш рост (см), например: 178', { chat_id: chatId, message_id: query.message?.message_id });
+
+      } else if (field === 'calories') {
+        userStates[telegramId] = { step: 'ep_calories', data: {} };
+        bot.editMessageText(`Текущая норма: ${user.caloriesGoal ?? 'не задана'} ккал\n\nВведите новую норму калорий (ккал):`, { chat_id: chatId, message_id: query.message?.message_id });
+
+      } else if (field === 'recalc') {
+        const updated = await storage.calculateAndSetGoals(user.id);
+        bot.editMessageText(`✅ Нормы пересчитаны:\nКкал: ${updated.caloriesGoal}\nБелки: ${updated.proteinGoal}г\nЖиры: ${updated.fatGoal}г\nУглеводы: ${updated.carbsGoal}г`, { chat_id: chatId, message_id: query.message?.message_id });
+
+      } else if (field === 'activity') {
+        bot.editMessageText('Выберите уровень активности:', {
+          chat_id: chatId, message_id: query.message?.message_id,
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🛋 Сидячий образ жизни', callback_data: 'ep_act_sedentary' }],
+              [{ text: '🚶 Лёгкая активность', callback_data: 'ep_act_light' }],
+              [{ text: '🏃 Умеренная активность', callback_data: 'ep_act_moderate' }],
+              [{ text: '🏋️ Высокая активность', callback_data: 'ep_act_active' }],
+              [{ text: '⚡ Очень высокая активность', callback_data: 'ep_act_very_active' }],
+            ]
+          }
+        });
+
+      } else if (field === 'goal') {
+        bot.editMessageText('Выберите цель:', {
+          chat_id: chatId, message_id: query.message?.message_id,
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔥 Похудение', callback_data: 'ep_goal_lose' }],
+              [{ text: '⚖️ Поддержание веса', callback_data: 'ep_goal_maintain' }],
+              [{ text: '💪 Набор массы', callback_data: 'ep_goal_gain' }],
+            ]
+          }
+        });
+      }
+
+    } else if (query.data.startsWith('ep_act_')) {
+      const activity = query.data.replace('ep_act_', '');
+      await storage.updateUser(user.id, { activityLevel: activity });
+      const updated = await storage.calculateAndSetGoals(user.id);
+      const ACT_LABEL: Record<string, string> = { sedentary: 'Сидячий', light: 'Лёгкая', moderate: 'Умеренная', active: 'Активный', very_active: 'Очень активный' };
+      bot.editMessageText(`✅ Активность: ${ACT_LABEL[activity]}\n\nНормы пересчитаны:\nКкал: ${updated.caloriesGoal} | Б${updated.proteinGoal}г Ж${updated.fatGoal}г У${updated.carbsGoal}г`, { chat_id: chatId, message_id: query.message?.message_id });
+
+    } else if (query.data.startsWith('ep_goal_')) {
+      const goal = query.data.replace('ep_goal_', '');
+      await storage.updateUser(user.id, { goal });
+      const updated = await storage.calculateAndSetGoals(user.id);
+      const GOAL_LABEL: Record<string, string> = { lose: 'Похудение', maintain: 'Поддержание', gain: 'Набор массы' };
+      bot.editMessageText(`✅ Цель: ${GOAL_LABEL[goal]}\n\nНормы пересчитаны:\nКкал: ${updated.caloriesGoal} | Б${updated.proteinGoal}г Ж${updated.fatGoal}г У${updated.carbsGoal}г`, { chat_id: chatId, message_id: query.message?.message_id });
+
     } else if (query.data.startsWith("admin_approve_")) {
       if (!user.isAdmin) return;
       const targetUserId = parseInt(query.data.split("_")[2]);
@@ -1290,6 +1670,81 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
           }
         }
         bot.sendMessage(chatId, "Неверный формат. Введите время в формате ЧЧ:ММ, например: 13:30");
+        return;
+      }
+
+      if (state.step === 'weight_reminder_time') {
+        const timeMatch = (msg.text || '').trim().match(/^(\d{1,2}):(\d{2})$/);
+        if (timeMatch) {
+          const h = parseInt(timeMatch[1]);
+          const m = parseInt(timeMatch[2]);
+          if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+            const time = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+            await storage.updateUser(user.id, { weightReminderTime: time });
+            delete userStates[telegramId];
+            bot.sendMessage(chatId, `⚖️ Напоминание взвеситься: ${time}`);
+            return;
+          }
+        }
+        bot.sendMessage(chatId, "Неверный формат. Введите время в формате ЧЧ:ММ, например: 08:00");
+        return;
+      }
+
+      if (state.step === 'ep_age') {
+        const v = parseInt(msg.text || '');
+        if (isNaN(v) || v < 10 || v > 100) {
+          bot.sendMessage(chatId, "Введите корректный возраст (10–100):");
+          return;
+        }
+        await storage.updateUser(user.id, { age: v });
+        await storage.calculateAndSetGoals(user.id);
+        delete userStates[telegramId];
+        bot.sendMessage(chatId, `✅ Возраст обновлён: ${v} лет. Нормы пересчитаны.`);
+        return;
+      }
+
+      if (state.step === 'ep_weight') {
+        const v = parseFloat((msg.text || '').replace(',', '.'));
+        if (isNaN(v) || v < 20 || v > 500) {
+          bot.sendMessage(chatId, "Введите корректный вес (кг), например: 74.5");
+          return;
+        }
+        await storage.updateUser(user.id, { weight: Math.round(v) });
+        await storage.logWeight(user.id, Math.round(v * 10) / 10);
+        await storage.calculateAndSetGoals(user.id);
+        delete userStates[telegramId];
+        bot.sendMessage(chatId, `✅ Вес обновлён: ${v.toFixed(1)} кг. Нормы пересчитаны.`);
+        return;
+      }
+
+      if (state.step === 'ep_height') {
+        const v = parseInt(msg.text || '');
+        if (isNaN(v) || v < 100 || v > 250) {
+          bot.sendMessage(chatId, "Введите корректный рост (100–250 см):");
+          return;
+        }
+        await storage.updateUser(user.id, { height: v });
+        await storage.calculateAndSetGoals(user.id);
+        delete userStates[telegramId];
+        bot.sendMessage(chatId, `✅ Рост обновлён: ${v} см. Нормы пересчитаны.`);
+        return;
+      }
+
+      if (state.step === 'ep_calories') {
+        const v = parseInt(msg.text || '');
+        if (isNaN(v) || v < 500 || v > 10000) {
+          bot.sendMessage(chatId, "Введите корректную норму (500–10000 ккал):");
+          return;
+        }
+        const ratio = user.caloriesGoal && user.caloriesGoal > 0 ? v / user.caloriesGoal : 1;
+        await storage.updateUser(user.id, {
+          caloriesGoal: v,
+          proteinGoal: user.proteinGoal ? Math.round(user.proteinGoal * ratio) : Math.round((v * 0.3) / 4),
+          fatGoal: user.fatGoal ? Math.round(user.fatGoal * ratio) : Math.round((v * 0.3) / 9),
+          carbsGoal: user.carbsGoal ? Math.round(user.carbsGoal * ratio) : Math.round((v * 0.4) / 4),
+        });
+        delete userStates[telegramId];
+        bot.sendMessage(chatId, `✅ Норма калорий установлена: ${v} ккал.`);
         return;
       }
 

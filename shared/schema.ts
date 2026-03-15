@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, timestamp, date } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, real } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
@@ -11,7 +11,7 @@ export const users = pgTable("users", {
   isAdmin: boolean("is_admin").default(false),
   age: integer("age"),
   gender: text("gender"), // male, female
-  weight: integer("weight"), // in kg
+  weight: integer("weight"), // in kg (profile weight, updated when logging)
   height: integer("height"), // in cm
   activityLevel: text("activity_level"), // sedentary, light, moderate, active, very_active
   goal: text("goal"), // lose, maintain, gain
@@ -24,6 +24,8 @@ export const users = pgTable("users", {
   lunchReminder: text("lunch_reminder").default("off"),
   dinnerReminder: text("dinner_reminder").default("off"),
   noLogReminderTime: text("no_log_reminder_time").default("off"),
+  weightReminderTime: text("weight_reminder_time").default("off"),
+  weightReminderDays: text("weight_reminder_days").default(""), // "1,3,5" = Mon,Wed,Fri (JS getDay: 0=Sun)
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -49,28 +51,35 @@ export const waterLogs = pgTable("water_logs", {
   date: timestamp("date").defaultNow(),
 });
 
+export const weightLogs = pgTable("weight_logs", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id),
+  weight: real("weight").notNull(), // in kg, e.g. 85.3
+  date: timestamp("date").defaultNow(),
+});
+
 export const usersRelations = relations(users, ({ many }) => ({
   logs: many(foodLogs),
   waterLogs: many(waterLogs),
+  weightLogs: many(weightLogs),
 }));
 
 export const foodLogsRelations = relations(foodLogs, ({ one }) => ({
-  user: one(users, {
-    fields: [foodLogs.userId],
-    references: [users.id],
-  }),
+  user: one(users, { fields: [foodLogs.userId], references: [users.id] }),
 }));
 
 export const waterLogsRelations = relations(waterLogs, ({ one }) => ({
-  user: one(users, {
-    fields: [waterLogs.userId],
-    references: [users.id],
-  }),
+  user: one(users, { fields: [waterLogs.userId], references: [users.id] }),
+}));
+
+export const weightLogsRelations = relations(weightLogs, ({ one }) => ({
+  user: one(users, { fields: [weightLogs.userId], references: [users.id] }),
 }));
 
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true });
 export const insertFoodLogSchema = createInsertSchema(foodLogs).omit({ id: true, date: true });
 export const insertWaterLogSchema = createInsertSchema(waterLogs).omit({ id: true, date: true });
+export const insertWeightLogSchema = createInsertSchema(weightLogs).omit({ id: true, date: true });
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -78,6 +87,8 @@ export type FoodLog = typeof foodLogs.$inferSelect;
 export type InsertFoodLog = z.infer<typeof insertFoodLogSchema>;
 export type WaterLog = typeof waterLogs.$inferSelect;
 export type InsertWaterLog = z.infer<typeof insertWaterLogSchema>;
+export type WeightLog = typeof weightLogs.$inferSelect;
+export type InsertWeightLog = z.infer<typeof insertWeightLogSchema>;
 
 export type CreateFoodLogRequest = InsertFoodLog;
 export type StatsResponse = {
@@ -85,5 +96,5 @@ export type StatsResponse = {
   dailyProtein: number;
   dailyFat: number;
   dailyCarbs: number;
-  weeklyCalories: number[]; // Last 7 days
+  weeklyCalories: number[];
 };

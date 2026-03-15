@@ -209,6 +209,50 @@ export async function askCoach(
   }
 }
 
+export async function generateWeightAnalysis(
+  weightLogs: { weight: number; date: Date | null }[],
+  weeklyStats: { dayLabel: string; calories: number; protein: number; fat: number; carbs: number }[],
+  profile: { caloriesGoal?: number | null; goal?: string | null; weight?: number | null }
+): Promise<string | null> {
+  try {
+    const sorted = [...weightLogs].sort((a, b) => new Date(a.date!).getTime() - new Date(b.date!).getTime());
+    const weightLines = sorted.map(w => {
+      const d = new Date(w.date!);
+      return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}: ${w.weight.toFixed(1)} кг`;
+    }).join('\n');
+
+    const dietLines = weeklyStats.map(d =>
+      `${d.dayLabel}: ${d.calories} ккал, Б${d.protein}г, Ж${d.fat}г, У${d.carbs}г`
+    ).join('\n');
+
+    const goalMap: Record<string, string> = { lose: 'похудение', maintain: 'поддержание веса', gain: 'набор массы' };
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `Ты нутрициолог-аналитик. Проанализируй данные о весе и питании пользователя за неделю.
+Структура ответа (кратко, по-русски):
+1. Изменение веса: факт + оценка (нормально ли это для цели пользователя)
+2. Связь питания с весом: что повлияло (калораж, белок, дефицит/профицит)
+3. Рекомендация: что скорректировать на следующей неделе
+Пиши дружелюбно, конкретно, 4-6 предложений. Без воды.`
+        },
+        {
+          role: "user",
+          content: `Цель пользователя: ${goalMap[profile.goal ?? ''] ?? 'не указана'}\nНорма калорий: ${profile.caloriesGoal ?? 'не указана'} ккал/день\n\nДинамика веса:\n${weightLines || 'Нет данных'}\n\nРацион за неделю:\n${dietLines || 'Нет данных'}`
+        }
+      ]
+    });
+
+    return response.choices[0].message.content || null;
+  } catch (error) {
+    console.error("OpenAI Weight Analysis Error:", error);
+    return null;
+  }
+}
+
 export async function analyzeFoodImage(imageBase64: string) {
   try {
     const response = await openai.chat.completions.create({

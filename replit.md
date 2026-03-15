@@ -9,12 +9,15 @@ Fullstack nutrition tracking application centered around a Telegram bot. Users l
 - GPT-4o for photo/barcode analysis (vision), GPT-4o-mini for text/reports/coach, Whisper-1 for voice transcription
 - Multi-item recognition: one message → multiple food items, each editable before saving
 - Nutritional quality scoring (1–10) with personalized advice in Russian
-- Personal profile setup (age, weight, height, activity, goal) — auto-launches after /start if not filled
+- Personal profile setup + `/editprofile` for editing individual fields (age/weight/height/activity/goal/calories)
 - Mifflin-St Jeor calorie calculation, daily stats with progress bars
-- Streak tracking (consecutive days with food logged), `/week` weekly breakdown, `/goal` quick goal change
+- Streak tracking (consecutive days), `/week` weekly breakdown, `/goal` quick goal change
+- `/month` monthly stats with 4-week breakdown; `/pdf` PDF report with charts (pdfkit, hand-drawn bar charts)
+- Weight tracking: `/weight [kg]` to log, history with trend, AI weekly analysis (GPT-4o-mini)
+- Weight reminders: configurable time + days of week (Mon/Tue/.../all) — fires only if no weight logged that day
 - `/ask` AI coach command with full profile + today's food context
 - Barcode scanning via Open Food Facts API (GPT-4o detects barcode → Open Food Facts lookup)
-- Configurable meal reminders (breakfast/lunch/dinner) + no-log reminder if no entries by a set time
+- Meal reminders (breakfast/lunch/dinner) + no-log reminder if no entries by a set time
 - Evening AI-powered diet reports, Excel export, admin whitelist system
 
 ## User Preferences
@@ -55,10 +58,14 @@ Preferred communication style: Simple, everyday language.
 - Profile: age, gender, weight (kg), height (cm), activityLevel, goal
 - Computed: caloriesGoal, proteinGoal, fatGoal, carbsGoal
 - Notifications: reportTime, breakfastReminder, lunchReminder, dinnerReminder, noLogReminderTime
+- Weight reminders: weightReminderTime (HH:MM|off), weightReminderDays ("1,3,5" = Mon,Wed,Fri; "" = all days)
 
 **foodLogs** table:
 - userId (FK), foodName, calories, protein, fat, carbs, weight (g/ml), mealType
 - foodScore (1–10), nutritionAdvice, date
+
+**weightLogs** table:
+- userId (FK), weight (real, kg with decimals e.g. 85.3), date
 
 ### Build System
 
