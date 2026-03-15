@@ -1,13 +1,9 @@
 import PDFDocument from "pdfkit";
 import path from "path";
-import { fileURLToPath } from "url";
-import { createRequire } from "module";
 import type { User, FoodLog, WeightLog } from "@shared/schema";
 
-const require = createRequire(import.meta.url);
-const FONT_PKG = path.dirname(require.resolve("dejavu-fonts-ttf/package.json"));
-const FONT_REGULAR = path.join(FONT_PKG, "ttf", "DejaVuSans.ttf");
-const FONT_BOLD = path.join(FONT_PKG, "ttf", "DejaVuSans-Bold.ttf");
+const FONT_REGULAR = path.join(process.cwd(), "node_modules", "dejavu-fonts-ttf", "ttf", "DejaVuSans.ttf");
+const FONT_BOLD = path.join(process.cwd(), "node_modules", "dejavu-fonts-ttf", "ttf", "DejaVuSans-Bold.ttf");
 
 interface WeekStat {
   weekLabel: string;
