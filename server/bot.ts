@@ -233,17 +233,30 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     const waterTotal = await storage.getDailyWater(user.id, today);
     const waterGoal = 2500;
     
-    let text = `Твоя статистика за сегодня:\n`;
-    text += `Ккал: ${stats.calories}${user.caloriesGoal ? ` / ${user.caloriesGoal}` : ''}\n`;
-    text += `Белки: ${stats.protein}г${user.proteinGoal ? ` / ${user.proteinGoal}г` : ''}\n`;
-    text += `Жиры: ${stats.fat}г${user.fatGoal ? ` / ${user.fatGoal}г` : ''}\n`;
-    text += `Углеводы: ${stats.carbs}г${user.carbsGoal ? ` / ${user.carbsGoal}г` : ''}`;
-    text += `\nВода: ${waterTotal}мл / ${waterGoal}мл`;
+    function progressBar(current: number, goal: number, length = 10): string {
+      const ratio = Math.min(current / goal, 1);
+      const filled = Math.round(ratio * length);
+      const empty = length - filled;
+      const bar = '█'.repeat(filled) + '░'.repeat(empty);
+      const percent = Math.round(ratio * 100);
+      return `[${bar}] ${percent}%`;
+    }
+
+    let text = `📊 Статистика за сегодня\n\n`;
 
     if (user.caloriesGoal) {
-      const percent = Math.round((stats.calories / user.caloriesGoal) * 100);
-      text += `\n\nПрогресс по калориям: ${percent}%`;
+      text += `🔥 Калории: ${stats.calories} / ${user.caloriesGoal} ккал\n`;
+      text += `${progressBar(stats.calories, user.caloriesGoal)}\n\n`;
+    } else {
+      text += `🔥 Калории: ${stats.calories} ккал\n\n`;
     }
+
+    text += `💪 Белки:    ${stats.protein}г${user.proteinGoal ? ` / ${user.proteinGoal}г` : ''}\n`;
+    text += `🧈 Жиры:     ${stats.fat}г${user.fatGoal ? ` / ${user.fatGoal}г` : ''}\n`;
+    text += `🍞 Углеводы: ${stats.carbs}г${user.carbsGoal ? ` / ${user.carbsGoal}г` : ''}\n\n`;
+
+    text += `💧 Вода: ${waterTotal} / ${waterGoal} мл\n`;
+    text += `${progressBar(waterTotal, waterGoal)}`;
 
     bot.sendMessage(chatId, text);
   });
