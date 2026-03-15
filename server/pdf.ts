@@ -1,5 +1,10 @@
 import PDFDocument from "pdfkit";
+import path from "path";
 import type { User, FoodLog, WeightLog } from "@shared/schema";
+
+const FONT_DIR = path.join(__dirname, "fonts");
+const FONT_REGULAR = path.join(FONT_DIR, "DejaVuSans.ttf");
+const FONT_BOLD = path.join(FONT_DIR, "DejaVuSans-Bold.ttf");
 
 interface WeekStat {
   weekLabel: string;
@@ -33,6 +38,10 @@ export function generateMonthlyPDF(
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
+    // Register fonts
+    doc.registerFont("Regular", FONT_REGULAR);
+    doc.registerFont("Bold", FONT_BOLD);
+
     // ── Colors ────────────────────────────────────────────────────
     const PRIMARY = "#2D6A4F";
     const ACCENT = "#52B788";
@@ -44,14 +53,14 @@ export function generateMonthlyPDF(
 
     // ── Header ────────────────────────────────────────────────────
     doc.rect(0, 0, 595, 160).fill(PRIMARY);
-    doc.fillColor("white").font("Helvetica-Bold").fontSize(28)
-      .text("Отчёт о питании", 50, 50, { align: "center", width: W });
+    doc.fillColor("white").font("Bold").fontSize(24)
+      .text("Отчёт о питании", 50, 52, { align: "center", width: W });
 
     const monthName = new Date().toLocaleString("ru-RU", { month: "long", year: "numeric" });
-    doc.fontSize(14).font("Helvetica")
-      .text(monthName.charAt(0).toUpperCase() + monthName.slice(1), 50, 90, { align: "center", width: W });
+    doc.fontSize(13).font("Regular")
+      .text(monthName.charAt(0).toUpperCase() + monthName.slice(1), 50, 88, { align: "center", width: W });
     if (user.username) {
-      doc.fontSize(12).text(`@${user.username}`, 50, 115, { align: "center", width: W });
+      doc.fontSize(11).text(`@${user.username}`, 50, 114, { align: "center", width: W });
     }
 
     // ── Summary boxes ─────────────────────────────────────────────
@@ -72,10 +81,10 @@ export function generateMonthlyPDF(
     boxes.forEach((b, i) => {
       const x = 50 + i * (boxW + 10);
       doc.rect(x, 175, boxW, 70).fillAndStroke(LIGHT, ACCENT);
-      doc.fillColor(PRIMARY).font("Helvetica-Bold").fontSize(20)
-        .text(b.value, x, 188, { width: boxW, align: "center" });
-      doc.fillColor(GRAY).font("Helvetica").fontSize(9)
-        .text(b.label, x, 210, { width: boxW, align: "center" });
+      doc.fillColor(PRIMARY).font("Bold").fontSize(19)
+        .text(b.value, x, 189, { width: boxW, align: "center" });
+      doc.fillColor(GRAY).font("Regular").fontSize(8)
+        .text(b.label, x, 211, { width: boxW, align: "center" });
     });
 
     let y = 265;
@@ -87,10 +96,10 @@ export function generateMonthlyPDF(
 
     const sectionTitle = (title: string) => {
       ensureSpace(40);
-      doc.rect(50, y, W, 28).fill(PRIMARY);
-      doc.fillColor("white").font("Helvetica-Bold").fontSize(13)
-        .text(title, 58, y + 8, { width: W - 10 });
-      y += 38;
+      doc.rect(50, y, W, 26).fill(PRIMARY);
+      doc.fillColor("white").font("Bold").fontSize(12)
+        .text(title, 58, y + 7, { width: W - 10 });
+      y += 34;
     };
 
     const drawBarChart = (
@@ -113,10 +122,10 @@ export function generateMonthlyPDF(
         doc.rect(bx, by, barW, bh).fill(barColor);
 
         if (item.value > 0) {
-          doc.fillColor(DARK).font("Helvetica").fontSize(7)
+          doc.fillColor(DARK).font("Regular").fontSize(7)
             .text(String(item.value), bx - 2, by - 11, { width: barW + 4, align: "center" });
         }
-        doc.fillColor(GRAY).font("Helvetica").fontSize(7)
+        doc.fillColor(GRAY).font("Regular").fontSize(7)
           .text(item.label, bx - 4, y + chartH + 4, { width: barW + 8, align: "center" });
       });
 
@@ -132,7 +141,7 @@ export function generateMonthlyPDF(
       maxWeekCal, ACCENT, 110
     );
     if (user.caloriesGoal) {
-      doc.fillColor(GRAY).font("Helvetica").fontSize(9)
+      doc.fillColor(GRAY).font("Regular").fontSize(9)
         .text(`Цель: ${user.caloriesGoal} ккал/день`, 50, y - 18, { align: "right", width: W });
     }
 
@@ -146,7 +155,7 @@ export function generateMonthlyPDF(
     let tx = 50;
     doc.rect(50, y, W, 20).fill(PRIMARY);
     cols.forEach(c => {
-      doc.fillColor("white").font("Helvetica-Bold").fontSize(9)
+      doc.fillColor("white").font("Bold").fontSize(8)
         .text(c.label, tx + 4, y + 6, { width: c.w - 4 });
       tx += c.w;
     });
@@ -158,7 +167,7 @@ export function generateMonthlyPDF(
       const row = [wk.weekLabel, String(wk.days), String(wk.calories), String(wk.protein), String(wk.fat), String(wk.carbs)];
       let rx = 50;
       row.forEach((cell, ci) => {
-        doc.fillColor(DARK).font("Helvetica").fontSize(9)
+        doc.fillColor(DARK).font("Regular").fontSize(8)
           .text(cell, rx + 4, y + 5, { width: cols[ci].w - 4 });
         rx += cols[ci].w;
       });
@@ -190,33 +199,33 @@ export function generateMonthlyPDF(
         const gy = y + chartH - (g / 4) * chartH;
         const gv = minW + (g / 4) * (maxW - minW);
         doc.moveTo(50, gy).lineTo(50 + W, gy).strokeColor(LIGHT).lineWidth(0.5).stroke();
-        doc.fillColor(GRAY).font("Helvetica").fontSize(7)
+        doc.fillColor(GRAY).font("Regular").fontSize(7)
           .text(gv.toFixed(1), 16, gy - 4, { width: 30, align: "right" });
       }
 
       const points = sorted.map((l, i) => ({
         x: 50 + (i / Math.max(sorted.length - 1, 1)) * W,
-        y: y + chartH - ((l.weight - minW) / Math.max(maxW - minW, 0.1)) * chartH,
+        yp: y + chartH - ((l.weight - minW) / Math.max(maxW - minW, 0.1)) * chartH,
       }));
 
       doc.strokeColor(PRIMARY).lineWidth(2);
-      points.forEach((p, i) => { if (i === 0) doc.moveTo(p.x, p.y); else doc.lineTo(p.x, p.y); });
+      points.forEach((p, i) => { if (i === 0) doc.moveTo(p.x, p.yp); else doc.lineTo(p.x, p.yp); });
       doc.stroke();
 
       points.forEach((p, i) => {
-        doc.circle(p.x, p.y, 3).fill(ACCENT);
+        doc.circle(p.x, p.yp, 3).fill(ACCENT);
         const d = new Date(sorted[i].date!);
         const dl = `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`;
-        doc.fillColor(GRAY).font("Helvetica").fontSize(7)
+        doc.fillColor(GRAY).font("Regular").fontSize(7)
           .text(dl, p.x - 13, y + chartH + 5, { width: 28, align: "center" });
         doc.fillColor(DARK).fontSize(7)
-          .text(sorted[i].weight.toFixed(1), p.x - 13, p.y - 14, { width: 28, align: "center" });
+          .text(sorted[i].weight.toFixed(1), p.x - 13, p.yp - 14, { width: 28, align: "center" });
       });
 
       const delta = sorted[sorted.length - 1].weight - sorted[0].weight;
       const deltaStr = (delta > 0 ? "+" : "") + delta.toFixed(1) + " кг";
       const deltaColor = delta > 0 ? "#EF4444" : "#22C55E";
-      doc.fillColor(deltaColor).font("Helvetica-Bold").fontSize(12)
+      doc.fillColor(deltaColor).font("Bold").fontSize(12)
         .text(`Изменение за период: ${deltaStr}`, 50, y + chartH + 22, { align: "center", width: W });
       y += chartH + 42;
     }
@@ -227,9 +236,9 @@ export function generateMonthlyPDF(
       topFoods.slice(0, 8).forEach((f, i) => {
         ensureSpace(18);
         doc.rect(50, y, W, 18).fill(i % 2 === 0 ? BG : "white");
-        doc.fillColor(ACCENT).font("Helvetica-Bold").fontSize(10).text(`${i + 1}.`, 50, y + 4, { width: 22 });
-        doc.fillColor(DARK).font("Helvetica").fontSize(10).text(f.name, 72, y + 4, { width: W - 80 });
-        doc.fillColor(GRAY).fontSize(9).text(`×${f.count}`, 50 + W - 30, y + 4, { width: 30, align: "right" });
+        doc.fillColor(ACCENT).font("Bold").fontSize(9).text(`${i + 1}.`, 50, y + 5, { width: 22 });
+        doc.fillColor(DARK).font("Regular").fontSize(9).text(f.name, 72, y + 5, { width: W - 80 });
+        doc.fillColor(GRAY).fontSize(8).text(`×${f.count}`, 50 + W - 30, y + 5, { width: 30, align: "right" });
         y += 18;
       });
       y += 10;
@@ -255,7 +264,7 @@ export function generateMonthlyPDF(
 
     profileLines.forEach(line => {
       ensureSpace(16);
-      doc.fillColor(DARK).font("Helvetica").fontSize(10).text(line, 50, y, { width: W });
+      doc.fillColor(DARK).font("Regular").fontSize(10).text(line, 50, y, { width: W });
       y += 16;
     });
 
@@ -265,7 +274,7 @@ export function generateMonthlyPDF(
     for (let i = 0; i < pageCount; i++) {
       doc.switchToPage(i);
       doc.rect(50, 806, W, 0.5).fill(LIGHT);
-      doc.fillColor(GRAY).font("Helvetica").fontSize(8)
+      doc.fillColor(GRAY).font("Regular").fontSize(8)
         .text(
           `Calorie Tracker Bot  •  Страница ${i + 1} из ${pageCount}  •  ${new Date().toLocaleDateString("ru-RU")}`,
           50, 810, { align: "center", width: W }
