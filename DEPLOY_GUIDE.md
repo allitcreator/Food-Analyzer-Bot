@@ -1,13 +1,13 @@
-# Инструкция для переноса Calorie Tracker Bot на свою VM
+# Инструкция по переносу Calorie Tracker Bot на свою VPS
 
 ## Стек технологий
 
 - **Runtime:** Node.js 20+
 - **Язык:** TypeScript
-- **Серверная часть:** Express
+- **Сервер:** Express
 - **База данных:** PostgreSQL
 - **ORM:** Drizzle ORM
-- **AI:** OpenAI GPT-4o (фото), GPT-4o-mini (текст, отчёты)
+- **AI:** GPT-4o (фото), GPT-4o-mini (текст, отчёты), Whisper-1 (голос)
 - **Telegram:** node-telegram-bot-api
 - **Сборка:** Vite + esbuild
 
@@ -16,17 +16,17 @@
 ```
 ├── server/
 │   ├── index.ts          # Точка входа, Express сервер
-│   ├── bot.ts            # Telegram бот: команды, профиль, еда, вода, напоминания, отчёты
-│   ├── openai.ts         # OpenAI: анализ текста (4o-mini), фото (4o), вечерний отчёт (4o-mini)
-│   ├── storage.ts        # CRUD операции, расчёт КБЖУ (Mifflin-St Jeor)
+│   ├── bot.ts            # Telegram бот: команды, профиль, еда, голос, напоминания, отчёты
+│   ├── openai.ts         # OpenAI: GPT-4o (фото), GPT-4o-mini (текст/отчёты), Whisper (голос)
+│   ├── storage.ts        # CRUD, расчёт КБЖУ (Mifflin-St Jeor)
 │   ├── routes.ts         # API роуты + запуск бота
-│   ├── db.ts             # Подключение к PostgreSQL через Drizzle
-│   ├── vite.ts           # Dev-сервер Vite (только для разработки)
+│   ├── db.ts             # PostgreSQL через Drizzle ORM
+│   ├── vite.ts           # Dev-сервер Vite (только разработка)
 │   └── static.ts         # Раздача статики в продакшене
 ├── shared/
-│   └── schema.ts         # Drizzle схема БД (users, foodLogs, waterLogs)
-├── client/               # React фронтенд (страница статуса бота)
-├── drizzle.config.ts     # Конфигурация Drizzle Kit
+│   └── schema.ts         # Drizzle схема: users, foodLogs
+├── client/               # React фронтенд (страница статуса)
+├── drizzle.config.ts
 ├── package.json
 └── tsconfig.json
 ```
@@ -35,79 +35,69 @@
 
 ### 1. OpenAI клиент
 
-В файле `server/openai.ts` заменить инициализацию:
+В `server/openai.ts` сейчас два клиента:
 
 ```typescript
-// БЫЛО (Replit AI Integrations):
+// Для GPT-4o / GPT-4o-mini — через Replit-прокси:
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || "dummy",
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
 });
 
-// СТАЛО (стандартный OpenAI):
+// Для Whisper — прямой OpenAI (прокси не поддерживает audio API):
+const whisperClient = process.env.OPENAI_API_KEY
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  : null;
+```
+
+На VPS Replit-прокси недоступен. Заменить оба клиента на один:
+
+```typescript
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
+
+// whisperClient тоже использует тот же ключ:
+const whisperClient = openai;
 ```
 
-### 2. Режим бота — webhook через свой домен
+> Один ключ `OPENAI_API_KEY` даёт доступ ко всем моделям: GPT-4o, GPT-4o-mini и Whisper.
 
-В файле `server/bot.ts` заменить логику инициализации бота.
+### 2. Webhook вместо polling
 
-Сейчас бот использует `REPLIT_DEPLOYMENT_URL` для webhook. Нужно заменить на `WEBHOOK_URL`:
+В `server/bot.ts` заменить логику инициализации:
 
 ```typescript
-// БЫЛО:
+// БЫЛО (Replit):
 const REPLIT_DEPLOYMENT_URL = process.env.REPLIT_DEPLOYMENT_URL;
 const useWebhook = isProduction && !!REPLIT_DEPLOYMENT_URL && !!app;
 
-if (useWebhook) {
-  bot = new TelegramBot(token);
-  const webhookPath = `/api/telegram-webhook/${token}`;
-  const webhookUrl = `https://${REPLIT_DEPLOYMENT_URL}${webhookPath}`;
-  ...
-}
-
-// СТАЛО:
+// СТАЛО (VPS):
 const WEBHOOK_URL = process.env.WEBHOOK_URL; // например https://bot.example.com
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 const useWebhook = !!WEBHOOK_URL && !!app;
 
 if (useWebhook) {
   if (!WEBHOOK_SECRET) {
-    throw new Error("WEBHOOK_SECRET is required when WEBHOOK_URL is set. Generate one: openssl rand -hex 32");
+    throw new Error("WEBHOOK_SECRET required. Generate: openssl rand -hex 32");
   }
   bot = new TelegramBot(token);
-  // Используем секретный путь вместо токена — токен в URL это риск утечки через логи
   const webhookPath = `/api/telegram-webhook/${WEBHOOK_SECRET}`;
-  const webhookUrl = `${WEBHOOK_URL}${webhookPath}`;
-  bot.setWebHook(webhookUrl).then(() => {
-    console.log("Telegram webhook set successfully");
-  }).catch(err => {
-    console.error("Failed to set webhook:", err);
-  });
+  bot.setWebHook(`${WEBHOOK_URL}${webhookPath}`);
   app.post(webhookPath, (req, res) => {
     bot.processUpdate(req.body);
     res.sendStatus(200);
   });
 } else {
-  // Fallback на polling для локальной разработки
   bot = new TelegramBot(token, { polling: true });
-  console.log("Bot started in polling mode (no WEBHOOK_URL set)");
 }
 ```
 
-**Безопасность webhook:** путь использует `WEBHOOK_SECRET` вместо `TELEGRAM_BOT_TOKEN`. Токен в URL — риск утечки через логи Nginx/access.log. Если `WEBHOOK_SECRET` не задан при наличии `WEBHOOK_URL`, бот упадёт с ошибкой — это защита от забытой переменной в проде.
+> **Безопасность:** путь использует `WEBHOOK_SECRET`, а не `TELEGRAM_BOT_TOKEN`. Токен в URL попадёт в логи Nginx.
 
-Webhook-путь: `POST /api/telegram-webhook/{WEBHOOK_SECRET}`
+### 3. Nginx (reverse proxy + SSL)
 
-**Требования для webhook:**
-- Домен с HTTPS (Let's Encrypt через Certbot или Cloudflare)
-- Nginx как reverse proxy перед приложением
-
-### 3. Nginx конфигурация (reverse proxy + SSL)
-
-Создать файл `/etc/nginx/sites-available/bot`:
+`/etc/nginx/sites-available/bot`:
 
 ```nginx
 server {
@@ -123,10 +113,10 @@ server {
     ssl_certificate /etc/letsencrypt/live/bot.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/bot.example.com/privkey.pem;
 
-    # Telegram отправляет фото до 20 МБ
+    # Telegram может присылать фото до 20 МБ
     client_max_body_size 20M;
 
-    # Таймауты для обработки фото через OpenAI (может занять 10-30 сек)
+    # Таймауты для OpenAI (фото анализируется до 30 сек)
     proxy_read_timeout 120s;
     proxy_send_timeout 120s;
     proxy_connect_timeout 10s;
@@ -141,22 +131,18 @@ server {
 }
 ```
 
-Получить SSL-сертификат:
+SSL через Let's Encrypt:
+
 ```bash
 sudo apt install certbot python3-certbot-nginx
 sudo certbot --nginx -d bot.example.com
-```
-
-Активировать конфиг и перезапустить Nginx:
-```bash
 sudo ln -s /etc/nginx/sites-available/bot /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl reload nginx
+sudo nginx -t && sudo systemctl reload nginx
 ```
 
-### 4. Keep-alive
+### 4. Удалить keep-alive (только для Replit Autoscale)
 
-В файле `server/routes.ts` удалить блок keep-alive (он нужен только для Replit Autoscale):
+В `server/routes.ts` удалить:
 
 ```typescript
 // Удалить этот блок:
@@ -166,83 +152,90 @@ if (process.env.NODE_ENV === "production" && REPLIT_DEPLOYMENT_URL) {
 }
 ```
 
-### 5. Папки Replit Integrations
+### 5. Удалить папки Replit Integrations
 
-Удалить эти каталоги — они не нужны вне Replit:
-- `server/replit_integrations/`
-- `client/replit_integrations/`
+```bash
+rm -rf server/replit_integrations client/replit_integrations
+```
 
-Также удалить все импорты из них, если они есть в `server/routes.ts`.
+Удалить их импорты из `server/routes.ts`, если есть.
 
-## Переменные окружения
-
-Создать файл `.env`:
+## Переменные окружения (.env)
 
 ```env
-# Обязательные
+# ── Telegram ───────────────────────────────────────
+TELEGRAM_BOT_TOKEN=токен_от_BotFather
+
+# ── База данных ────────────────────────────────────
 DATABASE_URL=postgresql://user:password@localhost:5432/calorie_bot
-TELEGRAM_BOT_TOKEN=ваш_токен_от_BotFather
-OPENAI_API_KEY=sk-ваш_ключ_openai
-ADMIN_TELEGRAM_ID=ваш_telegram_id
+
+# ── OpenAI ─────────────────────────────────────────
+# Один ключ для всех моделей: GPT-4o, GPT-4o-mini, Whisper-1
+OPENAI_API_KEY=sk-ваш_ключ
+
+# ── Webhook ────────────────────────────────────────
 WEBHOOK_URL=https://bot.example.com
-
-# Безопасность webhook (обязателен при использовании WEBHOOK_URL)
 # Сгенерировать: openssl rand -hex 32
-WEBHOOK_SECRET=случайная_строка_для_пути_webhook
+WEBHOOK_SECRET=случайная_строка_64_символа
 
-# Опциональные
+# ── Администратор ──────────────────────────────────
+# Узнать через @userinfobot в Telegram
+ADMIN_TELEGRAM_ID=123456789
+
+# ── Прочее ─────────────────────────────────────────
 SESSION_SECRET=любая_случайная_строка
 NODE_ENV=production
 TZ=Europe/Moscow
 PORT=5000
 ```
 
-**Как получить:**
-- `TELEGRAM_BOT_TOKEN` — у @BotFather в Telegram
-- `OPENAI_API_KEY` — на https://platform.openai.com/api-keys
-- `ADMIN_TELEGRAM_ID` — отправить /start боту @userinfobot в Telegram
-- `WEBHOOK_SECRET` — сгенерировать: `openssl rand -hex 32`
+**Обязательные:** `TELEGRAM_BOT_TOKEN`, `DATABASE_URL`, `OPENAI_API_KEY`
+
+**Нужны вместе:** `WEBHOOK_URL` + `WEBHOOK_SECRET` (для webhook-режима). Без них бот запустится в polling.
+
+**Где получить:**
+- `TELEGRAM_BOT_TOKEN` — у @BotFather
+- `OPENAI_API_KEY` — [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- `ADMIN_TELEGRAM_ID` — отправить `/start` боту @userinfobot
+- `WEBHOOK_SECRET` — `openssl rand -hex 32`
 
 ## Установка и запуск
 
-### Вариант A: Запуск напрямую
+### Вариант A: Запуск напрямую (PM2)
 
 ```bash
-# 1. Установить Node.js 20+ и PostgreSQL
+# 1. Node.js 20+ и PostgreSQL
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash -
 sudo apt install -y nodejs postgresql
 
-# 2. Создать базу данных
+# 2. База данных
 sudo -u postgres createdb calorie_bot
 sudo -u postgres psql -c "CREATE USER bot WITH PASSWORD 'your_password';"
 sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE calorie_bot TO bot;"
 
-# 3. Клонировать проект и установить зависимости
+# 3. Проект
 git clone <your-repo-url> calorie-bot
 cd calorie-bot
 npm install
 
-# 4. Создать .env файл (см. раздел выше)
+# 4. Создать .env (см. выше)
 
 # 5. Применить схему БД
 npm run db:push
 
-# 6. Собрать проект
+# 6. Собрать и запустить
 npm run build
-
-# 7. Запустить
 npm start
 
-# 8. (Опционально) Запуск через PM2 для автоперезапуска
+# 7. Автоперезапуск через PM2
 npm install -g pm2
 pm2 start dist/index.cjs --name calorie-bot
-pm2 save
-pm2 startup
+pm2 save && pm2 startup
 ```
 
 ### Вариант B: Docker Compose
 
-Создать `Dockerfile`:
+**Dockerfile:**
 
 ```dockerfile
 FROM node:20-alpine
@@ -252,8 +245,6 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-# db:push нельзя делать на этапе build — БД ещё недоступна.
-# Миграция запускается при старте контейнера через entrypoint.
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
@@ -262,7 +253,7 @@ ENTRYPOINT ["/entrypoint.sh"]
 CMD ["npm", "start"]
 ```
 
-Создать `entrypoint.sh`:
+**entrypoint.sh:**
 
 ```bash
 #!/bin/sh
@@ -278,18 +269,18 @@ for i in $(seq 1 30); do
     echo "PostgreSQL is ready"
     break
   fi
-  echo "Waiting for DB... ($i/30)"
+  echo "Waiting... ($i/30)"
   sleep 1
 done
 
-echo "Running database migrations..."
+echo "Running migrations..."
 npx drizzle-kit push
 
 echo "Starting application..."
 exec "$@"
 ```
 
-Создать `docker-compose.yml`:
+**docker-compose.yml:**
 
 ```yaml
 version: '3.8'
@@ -332,72 +323,78 @@ volumes:
   pgdata:
 ```
 
-Запуск:
 ```bash
-# Создать .env с токенами (без DATABASE_URL — он задан в docker-compose)
+# Запуск
 docker compose up -d
 
-# Проверить логи
+# Логи
 docker compose logs -f bot
 ```
 
-## Скрипты package.json
+## Команды npm
 
-| Скрипт | Описание |
+| Команда | Описание |
 |--------|----------|
 | `npm run dev` | Разработка (TypeScript + Vite hot reload) |
 | `npm run build` | Сборка в `dist/` |
-| `npm start` | Запуск продакшена из `dist/` |
+| `npm start` | Продакшен из `dist/` |
 | `npm run db:push` | Применить схему Drizzle к БД |
 
 ## Функции бота
 
 ### Команды
+
 | Команда | Описание |
 |---------|----------|
-| `/start` | Регистрация + автоматическая настройка профиля |
-| `/profile` | Повторная настройка профиля (пол, возраст, вес, рост, активность, цель) |
-| `/stats` | Статистика за сегодня с прогрессом к персональным целям |
+| `/start` | Регистрация + автонастройка профиля если не заполнен |
+| `/profile` | Повторная настройка профиля |
+| `/stats` | Статистика за день с прогресс-барами |
 | `/history` | Последние записи с кнопками удаления |
-| `/water` | Трекинг воды (кнопки 150/250/500 мл, цель 2500 мл) |
-| `/report` | Вечерний AI-отчёт вручную (сообщит, если записей нет) |
-| `/report_time HH:MM` | Настройка автоотчёта (19:00-23:00 или `off`) |
-| `/reminders` | Настройка напоминаний о приёмах пищи (завтрак/обед/ужин) |
+| `/report` | Ручной вечерний AI-отчёт |
+| `/report_time HH:MM` | Время автоотчёта (19:00–23:00 или `off`) |
+| `/reminders` | Напоминания о приёмах пищи |
 | `/export ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ ]` | Экспорт в Excel |
 | `/clear ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ ]` | Очистка записей |
 | `/users` | Управление пользователями (только админ) |
 | `/help` | Список команд |
 
 ### Взаимодействие без команд
-- **Фото** — AI распознает еду на изображении (GPT-4o)
-- **Текст** — AI анализирует описание еды (GPT-4o-mini)
-- **"вода 330мл"** — авто-распознавание воды из текстовых сообщений
 
-### Особенности поведения
-- Профиль запускается автоматически после `/start`, если не заполнен
-- Вечерний автоотчёт пропускается, если за день нет записей о еде
-- Ручной `/report` сообщает об отсутствии записей вместо пустого отчёта
+| Тип сообщения | Обработка |
+|--------------|-----------|
+| Фото | GPT-4o распознаёт блюда на изображении |
+| Текст | GPT-4o-mini анализирует описание еды |
+| Голосовое | Whisper-1 транскрибирует → GPT-4o-mini анализирует |
+
+### Мультипозиционное распознавание
+
+Если в сообщении несколько блюд (например, "завтрак: яйца, бутерброд, кофе"), бот покажет список всех позиций с кнопками:
+- **✏️ N. Название** — открыть редактор позиции (корректировка веса ±10/50/100, удаление)
+- **✅ Сохранить все** — сохранить все позиции сразу
+- **❌ Отмена** — отменить без сохранения
+
+### Поведение
+
+- Профиль запускается автоматически после `/start`, если age/weight/height не заполнены
+- Автоотчёт пропускается без сообщения, если за день нет записей
+- Ручной `/report` сообщает об отсутствии данных вместо пустого отчёта
 - Напоминания срабатывают один раз в день на каждый приём пищи
-- Данные о воде не включаются в AI-анализ вечернего отчёта
 
 ## Схема базы данных
 
 ### users
-Профиль пользователя, рассчитанные цели КБЖУ, настройки напоминаний и отчётов
+Профиль пользователя, нормы КБЖУ, настройки напоминаний и отчётов
 
 ### food_logs
-Записи о еде: название, калории, БЖУ, вес (г/мл), тип приёма пищи, оценка полезности (1-10), совет
+Название, калории, БЖУ, вес (г/мл), тип приёма пищи, оценка (1–10), совет
 
-### water_logs
-Записи о воде: количество в мл, дата
+## Особенности кода
 
-## Важные особенности кода
-
-- **Mifflin-St Jeor** — расчёт калорий в `storage.ts` → `calculateAndSetGoals()`
-- **AI-модели** — GPT-4o для фото (vision), GPT-4o-mini для текста и отчётов (экономия)
-- **Оценка еды** — AI выставляет foodScore 1-10 и даёт nutritionAdvice на русском
-- **Жидкости vs твёрдое** — LIQUID_PATTERN в `bot.ts` определяет мл или г
-- **Вечерний отчёт** — планировщик в `bot.ts` проверяет каждую минуту по московскому времени (UTC+3)
-- **Excel экспорт** — через библиотеку `exceljs`
-- **Подтверждение еды** — inline кнопки для корректировки веса перед сохранением
-- **Профиль при старте** — `startProfileFlow()` вызывается из `/start`, если age/weight/height не заполнены
+| Деталь | Где |
+|-------|-----|
+| Mifflin-St Jeor расчёт | `storage.ts → calculateAndSetGoals()` |
+| Жидкости vs твёрдое (мл/г) | `bot.ts → LIQUID_PATTERN` |
+| Два OpenAI-клиента | `openai.ts` — `openai` (прокси) + `whisperClient` (прямой) |
+| Мультипозиционный стейт | `bot.ts → pendingMulti[telegramId]: FoodItem[]` |
+| Вечерний планировщик | Проверка каждую минуту по UTC+3 |
+| Excel экспорт | Библиотека `exceljs` |

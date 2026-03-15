@@ -2,15 +2,17 @@
 
 ## Overview
 
-This is a fullstack nutrition tracking application centered around a Telegram bot interface. Users interact primarily through Telegram to log food (via text or photo), track water intake, view daily stats, and receive AI-powered dietary recommendations. A minimal web frontend (React) serves as a status page. The backend handles Telegram bot logic, AI food analysis via OpenAI GPT-4o, and persists all data to a PostgreSQL database using Drizzle ORM.
+Fullstack nutrition tracking application centered around a Telegram bot. Users log food via text, photo, or voice message; the bot analyses it with OpenAI, calculates КБЖУ, and stores everything in PostgreSQL. A minimal React frontend serves as a status page.
 
 **Core Features:**
-- Telegram bot for food/water logging with inline button interactions
-- AI-powered food analysis from text descriptions or photos (GPT-4o)
-- Nutritional quality scoring (1-10) with personalized advice in Russian
-- Personal profile setup (age, weight, height, goal) with Mifflin-St Jeor calorie calculation
-- Daily/weekly stats, Excel export, configurable meal reminders, and evening AI reports
-- Admin whitelist system for user approval
+- Telegram bot for food logging via text, photo, or voice
+- GPT-4o for photo analysis (vision), GPT-4o-mini for text/reports, Whisper-1 for voice transcription
+- Multi-item recognition: one message → multiple food items, each editable before saving
+- Nutritional quality scoring (1–10) with personalized advice in Russian
+- Personal profile setup (age, weight, height, activity, goal) — auto-launches after /start if not filled
+- Mifflin-St Jeor calorie calculation, daily stats with progress bars
+- Configurable meal reminders and evening AI-powered diet reports
+- Excel export, admin whitelist system
 
 ## User Preferences
 
@@ -20,73 +22,79 @@ Preferred communication style: Simple, everyday language.
 
 ### Backend (Express + Node.js)
 
-- **Entry point**: `server/index.ts` — creates an Express HTTP server, registers routes, and serves static files
-- **Routes**: `server/routes.ts` — registers the Telegram bot via `setupBot()`, adds a `/api/health` endpoint, and sets up a keep-alive ping in production
-- **Bot logic**: `server/bot.ts` — all Telegram interaction logic including command handlers, food confirmation flow with inline weight-adjustment buttons, water tracking, reminders, and admin controls using `node-telegram-bot-api`
-- **AI integration**: `server/openai.ts` — wraps OpenAI GPT-4o for food text analysis, food image analysis, and evening report generation; uses Replit AI Integration environment variables (`AI_INTEGRATIONS_OPENAI_API_KEY` / `AI_INTEGRATIONS_OPENAI_BASE_URL`) so no personal key is needed
-- **Storage layer**: `server/storage.ts` — `DatabaseStorage` class implementing the `IStorage` interface with all CRUD operations for users, food logs, and water logs; includes `calculateAndSetGoals()` using the Mifflin-St Jeor equation
-- **Database connection**: `server/db.ts` — Drizzle ORM connected to PostgreSQL via `pg` Pool using `DATABASE_URL`
+- **Entry point**: `server/index.ts` — Express HTTP server, routes, static files
+- **Routes**: `server/routes.ts` — registers bot via `setupBot()`, `/api/health`, keep-alive ping in production
+- **Bot logic**: `server/bot.ts` — all Telegram interaction: commands, profile flow, multi-item food confirmation with inline buttons, per-item weight editing, meal reminders, evening reports, admin controls
+- **AI integration**: `server/openai.ts`:
+  - `openai` client — Replit AI Integration proxy for GPT-4o / GPT-4o-mini
+  - `whisperClient` — direct OpenAI client using `OPENAI_API_KEY` (Replit proxy does not support audio API)
+  - `analyzeFoodText()` → `FoodItem[]` (GPT-4o-mini)
+  - `analyzeFoodImage()` → `FoodItem[]` (GPT-4o)
+  - `transcribeVoice()` → string (Whisper-1, requires OPENAI_API_KEY)
+  - `generateEveningReport()` → string (GPT-4o-mini)
+- **Storage layer**: `server/storage.ts` — `DatabaseStorage` implementing `IStorage`; includes `calculateAndSetGoals()` (Mifflin-St Jeor)
+- **Database**: `server/db.ts` — Drizzle ORM connected to PostgreSQL via `pg` Pool
 
 ### Frontend (React + Vite)
 
-- Minimal frontend — `client/index.html` renders a simple "Telegram Bot is active" page
-- Built with React, Vite, Tailwind CSS, and shadcn/ui (New York style)
-- Vite serves as dev server in development and builds to `dist/public` for production
-- `@tanstack/react-query` is available for data fetching
-- Recharts available for nutrition visualization (charts)
+- Minimal frontend — `client/index.html` renders a "Telegram Bot is active" status page
+- React, Vite, Tailwind CSS, shadcn/ui (New York style)
+- `@tanstack/react-query` available for data fetching
 
 ### Shared Layer
 
-- `shared/schema.ts` — Drizzle schema definitions for `users`, `foodLogs`, and `waterLogs` tables; also exports Zod insert schemas
-- `shared/models/chat.ts` — schema for `conversations` and `messages` tables (Replit integration boilerplate)
-- `shared/routes.ts` — typed API route definitions using Zod
+- `shared/schema.ts` — Drizzle schema for `users` and `foodLogs` tables; Zod insert schemas
 
 ### Database Schema
 
 **users** table:
-- Telegram ID, username, approval status, admin flag
-- Profile: age, gender, weight (kg), height (cm), activity level, goal
-- Computed goals: caloriesGoal, proteinGoal, fatGoal, carbsGoal
-- Notification settings: reportTime, breakfastReminder, lunchReminder, dinnerReminder
+- telegramId, username, isApproved, isAdmin
+- Profile: age, gender, weight (kg), height (cm), activityLevel, goal
+- Computed: caloriesGoal, proteinGoal, fatGoal, carbsGoal
+- Notifications: reportTime, breakfastReminder, lunchReminder, dinnerReminder
 
 **foodLogs** table:
 - userId (FK), foodName, calories, protein, fat, carbs, weight (g/ml), mealType
-- foodScore (1-10), nutritionAdvice, date
-
-**waterLogs** table:
-- userId (FK), amount (ml), date
+- foodScore (1–10), nutritionAdvice, date
 
 ### Build System
 
-- `script/build.ts` — runs Vite build for the client, then esbuild for the server into a single `dist/index.cjs`; bundles key server dependencies (openai, drizzle-orm, pg, xlsx, etc.) while externalizing UI/Radix packages
+- `script/build.ts` — Vite build for client, esbuild for server → `dist/index.cjs`; bundles openai, drizzle-orm, pg, xlsx, etc.
 
-### Replit Integration Boilerplate
+## Multi-Item Food Flow
 
-The repo includes `server/replit_integrations/` and `client/replit_integrations/` directories with pre-built utilities for chat, audio (voice recording/playback via AudioWorklet), image generation, and batch processing. These are scaffolding from Replit's AI integration templates and are **not actively used** by the main bot application.
+When AI detects multiple dishes in one message:
+1. `pendingMulti[telegramId]: FoodItem[]` stores the array
+2. Summary message shows all items with total calories
+3. Inline buttons: `mi_e_N` (edit item N), `save_all`, `cancel_multi`
+4. Editor buttons: `mi_wp_AMOUNT_N` / `mi_wm_AMOUNT_N` (weight ±), `mi_del_N` (delete), `mi_back` (back to list)
+5. Weight changes recalculate КБЖУ proportionally
+
+Single-item flow still uses `(bot as any).pendingLogs[telegramId]` with weight adjustment buttons.
 
 ## External Dependencies
 
 ### Required Environment Variables
-- `TELEGRAM_BOT_TOKEN` — from @BotFather on Telegram (required for bot to start)
-- `DATABASE_URL` — PostgreSQL connection string (required; Drizzle will throw on missing)
-- `ADMIN_TELEGRAM_ID` — Telegram user ID for admin commands (optional but needed for user management)
-- `AI_INTEGRATIONS_OPENAI_API_KEY` and `AI_INTEGRATIONS_OPENAI_BASE_URL` — provided automatically by Replit AI Integrations (no personal OpenAI key needed)
-- `REPLIT_DEPLOYMENT_URL` — used in production to set up a keep-alive ping every 4 minutes
+- `TELEGRAM_BOT_TOKEN` — from @BotFather (required)
+- `DATABASE_URL` — PostgreSQL connection string (required)
+- `OPENAI_API_KEY` — direct OpenAI key required for Whisper; also used as fallback for GPT on VPS
+- `ADMIN_TELEGRAM_ID` — admin Telegram user ID (optional)
+- `AI_INTEGRATIONS_OPENAI_API_KEY` / `AI_INTEGRATIONS_OPENAI_BASE_URL` — Replit AI Integrations proxy (auto-provided on Replit)
+- `REPLIT_DEPLOYMENT_URL` — used for keep-alive ping in Replit production
 
-### Third-Party Services
-- **OpenAI GPT-4o / GPT-4o-mini** — food text analysis, image analysis, evening report generation; accessed via Replit AI Integrations proxy
-- **Telegram Bot API** — primary user interface via `node-telegram-bot-api`
-- **PostgreSQL** — persistent storage for users, food logs, water logs; provisioned as a Replit database
+### Two OpenAI Clients (important)
+- `openai` — uses Replit proxy (`AI_INTEGRATIONS_OPENAI_BASE_URL`), supports only chat completions
+- `whisperClient` — uses `OPENAI_API_KEY` directly (no proxy), required for `audio.transcriptions`
+- On VPS: replace both with a single `new OpenAI({ apiKey: process.env.OPENAI_API_KEY })`
 
 ### Key Libraries
-- `drizzle-orm` + `drizzle-kit` — ORM and schema migrations (PostgreSQL dialect)
-- `drizzle-zod` — auto-generates Zod schemas from Drizzle tables
-- `node-telegram-bot-api` — Telegram bot client with polling
-- `exceljs` — Excel file export for food log history
-- `xlsx` — additional spreadsheet support (bundled in server build)
-- `express` + `express-session` + `connect-pg-simple` — HTTP server and session management
-- `react` + `vite` + `tailwindcss` + `shadcn/ui` (Radix UI) — frontend stack
+- `drizzle-orm` + `drizzle-kit` — ORM and schema migrations
+- `drizzle-zod` — Zod schemas from Drizzle tables
+- `node-telegram-bot-api` — Telegram bot client
+- `exceljs` — Excel export
+- `openai` — GPT-4o, GPT-4o-mini, Whisper-1
+- `express` + `express-session` + `connect-pg-simple` — HTTP server and sessions
+- `react` + `vite` + `tailwindcss` + `shadcn/ui` — frontend
 - `@tanstack/react-query` — client-side data fetching
-- `recharts` — chart components for nutrition visualization
-- `date-fns` — date formatting and manipulation
-- `zod` — runtime validation throughout shared layer
+- `date-fns` — date formatting
+- `zod` — runtime validation
