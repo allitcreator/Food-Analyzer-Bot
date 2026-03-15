@@ -8,39 +8,60 @@ const openai = new OpenAI({
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
 });
 
-export async function analyzeFoodText(text: string) {
+export async function analyzeFoodText(text: string): Promise<FoodItem[] | null> {
   try {
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         {
           role: "system",
-          content: `You are a nutrition expert. 
-          1. If the text is a barcode (digits), search for the specific product name and its exact nutrition facts (per serving or 100g).
-          2. If it's a food name, find the most accurate nutrition data for that specific item.
-          3. Rate the food's nutritional quality on a scale of 1-10 (10 = very healthy, 1 = very unhealthy). Consider: fiber, vitamins, added sugar, trans fats, processing level.
-          4. Provide a brief nutrition advice in Russian (1-2 sentences) about this food: what's good/bad about it, and a suggestion to improve the meal.
-          5. Return ONLY a JSON object with:
-          - foodName (string, exact product or dish name)
-          - calories (number)
-          - protein (number)
-          - fat (number)
-          - carbs (number)
-          - weight (number, grams)
-          - mealType (string: "breakfast", "lunch", "dinner", "snack")
-          - foodScore (number, 1-10)
-          - nutritionAdvice (string, in Russian)`
+          content: `You are a nutrition expert. The user may describe one or multiple food items in a single message.
+
+Split the message into individual food items/dishes. For each item:
+1. Identify the exact food name (in Russian if the user wrote in Russian).
+2. Find accurate nutrition data per the specified or estimated portion.
+3. Rate nutritional quality 1-10 (10 = very healthy, 1 = very unhealthy).
+4. Write a brief nutrition advice in Russian (1-2 sentences).
+
+Return ONLY a JSON object with a single key "items" containing an array. Each element:
+- foodName (string)
+- calories (number)
+- protein (number, grams)
+- fat (number, grams)
+- carbs (number, grams)
+- weight (number, grams or ml for liquids)
+- mealType ("breakfast" | "lunch" | "dinner" | "snack")
+- foodScore (number, 1-10)
+- nutritionAdvice (string, Russian)
+
+Example output: {"items": [{...}, {...}]}`
         },
         { role: "user", content: text }
       ],
       response_format: { type: "json_object" }
     });
 
-    return JSON.parse(response.choices[0].message.content || "{}");
+    const parsed = JSON.parse(response.choices[0].message.content || "{}");
+    if (Array.isArray(parsed.items) && parsed.items.length > 0) {
+      return parsed.items as FoodItem[];
+    }
+    return null;
   } catch (error) {
     console.error("OpenAI Text Analysis Error:", error);
     return null;
   }
+}
+
+export interface FoodItem {
+  foodName: string;
+  calories: number;
+  protein: number;
+  fat: number;
+  carbs: number;
+  weight: number;
+  mealType: string;
+  foodScore?: number;
+  nutritionAdvice?: string;
 }
 
 export async function generateEveningReport(foodItems: { foodName: string; calories: number; protein: number; fat: number; carbs: number; weight: number; foodScore?: number | null }[], totals: { calories: number; protein: number; fat: number; carbs: number }, goals: { caloriesGoal?: number | null; proteinGoal?: number | null; fatGoal?: number | null; carbsGoal?: number | null }) {

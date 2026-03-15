@@ -1,7 +1,7 @@
 import TelegramBot from "node-telegram-bot-api";
 import ExcelJS from "exceljs";
 import { IStorage } from "./storage";
-import { analyzeFoodText, analyzeFoodImage, generateEveningReport, transcribeVoice } from "./openai";
+import { analyzeFoodText, analyzeFoodImage, generateEveningReport, transcribeVoice, FoodItem } from "./openai";
 import { User } from "@shared/schema";
 
 const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
@@ -117,6 +117,50 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
   });
 
   const userStates: Record<string, { step: string; data: Partial<User> & { reminderMeal?: string } }> = {};
+  const pendingMulti: Record<string, FoodItem[]> = {};
+
+  function buildMultiSummary(items: FoodItem[]): string {
+    const MEAL_EMOJI: Record<string, string> = { breakfast: '🌅', lunch: '☀️', dinner: '🌙', snack: '🍎' };
+    let text = `🍽 Распознано ${items.length} позиций:\n\n`;
+    let totalCal = 0, totalP = 0, totalF = 0, totalC = 0;
+    for (const item of items) {
+      const unit = item.foodName.toLowerCase().match(LIQUID_PATTERN) ? 'мл' : 'г';
+      const emoji = MEAL_EMOJI[item.mealType] || '🍴';
+      text += `${emoji} ${item.foodName} (${item.weight}${unit})\n`;
+      text += `   ${item.calories} ккал | Б${item.protein} Ж${item.fat} У${item.carbs}\n\n`;
+      totalCal += item.calories;
+      totalP += item.protein;
+      totalF += item.fat;
+      totalC += item.carbs;
+    }
+    text += `──────────────\n`;
+    text += `📊 Итого: ${totalCal} ккал | Б${totalP} Ж${totalF} У${totalC}`;
+    return text;
+  }
+
+  async function processFoodItems(chatId: number, telegramId: string, items: FoodItem[]) {
+    if (items.length === 1) {
+      (bot as any).pendingLogs = (bot as any).pendingLogs || {};
+      (bot as any).pendingLogs[telegramId] = items[0];
+      const unit = getUnit(items[0].foodName);
+      bot.sendMessage(chatId, buildConfirmMessage(items[0]), {
+        reply_markup: buildConfirmKeyboard(unit)
+      });
+    } else {
+      pendingMulti[telegramId] = items;
+      const summary = buildMultiSummary(items);
+      bot.sendMessage(chatId, summary, {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: `✅ Сохранить все (${items.length})`, callback_data: 'save_all' },
+              { text: '❌ Отмена', callback_data: 'cancel_multi' }
+            ]
+          ]
+        }
+      });
+    }
+  }
 
   function startProfileFlow(chatId: number, telegramId: string) {
     userStates[telegramId] = { step: 'gender', data: {} };
@@ -608,6 +652,44 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
         message_id: query.message?.message_id,
         reply_markup: buildConfirmKeyboard(unit)
       });
+    } else if (query.data === "save_all") {
+      const items = pendingMulti[telegramId];
+      if (!items || items.length === 0) {
+        bot.answerCallbackQuery(query.id, { text: "Нет позиций для сохранения" });
+        return;
+      }
+      delete pendingMulti[telegramId];
+      let savedCount = 0;
+      for (const item of items) {
+        try {
+          await storage.createFoodLog({
+            userId: user.id,
+            foodName: item.foodName,
+            calories: Math.round(Number(item.calories)) || 0,
+            protein: Math.round(Number(item.protein)) || 0,
+            fat: Math.round(Number(item.fat)) || 0,
+            carbs: Math.round(Number(item.carbs)) || 0,
+            weight: Math.round(Number(item.weight)) || 0,
+            mealType: item.mealType || 'snack',
+            foodScore: item.foodScore ? Math.round(Number(item.foodScore)) : null,
+            nutritionAdvice: item.nutritionAdvice || null,
+          });
+          savedCount++;
+        } catch (e) {
+          console.error("Error saving food item:", e);
+        }
+      }
+      const totalCal = items.reduce((s, i) => s + i.calories, 0);
+      bot.editMessageText(`✅ Сохранено ${savedCount} из ${items.length} позиций\n📊 Итого: ${totalCal} ккал`, {
+        chat_id: chatId,
+        message_id: query.message?.message_id
+      });
+    } else if (query.data === "cancel_multi") {
+      delete pendingMulti[telegramId];
+      bot.editMessageText("❌ Отменено", {
+        chat_id: chatId,
+        message_id: query.message?.message_id
+      });
     } else if (query.data.startsWith("delete_log_")) {
       const logId = parseInt(query.data.split("_")[2]);
       await storage.deleteFoodLog(logId);
@@ -891,18 +973,12 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     // Handle Text
     if (msg.text) {
       console.log("Text received:", msg.text);
-      bot.sendMessage(chatId, "Анализирую текст...");
+      bot.sendMessage(chatId, "Анализирую...");
       try {
-        const analysis = await analyzeFoodText(msg.text);
-        console.log("Text analysis result:", analysis);
-        if (analysis && analysis.foodName) {
-          (bot as any).pendingLogs = (bot as any).pendingLogs || {};
-          (bot as any).pendingLogs[telegramId] = analysis;
-
-          const unit = getUnit(analysis.foodName);
-          bot.sendMessage(chatId, buildConfirmMessage(analysis), {
-            reply_markup: buildConfirmKeyboard(unit)
-          });
+        const items = await analyzeFoodText(msg.text);
+        console.log("Text analysis result:", items);
+        if (items && items.length > 0) {
+          await processFoodItems(chatId, telegramId, items);
         } else {
           bot.sendMessage(chatId, "Не удалось распознать еду. Попробуй описать точнее.");
         }
@@ -970,15 +1046,9 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
         console.log("Voice transcription:", transcript);
         bot.sendMessage(chatId, `🗣 "${transcript}"\n\nАнализирую...`);
 
-        const analysis = await analyzeFoodText(transcript);
-        if (analysis && analysis.foodName) {
-          (bot as any).pendingLogs = (bot as any).pendingLogs || {};
-          (bot as any).pendingLogs[telegramId] = analysis;
-
-          const unit = getUnit(analysis.foodName);
-          bot.sendMessage(chatId, buildConfirmMessage(analysis), {
-            reply_markup: buildConfirmKeyboard(unit)
-          });
+        const items = await analyzeFoodText(transcript);
+        if (items && items.length > 0) {
+          await processFoodItems(chatId, telegramId, items);
         } else {
           bot.sendMessage(chatId, "Не удалось распознать еду из голосового сообщения. Попробуй описать точнее.");
         }
