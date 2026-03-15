@@ -229,6 +229,182 @@ export function generateMonthlyPDF(
       y += chartH + 42;
     }
 
+    // ── Nutrition ↔ Weight correlation ───────────────────────────
+    if (user.caloriesGoal && weeklyStats.some(w => w.days > 0) && weightLogs.length >= 1) {
+      sectionTitle("Питание и динамика веса");
+
+      // Recompute week date ranges (same algorithm as storage.getMonthlyStats)
+      const today2 = new Date();
+      const weekRanges: { start: Date; end: Date }[] = [];
+      for (let w = 3; w >= 0; w--) {
+        const weekEnd = new Date(today2);
+        weekEnd.setDate(today2.getDate() - w * 7);
+        weekEnd.setHours(23, 59, 59, 999);
+        const weekStart = new Date(weekEnd);
+        weekStart.setDate(weekEnd.getDate() - 6);
+        weekStart.setHours(0, 0, 0, 0);
+        weekRanges.push({ start: weekStart, end: weekEnd });
+      }
+
+      const sortedWL = [...weightLogs].sort((a, b) => new Date(a.date!).getTime() - new Date(b.date!).getTime());
+
+      // Find nearest weight on or before a given date
+      const weightBefore = (date: Date): number | null => {
+        const ts = date.getTime();
+        const cands = sortedWL.filter(l => new Date(l.date!).getTime() <= ts);
+        return cands.length > 0 ? cands[cands.length - 1].weight : null;
+      };
+      // Find nearest weight on or after a given date
+      const weightAfter = (date: Date): number | null => {
+        const ts = date.getTime();
+        const cands = sortedWL.filter(l => new Date(l.date!).getTime() >= ts);
+        return cands.length > 0 ? cands[0].weight : null;
+      };
+
+      // Per-week: avg cal, deficit, weight start/end
+      interface WeekCorr {
+        label: string;
+        avgCal: number;
+        balance: number; // negative = deficit (goal - avgCal), positive = surplus
+        wStart: number | null;
+        wEnd: number | null;
+        wDelta: number | null;
+        hasFood: boolean;
+      }
+      const corr: WeekCorr[] = weekRanges.map((r, i) => {
+        const wk = weeklyStats[i];
+        const balance = wk.days > 0 ? wk.calories - (user.caloriesGoal ?? 0) : 0;
+        const wStart = weightBefore(r.start) ?? weightAfter(r.start);
+        const wEnd = weightBefore(r.end);
+        const wDelta = wStart != null && wEnd != null ? wEnd - wStart : null;
+        return {
+          label: wk.weekLabel,
+          avgCal: wk.calories,
+          balance,
+          wStart,
+          wEnd,
+          wDelta,
+          hasFood: wk.days > 0,
+        };
+      });
+
+      // ── Caloric balance bar chart ─────────────────────────────
+      const hasBalance = corr.some(c => c.hasFood && c.balance !== 0);
+      if (hasBalance) {
+        const maxAbs = Math.max(...corr.filter(c => c.hasFood).map(c => Math.abs(c.balance)), 1);
+        const chartH2 = 80;
+        const halfH = chartH2 / 2;
+        ensureSpace(chartH2 + 60);
+
+        // Baseline (zero = goal)
+        const baseY = y + halfH;
+        doc.moveTo(50, baseY).lineTo(50 + W, baseY).strokeColor(LIGHT).lineWidth(0.8).stroke();
+        doc.fillColor(GRAY).font("Regular").fontSize(7).text("Цель", 16, baseY - 4, { width: 30, align: "right" });
+
+        const n2 = corr.length;
+        const barW2 = Math.min(50, (W - 20) / n2 - 10);
+        const gap2 = (W - n2 * barW2) / (n2 + 1);
+
+        corr.forEach((c, i) => {
+          const bx = 50 + gap2 * (i + 1) + i * barW2;
+          if (!c.hasFood) {
+            doc.fillColor(LIGHT).font("Regular").fontSize(7).text("—", bx, baseY - 4, { width: barW2, align: "center" });
+          } else {
+            const ratio = c.balance / maxAbs;
+            const bh = Math.abs(ratio) * halfH;
+            const isSurplus = c.balance > 0;
+            const barColor = isSurplus ? "#F87171" : "#4ADE80"; // red=surplus, green=deficit
+            const barY = isSurplus ? baseY : baseY - bh;
+            doc.rect(bx, barY, barW2, bh).fill(barColor);
+            const labelVal = (c.balance > 0 ? "+" : "") + c.balance;
+            doc.fillColor(DARK).font("Regular").fontSize(7)
+              .text(labelVal, bx - 2, isSurplus ? baseY + bh + 2 : baseY - bh - 11, { width: barW2 + 4, align: "center" });
+          }
+          doc.fillColor(GRAY).font("Regular").fontSize(7)
+            .text(c.label, bx - 4, y + chartH2 + 12, { width: barW2 + 8, align: "center" });
+        });
+
+        doc.fillColor(GRAY).font("Regular").fontSize(8)
+          .text("Зелёный = дефицит ккал (меньше цели)  •  Красный = профицит (больше цели)", 50, y + chartH2 + 24, { align: "center", width: W });
+        y += chartH2 + 40;
+      }
+
+      // ── Correlation table ─────────────────────────────────────
+      const tCols = [
+        { label: "Неделя",     w: 105 },
+        { label: "Ср. ккал",   w: 65  },
+        { label: "Баланс",     w: 65  },
+        { label: "Вес нач.",   w: 65  },
+        { label: "Вес кон.",   w: 65  },
+        { label: "Δ вес",      w: 55  },
+        { label: "Итог",       w: 75  },
+      ];
+      ensureSpace(20 + corr.length * 20 + 20);
+      let ttx = 50;
+      doc.rect(50, y, W, 20).fill(PRIMARY);
+      tCols.forEach(c => {
+        doc.fillColor("white").font("Bold").fontSize(8).text(c.label, ttx + 4, y + 6, { width: c.w - 4 });
+        ttx += c.w;
+      });
+      y += 20;
+
+      corr.forEach((c, idx) => {
+        ensureSpace(20);
+        doc.rect(50, y, W, 20).fill(idx % 2 === 0 ? BG : "white");
+
+        const balStr = !c.hasFood ? "—" : (c.balance > 0 ? "+" : "") + c.balance + " ккал";
+        const wStartStr = c.wStart != null ? c.wStart.toFixed(1) + " кг" : "—";
+        const wEndStr   = c.wEnd   != null ? c.wEnd.toFixed(1)   + " кг" : "—";
+        let deltaStr = "—";
+        let verdict = "—";
+        let verdictColor = GRAY;
+        if (c.wDelta != null) {
+          deltaStr = (c.wDelta > 0 ? "+" : "") + c.wDelta.toFixed(1) + " кг";
+          if (c.wDelta < -0.1) { verdict = "Снижение"; verdictColor = "#22C55E"; }
+          else if (c.wDelta > 0.1) { verdict = "Рост"; verdictColor = "#EF4444"; }
+          else { verdict = "Стабильно"; verdictColor = GRAY; }
+        }
+
+        const row = [c.label, c.hasFood ? String(c.avgCal) : "—", balStr, wStartStr, wEndStr, deltaStr];
+        let rx = 50;
+        row.forEach((cell, ci) => {
+          const isBalance = ci === 2;
+          let color = DARK;
+          if (isBalance && c.hasFood) color = c.balance > 0 ? "#EF4444" : c.balance < 0 ? "#16A34A" : DARK;
+          doc.fillColor(color).font("Regular").fontSize(8).text(cell, rx + 4, y + 6, { width: tCols[ci].w - 4 });
+          rx += tCols[ci].w;
+        });
+        // Verdict column
+        doc.fillColor(verdictColor).font("Bold").fontSize(8).text(verdict, rx + 4, y + 6, { width: tCols[6].w - 4 });
+        y += 20;
+      });
+
+      // ── Insight text ──────────────────────────────────────────
+      const deficitWeeks = corr.filter(c => c.hasFood && c.balance < -50 && c.wDelta != null);
+      const surplusWeeks = corr.filter(c => c.hasFood && c.balance > 50  && c.wDelta != null);
+      const insights: string[] = [];
+      if (deficitWeeks.length > 0) {
+        const avgDelta = deficitWeeks.reduce((s, c) => s + (c.wDelta ?? 0), 0) / deficitWeeks.length;
+        insights.push(`В неделях с дефицитом калорий вес менялся в среднем на ${avgDelta > 0 ? "+" : ""}${avgDelta.toFixed(1)} кг.`);
+      }
+      if (surplusWeeks.length > 0) {
+        const avgDelta = surplusWeeks.reduce((s, c) => s + (c.wDelta ?? 0), 0) / surplusWeeks.length;
+        insights.push(`В неделях с профицитом вес менялся на ${avgDelta > 0 ? "+" : ""}${avgDelta.toFixed(1)} кг.`);
+      }
+      if (insights.length > 0) {
+        ensureSpace(30);
+        y += 8;
+        doc.rect(50, y, W, insights.length * 16 + 12).fillAndStroke(LIGHT, ACCENT);
+        doc.fillColor(PRIMARY).font("Bold").fontSize(9);
+        insights.forEach((ins, i) => {
+          doc.text(ins, 60, y + 8 + i * 16, { width: W - 20 });
+        });
+        y += insights.length * 16 + 20;
+      } else {
+        y += 10;
+      }
+    }
+
     // ── Top foods ─────────────────────────────────────────────────
     if (topFoods.length > 0) {
       sectionTitle("Часто употребляемые продукты");
