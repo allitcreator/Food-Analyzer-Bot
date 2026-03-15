@@ -90,11 +90,16 @@ async function buildDailyProgress(storage: IStorage, userId: number, user: User)
   return text;
 }
 
-function buildConfirmMessage(analysis: any): string {
+function buildConfirmMessage(analysis: any, showMicronutrients = false): string {
   const unit = getUnit(analysis.foodName);
-  let msg = `Распознано: ${analysis.foodName}\nКкал: ${analysis.calories} | Б: ${analysis.protein} | Ж: ${analysis.fat} | У: ${analysis.carbs}\n${unit === 'мл' ? 'Объем' : 'Вес'}: ${analysis.weight}${unit}`;
-  if (analysis.foodScore) msg += `\nОценка полезности: ${analysis.foodScore}/10`;
-  if (analysis.nutritionAdvice) msg += `\n\n${analysis.nutritionAdvice}`;
+  let msg = `🍽 *${analysis.foodName}*\n`;
+  msg += `🔥 Ккал: ${analysis.calories}  💪 Б: ${analysis.protein}г  🧈 Ж: ${analysis.fat}г  🍞 У: ${analysis.carbs}г\n`;
+  msg += `⚖️ ${unit === 'мл' ? 'Объём' : 'Вес'}: ${analysis.weight}${unit}`;
+  if (analysis.foodScore) msg += `\n⭐ Оценка полезности: ${analysis.foodScore}/10`;
+  if (showMicronutrients && (analysis.fiber != null || analysis.sugar != null || analysis.sodium != null || analysis.saturatedFat != null)) {
+    msg += `\n🔬 Микро: 🌾${analysis.fiber?.toFixed?.(1) ?? '—'}г  🍬${analysis.sugar?.toFixed?.(1) ?? '—'}г  🧂${analysis.sodium != null ? Math.round(analysis.sodium) : '—'}мг  🧈нас.${analysis.saturatedFat?.toFixed?.(1) ?? '—'}г`;
+  }
+  if (analysis.nutritionAdvice) msg += `\n\n💬 ${analysis.nutritionAdvice}`;
   msg += `\n\nДобавить в дневник?`;
   return msg;
 }
@@ -359,7 +364,9 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       (bot as any).pendingLogs = (bot as any).pendingLogs || {};
       (bot as any).pendingLogs[telegramId] = items[0];
       const unit = getUnit(items[0].foodName);
-      bot.sendMessage(chatId, buildConfirmMessage(items[0]), {
+      const u = await storage.getUserByTelegramId(telegramId);
+      bot.sendMessage(chatId, buildConfirmMessage(items[0], u?.showMicronutrients ?? false), {
+        parse_mode: 'Markdown',
         reply_markup: buildConfirmKeyboard(unit)
       });
     } else {
@@ -1211,9 +1218,10 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       if (pending.saturatedFat != null) pending.saturatedFat = Math.round(pending.saturatedFat * ratio * 10) / 10;
 
       const unit = getUnit(pending.foodName);
-      bot.editMessageText(buildConfirmMessage(pending), {
+      bot.editMessageText(buildConfirmMessage(pending, user.showMicronutrients ?? false), {
         chat_id: chatId,
         message_id: query.message?.message_id,
+        parse_mode: 'Markdown',
         reply_markup: buildConfirmKeyboard(unit)
       });
     } else if (query.data === "save_all") {
@@ -1964,8 +1972,9 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
 
           const unit = getUnit(analysis.foodName);
           const prefix = barcodeSource ? `📦 Найдено по штрихкоду\n\n` : "";
-          const confirmText = prefix + buildConfirmMessage(analysis);
+          const confirmText = prefix + buildConfirmMessage(analysis, user.showMicronutrients ?? false);
           bot.sendMessage(chatId, confirmText, {
+            parse_mode: 'Markdown',
             reply_markup: buildConfirmKeyboard(unit)
           });
         } else {
