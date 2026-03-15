@@ -8,6 +8,11 @@ const openai = new OpenAI({
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
 });
 
+// Whisper is not supported by the Replit AI proxy — needs direct OpenAI access
+const whisperClient = process.env.OPENAI_API_KEY
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  : null;
+
 export async function analyzeFoodText(text: string): Promise<FoodItem[] | null> {
   try {
     const response = await openai.chat.completions.create({
@@ -97,10 +102,14 @@ export async function generateEveningReport(foodItems: { foodName: string; calor
 }
 
 export async function transcribeVoice(audioBuffer: Buffer): Promise<string | null> {
+  if (!whisperClient) {
+    console.error("Whisper: OPENAI_API_KEY not set — voice transcription unavailable");
+    return null;
+  }
   const tmpFile = path.join(os.tmpdir(), `voice_${Date.now()}.ogg`);
   try {
     fs.writeFileSync(tmpFile, audioBuffer);
-    const response = await openai.audio.transcriptions.create({
+    const response = await whisperClient.audio.transcriptions.create({
       model: "whisper-1",
       file: fs.createReadStream(tmpFile),
       language: "ru",

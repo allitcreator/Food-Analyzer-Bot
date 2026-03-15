@@ -1135,7 +1135,11 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
         const transcript = await transcribeVoice(audioBuffer);
 
         if (!transcript) {
-          bot.sendMessage(chatId, "Не удалось распознать голосовое сообщение. Попробуйте ещё раз.");
+          const hasKey = !!process.env.OPENAI_API_KEY;
+          bot.sendMessage(chatId, hasKey
+            ? "Не удалось распознать голосовое сообщение. Попробуйте ещё раз."
+            : "Голосовые сообщения требуют личного ключа OpenAI. Добавьте OPENAI_API_KEY в секреты проекта."
+          );
           return;
         }
 
