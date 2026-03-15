@@ -1,7 +1,7 @@
 import TelegramBot from "node-telegram-bot-api";
 import ExcelJS from "exceljs";
 import { IStorage } from "./storage";
-import { analyzeFoodText, analyzeFoodImage, generateEveningReport, transcribeVoice, askCoach, FoodItem } from "./openai";
+import { analyzeFoodText, analyzeFoodImage, generateEveningReport, transcribeVoice, askCoach, detectBarcode, FoodItem } from "./openai";
 import { User } from "@shared/schema";
 
 const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
@@ -16,6 +16,49 @@ function progressBar(current: number, goal: number, length = 10): string {
   const filled = Math.round(ratio * length);
   const empty = length - filled;
   return `[${('█'.repeat(filled) + '░'.repeat(empty))}] ${Math.round(ratio * 100)}%`;
+}
+
+async function lookupBarcodeProduct(barcode: string): Promise<(FoodItem & { barcode: string; foundInDb: boolean }) | null> {
+  try {
+    const res = await fetch(`https://world.openfoodfacts.org/api/v0/product/${barcode}.json`);
+    if (!res.ok) return null;
+    const data = await res.json() as any;
+    if (data.status !== 1 || !data.product) return null;
+
+    const p = data.product;
+    const name: string = p.product_name_ru || p.product_name || p.generic_name_ru || p.generic_name || "";
+    if (!name) return null;
+
+    const n = p.nutriments || {};
+    const cal100 = n["energy-kcal_100g"]
+      ? Math.round(n["energy-kcal_100g"])
+      : n["energy_100g"]
+        ? Math.round(n["energy_100g"] / 4.184)
+        : 0;
+    const protein100 = Math.round(n["proteins_100g"] ?? 0);
+    const fat100 = Math.round(n["fat_100g"] ?? 0);
+    const carbs100 = Math.round(n["carbohydrates_100g"] ?? 0);
+
+    const servingStr: string = p.serving_size || "";
+    const servingMatch = servingStr.match(/(\d+)/);
+    const weight = servingMatch ? parseInt(servingMatch[1]) : 100;
+    const ratio = weight / 100;
+
+    return {
+      foodName: name,
+      calories: Math.round(cal100 * ratio),
+      protein: Math.round(protein100 * ratio),
+      fat: Math.round(fat100 * ratio),
+      carbs: Math.round(carbs100 * ratio),
+      weight,
+      mealType: "snack",
+      barcode,
+      foundInDb: true,
+    };
+  } catch (err) {
+    console.error("Open Food Facts lookup error:", err);
+    return null;
+  }
 }
 
 async function buildDailyProgress(storage: IStorage, userId: number, user: User): Promise<string> {
@@ -1161,35 +1204,68 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     // Handle Photo
     if (msg.photo) {
       console.log("Photo received, processing...");
-      bot.sendMessage(chatId, "Анализирую фото...");
+      const statusMsg = await bot.sendMessage(chatId, "📷 Анализирую фото...");
       const fileId = msg.photo[msg.photo.length - 1].file_id;
       try {
         const file = await bot.getFile(fileId);
         const botToken = process.env.TELEGRAM_BOT_TOKEN;
         const fileLink = `https://api.telegram.org/file/bot${botToken}/${file.file_path}`;
-        
+
         const imgResponse = await fetch(fileLink);
         if (!imgResponse.ok) throw new Error(`Failed to fetch image: ${imgResponse.status}`);
-        
-        const arrayBuffer = await imgResponse.arrayBuffer();
-        const base64 = Buffer.from(arrayBuffer).toString('base64');
 
-        const analysis = await analyzeFoodImage(base64);
-        console.log("Vision analysis result:", analysis);
-        
+        const arrayBuffer = await imgResponse.arrayBuffer();
+        const base64 = Buffer.from(arrayBuffer).toString("base64");
+
+        // Step 1: Try barcode detection
+        const barcode = await detectBarcode(base64);
+        let analysis: any = null;
+        let barcodeSource = false;
+
+        if (barcode) {
+          console.log("Barcode detected:", barcode);
+          await bot.editMessageText(`🔍 Найден штрихкод: ${barcode}\nИщу в базе продуктов...`, {
+            chat_id: chatId,
+            message_id: statusMsg.message_id,
+          });
+          const barcodeResult = await lookupBarcodeProduct(barcode);
+          if (barcodeResult) {
+            console.log("Barcode product found:", barcodeResult.foodName);
+            analysis = barcodeResult;
+            barcodeSource = true;
+          } else {
+            console.log("Barcode not found in DB, falling back to vision...");
+            await bot.editMessageText("🔍 Штрихкод не найден в базе, анализирую визуально...", {
+              chat_id: chatId,
+              message_id: statusMsg.message_id
+            });
+          }
+        }
+
+        // Step 2: Fall back to GPT-4o vision
+        if (!analysis) {
+          analysis = await analyzeFoodImage(base64);
+          console.log("Vision analysis result:", analysis);
+        }
+
+        await bot.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
+
         if (analysis && analysis.foodName) {
           (bot as any).pendingLogs = (bot as any).pendingLogs || {};
           (bot as any).pendingLogs[telegramId] = analysis;
 
           const unit = getUnit(analysis.foodName);
-          bot.sendMessage(chatId, buildConfirmMessage(analysis), {
+          const prefix = barcodeSource ? `📦 Найдено по штрихкоду\n\n` : "";
+          const confirmText = prefix + buildConfirmMessage(analysis);
+          bot.sendMessage(chatId, confirmText, {
             reply_markup: buildConfirmKeyboard(unit)
           });
         } else {
-          bot.sendMessage(chatId, "Не удалось распознать еду на фото. Попробуйте более четкий снимок.");
+          bot.sendMessage(chatId, "Не удалось распознать еду на фото. Попробуйте более чёткий снимок.");
         }
       } catch (err: any) {
         console.error("Error processing photo:", err);
+        bot.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
         bot.sendMessage(chatId, "Произошла ошибка при обработке фото.");
       }
     }

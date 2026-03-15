@@ -123,6 +123,32 @@ export async function transcribeVoice(audioBuffer: Buffer): Promise<string | nul
   }
 }
 
+export async function detectBarcode(imageBase64: string): Promise<string | null> {
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      max_tokens: 30,
+      messages: [{
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "If a barcode (EAN-13, EAN-8, UPC-A, QR, etc.) is visible in this image, return ONLY the numeric barcode digits. If no barcode is visible or readable, return exactly: none"
+          },
+          { type: "image_url", image_url: { url: `data:image/jpeg;base64,${imageBase64}` } }
+        ]
+      }]
+    });
+    const result = response.choices[0].message.content?.trim() ?? "";
+    if (!result || result.toLowerCase() === "none") return null;
+    const digits = result.replace(/\D/g, "");
+    return digits.length >= 8 ? digits : null;
+  } catch (error) {
+    console.error("Barcode Detection Error:", error);
+    return null;
+  }
+}
+
 export async function askCoach(
   question: string,
   profile: {
