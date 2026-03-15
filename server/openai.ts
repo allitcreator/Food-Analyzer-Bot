@@ -41,7 +41,7 @@ export async function analyzeFoodText(text: string) {
   }
 }
 
-export async function generateEveningReport(foodItems: { foodName: string; calories: number; protein: number; fat: number; carbs: number; weight: number; foodScore?: number | null }[], totals: { calories: number; protein: number; fat: number; carbs: number }, goals: { caloriesGoal?: number | null; proteinGoal?: number | null; fatGoal?: number | null; carbsGoal?: number | null }, waterMl: number) {
+export async function generateEveningReport(foodItems: { foodName: string; calories: number; protein: number; fat: number; carbs: number; weight: number; foodScore?: number | null }[], totals: { calories: number; protein: number; fat: number; carbs: number }, goals: { caloriesGoal?: number | null; proteinGoal?: number | null; fatGoal?: number | null; carbsGoal?: number | null }) {
   try {
     const foodList = foodItems.map(f => `${f.foodName} (${f.weight}г): ${f.calories} ккал, Б${f.protein} Ж${f.fat} У${f.carbs}${f.foodScore ? `, оценка ${f.foodScore}/10` : ''}`).join('\n');
     const goalsText = goals.caloriesGoal ? `Цели: ${goals.caloriesGoal} ккал, Б${goals.proteinGoal}г, Ж${goals.fatGoal}г, У${goals.carbsGoal}г` : 'Цели не установлены';

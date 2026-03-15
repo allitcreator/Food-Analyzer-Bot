@@ -6,7 +6,6 @@ import { User } from "@shared/schema";
 
 const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
 
-const WATER_TEXT_PATTERN = /^(?:(?:вод[аыу]?\s+(\d+)\s*(?:мл)?)|(?:(\d+)\s*(?:мл)?\s+вод[аыу]?))$/i;
 
 function getUnit(foodName: string): string {
   return foodName.toLowerCase().match(LIQUID_PATTERN) ? 'мл' : 'г';
@@ -103,8 +102,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     const helpText = [
       "/start - Начать работу с ботом",
       "/profile - Настроить профиль (пол, возраст, вес, рост, активность, цель) и рассчитать норму КБЖУ",
-      "/stats - Статистика за сегодня: калории, БЖУ, вода",
-      "/water - Трекер воды: добавить выпитое за день",
+      "/stats - Статистика за сегодня: калории и БЖУ",
       "/history - Последние записи еды с возможностью удаления",
       "/export ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ] - Экспорт дневника в Excel",
       "/clear ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ] - Очистить записи за период",
@@ -230,9 +228,6 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     const today = new Date();
     const stats = await storage.getDailyStats(user.id, today);
 
-    const waterTotal = await storage.getDailyWater(user.id, today);
-    const waterGoal = 2500;
-    
     function progressBar(current: number, goal: number, length = 10): string {
       const ratio = Math.min(current / goal, 1);
       const filled = Math.round(ratio * length);
@@ -253,37 +248,9 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
 
     text += `💪 Белки:    ${stats.protein}г${user.proteinGoal ? ` / ${user.proteinGoal}г` : ''}\n`;
     text += `🧈 Жиры:     ${stats.fat}г${user.fatGoal ? ` / ${user.fatGoal}г` : ''}\n`;
-    text += `🍞 Углеводы: ${stats.carbs}г${user.carbsGoal ? ` / ${user.carbsGoal}г` : ''}\n\n`;
-
-    text += `💧 Вода: ${waterTotal} / ${waterGoal} мл\n`;
-    text += `${progressBar(waterTotal, waterGoal)}`;
+    text += `🍞 Углеводы: ${stats.carbs}г${user.carbsGoal ? ` / ${user.carbsGoal}г` : ''}`;
 
     bot.sendMessage(chatId, text);
-  });
-
-  bot.onText(/\/water/, async (msg) => {
-    const chatId = msg.chat.id;
-    const telegramId = msg.from?.id.toString();
-    if (!telegramId) return;
-
-    const user = await isUserAllowed(chatId, telegramId);
-    if (!user) return;
-
-    const today = new Date();
-    const waterTotal = await storage.getDailyWater(user.id, today);
-    const waterGoal = 2500;
-
-    bot.sendMessage(chatId, `Вода за сегодня: ${waterTotal}мл / ${waterGoal}мл\n\nСколько выпили?`, {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "150мл", callback_data: "water_150" },
-            { text: "250мл", callback_data: "water_250" },
-            { text: "500мл", callback_data: "water_500" }
-          ]
-        ]
-      }
-    });
   });
 
   async function sendEveningReport(user: User, manual = false) {
@@ -293,8 +260,6 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
 
     if (foodLogs.length === 0 && !manual) return;
 
-    const waterTotal = await storage.getDailyWater(user.id, today);
-
     if (foodLogs.length === 0) {
       bot.sendMessage(user.telegramId!, "За сегодня нет записей о еде. Отчёт не сформирован.");
       return;
@@ -303,14 +268,12 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     const report = await generateEveningReport(
       foodLogs.map(f => ({ foodName: f.foodName, calories: f.calories, protein: f.protein, fat: f.fat, carbs: f.carbs, weight: f.weight, foodScore: f.foodScore })),
       { calories: stats.calories, protein: stats.protein, fat: stats.fat, carbs: stats.carbs },
-      { caloriesGoal: user.caloriesGoal, proteinGoal: user.proteinGoal, fatGoal: user.fatGoal, carbsGoal: user.carbsGoal },
-      waterTotal
+      { caloriesGoal: user.caloriesGoal, proteinGoal: user.proteinGoal, fatGoal: user.fatGoal, carbsGoal: user.carbsGoal }
     );
 
     if (report) {
-      let text = `Вечерний отчёт\n\n`;
-      text += `Итого за день: ${stats.calories} ккал | Б${stats.protein}г Ж${stats.fat}г У${stats.carbs}г\n`;
-      text += `Вода: ${waterTotal}мл / 2500мл\n\n`;
+      let text = `📊 Вечерний отчёт\n\n`;
+      text += `Итого за день: ${stats.calories} ккал | Б${stats.protein}г Ж${stats.fat}г У${stats.carbs}г\n\n`;
       text += report;
       bot.sendMessage(user.telegramId!, text);
     }
@@ -652,26 +615,6 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
         chat_id: chatId,
         message_id: query.message?.message_id
       });
-    } else if (query.data.startsWith("water_")) {
-      const amount = parseInt(query.data.split("_")[1]);
-      if (![150, 250, 500].includes(amount)) return;
-      if (!user.isApproved && user.telegramId !== process.env.ADMIN_TELEGRAM_ID) return;
-      await storage.logWater(user.id, amount);
-      const waterTotal = await storage.getDailyWater(user.id, new Date());
-      const waterGoal = 2500;
-      bot.editMessageText(`Записано +${amount}мл\n\nВода за сегодня: ${waterTotal}мл / ${waterGoal}мл\n\nСколько ещё выпили?`, {
-        chat_id: chatId,
-        message_id: query.message?.message_id,
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: "150мл", callback_data: "water_150" },
-              { text: "250мл", callback_data: "water_250" },
-              { text: "500мл", callback_data: "water_500" }
-            ]
-          ]
-        }
-      });
     } else if (query.data.startsWith("rtime_")) {
       const time = query.data.replace("rtime_", "");
       await storage.updateUserReportTime(user.id, time);
@@ -947,18 +890,6 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
 
     // Handle Text
     if (msg.text) {
-      const waterMatch = msg.text.trim().match(WATER_TEXT_PATTERN);
-      if (waterMatch) {
-        const amount = parseInt(waterMatch[1] || waterMatch[2]);
-        if (amount > 0 && amount <= 5000) {
-          await storage.logWater(user.id, amount);
-          const waterTotal = await storage.getDailyWater(user.id, new Date());
-          const waterGoal = 2500;
-          bot.sendMessage(chatId, `Записано +${amount}мл воды\n\nВода за сегодня: ${waterTotal}мл / ${waterGoal}мл`);
-          return;
-        }
-      }
-
       console.log("Text received:", msg.text);
       bot.sendMessage(chatId, "Анализирую текст...");
       try {
