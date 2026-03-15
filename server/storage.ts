@@ -27,6 +27,8 @@ export interface IStorage {
   getAllApprovedUsers(): Promise<User[]>;
   updateUserReportTime(userId: number, time: string): Promise<void>;
   updateUserReminder(userId: number, meal: 'breakfast' | 'lunch' | 'dinner', time: string): Promise<void>;
+  getStreak(userId: number): Promise<number>;
+  getWeeklyFullStats(userId: number): Promise<{ date: string; dayLabel: string; calories: number; protein: number; fat: number; carbs: number }[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -195,6 +197,37 @@ export class DatabaseStorage implements IStorage {
   async updateUserReminder(userId: number, meal: 'breakfast' | 'lunch' | 'dinner', time: string): Promise<void> {
     const field = meal === 'breakfast' ? 'breakfastReminder' : meal === 'lunch' ? 'lunchReminder' : 'dinnerReminder';
     await db.update(users).set({ [field]: time }).where(eq(users.id, userId));
+  }
+
+  async getStreak(userId: number): Promise<number> {
+    const today = new Date();
+    const todayStats = await this.getDailyStats(userId, today);
+    const startOffset = todayStats.calories > 0 ? 0 : 1;
+    let streak = 0;
+    for (let i = startOffset; i < 365; i++) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const s = await this.getDailyStats(userId, d);
+      if (s.calories > 0) {
+        streak++;
+      } else {
+        break;
+      }
+    }
+    return streak;
+  }
+
+  async getWeeklyFullStats(userId: number): Promise<{ date: string; dayLabel: string; calories: number; protein: number; fat: number; carbs: number }[]> {
+    const DAY_RU = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+    const result = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const s = await this.getDailyStats(userId, d);
+      const dd = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`;
+      result.push({ date: d.toISOString().split('T')[0], dayLabel: `${DAY_RU[d.getDay()]} ${dd}`, ...s });
+    }
+    return result;
   }
 }
 

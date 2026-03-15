@@ -174,19 +174,22 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
   bot.onText(/\/help/, async (msg) => {
     const chatId = msg.chat.id;
     const helpText = [
-      "/start - Начать работу с ботом",
-      "/profile - Настроить профиль (пол, возраст, вес, рост, активность, цель) и рассчитать норму КБЖУ",
-      "/stats - Статистика за сегодня: калории и БЖУ",
-      "/history - Последние записи еды с возможностью удаления",
-      "/export ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ] - Экспорт дневника в Excel",
-      "/clear ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ] - Очистить записи за период",
-      "/report - Вечерний отчёт с рекомендациями ИИ (вручную)",
-      "/report_time - Настроить время автоматического отчёта",
-      "/reminders - Напоминания о приёмах пищи (завтрак, обед, ужин)",
-      "/ask [вопрос] - Задать вопрос личному тренеру-нутрициологу",
-      "/users - (Админ) Управление пользователями",
+      "📋 Команды бота:\n",
+      "/start — Начать работу с ботом",
+      "/profile — Настроить профиль (пол, возраст, вес, рост, активность, цель)",
+      "/goal — Быстро изменить цель (похудение / поддержание / набор)",
+      "/stats — Статистика за сегодня + серия дней 🔥",
+      "/week — Разбивка питания по дням за последние 7 дней",
+      "/history — Последние записи еды с возможностью удаления",
+      "/export ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ] — Экспорт дневника в Excel",
+      "/clear ДД.ММ.ГГГГ [ - ДД.ММ.ГГГГ] — Очистить записи за период",
+      "/report — Вечерний отчёт с рекомендациями ИИ (вручную)",
+      "/report_time — Настроить время автоматического отчёта",
+      "/reminders — Напоминания: завтрак, обед, ужин, «нет записей»",
+      "/ask [вопрос] — Вопрос личному тренеру-нутрициологу",
+      "/users — (Админ) Управление пользователями",
       "",
-      "Отправьте текст с описанием еды или фото — бот распознает продукты и посчитает КБЖУ."
+      "Отправьте текст, фото, голосовое или штрихкод — бот распознает и посчитает КБЖУ."
     ].join("\n");
     bot.sendMessage(chatId, helpText);
   });
@@ -430,9 +433,19 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     if (!user) return;
 
     const today = new Date();
-    const stats = await storage.getDailyStats(user.id, today);
+    const [stats, streak] = await Promise.all([
+      storage.getDailyStats(user.id, today),
+      storage.getStreak(user.id),
+    ]);
 
-    let text = `📊 Статистика за сегодня\n\n`;
+    let text = `📊 Статистика за сегодня\n`;
+
+    if (streak > 0) {
+      const streakEmoji = streak >= 14 ? '🏆' : streak >= 7 ? '🔥🔥' : '🔥';
+      text += `${streakEmoji} Стрик: ${streak} ${streak === 1 ? 'день' : streak < 5 ? 'дня' : 'дней'} подряд\n`;
+    }
+
+    text += '\n';
 
     if (user.caloriesGoal) {
       text += `🔥 Калории: ${stats.calories} / ${user.caloriesGoal} ккал\n`;
@@ -446,6 +459,67 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     text += `🍞 Углеводы: ${stats.carbs}г${user.carbsGoal ? ` / ${user.carbsGoal}г` : ''}`;
 
     bot.sendMessage(chatId, text);
+  });
+
+  bot.onText(/\/week/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from?.id.toString();
+    if (!telegramId) return;
+    const user = await isUserAllowed(chatId, telegramId);
+    if (!user) return;
+
+    const days = await storage.getWeeklyFullStats(user.id);
+    const daysWithData = days.filter(d => d.calories > 0);
+    const avgCal = daysWithData.length
+      ? Math.round(daysWithData.reduce((s, d) => s + d.calories, 0) / daysWithData.length)
+      : 0;
+
+    let text = `📅 Статистика за 7 дней\n\n`;
+    for (const d of days) {
+      if (d.calories === 0) {
+        text += `${d.dayLabel}  —\n`;
+      } else {
+        const bar = user.caloriesGoal
+          ? `  ${progressBar(d.calories, user.caloriesGoal, 8)}`
+          : '';
+        text += `${d.dayLabel}  ${d.calories} ккал${bar}\n`;
+        text += `   Б${d.protein} Ж${d.fat} У${d.carbs}\n`;
+      }
+    }
+
+    text += `\n📊 Среднее: ${avgCal} ккал/день (${daysWithData.length}/7 дней с данными)`;
+
+    if (user.caloriesGoal && avgCal > 0) {
+      const diff = avgCal - user.caloriesGoal;
+      text += diff > 0
+        ? `\n⚠️ В среднем превышение на ${diff} ккал/день`
+        : `\n✅ В среднем дефицит ${Math.abs(diff)} ккал/день`;
+    }
+
+    bot.sendMessage(chatId, text);
+  });
+
+  bot.onText(/\/goal/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from?.id.toString();
+    if (!telegramId) return;
+    const user = await isUserAllowed(chatId, telegramId);
+    if (!user) return;
+
+    const goalLabels: Record<string, string> = { lose: 'Похудение', maintain: 'Поддержание', gain: 'Набор массы' };
+    const current = user.goal ? `Текущая цель: ${goalLabels[user.goal] ?? user.goal}\n\n` : '';
+
+    bot.sendMessage(chatId, `${current}Выберите новую цель:`, {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: `🔥 Похудение${user.goal === 'lose' ? ' ✓' : ''}`, callback_data: 'goal_lose' },
+            { text: `⚖️ Поддержание${user.goal === 'maintain' ? ' ✓' : ''}`, callback_data: 'goal_maintain' },
+            { text: `💪 Набор массы${user.goal === 'gain' ? ' ✓' : ''}`, callback_data: 'goal_gain' },
+          ]
+        ]
+      }
+    });
   });
 
   async function sendEveningReport(user: User, manual = false) {
@@ -547,15 +621,18 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     const br = user.breakfastReminder || 'off';
     const lu = user.lunchReminder || 'off';
     const di = user.dinnerReminder || 'off';
+    const nl = user.noLogReminderTime || 'off';
 
     const formatTime = (t: string) => t === 'off' ? 'выкл' : t;
 
-    bot.sendMessage(chatId, `Напоминания о приёмах пищи:\n\nЗавтрак: ${formatTime(br)}\nОбед: ${formatTime(lu)}\nУжин: ${formatTime(di)}\n\nВыберите, что настроить:`, {
+    bot.sendMessage(chatId,
+      `Напоминания:\n\nЗавтрак: ${formatTime(br)}\nОбед: ${formatTime(lu)}\nУжин: ${formatTime(di)}\nНет записей к: ${formatTime(nl)}\n\nВыберите, что настроить:`, {
       reply_markup: {
         inline_keyboard: [
           [{ text: `Завтрак (${formatTime(br)})`, callback_data: "rmnd_breakfast" }],
           [{ text: `Обед (${formatTime(lu)})`, callback_data: "rmnd_lunch" }],
           [{ text: `Ужин (${formatTime(di)})`, callback_data: "rmnd_dinner" }],
+          [{ text: `⚠️ Нет записей к (${formatTime(nl)})`, callback_data: "rmnd_nolog" }],
           [{ text: "Выключить все", callback_data: "rmnd_all_off" }]
         ]
       }
@@ -613,6 +690,22 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
           bot.sendMessage(user.telegramId!, `Время записать ${MEAL_LABELS[meal]?.toLowerCase()}! Отправьте текст или фото еды.`);
         } catch (e) {
           console.error(`Failed to send ${meal} reminder to user ${user.id}:`, e);
+        }
+      }
+
+      // No-log reminder: fires if user set noLogReminderTime and has no food entries today
+      if (user.noLogReminderTime && user.noLogReminderTime !== 'off' && user.noLogReminderTime === currentTime) {
+        const key = `${user.id}_nolog_${todayKey}`;
+        if (!reminderSentKeys.has(key)) {
+          reminderSentKeys.add(key);
+          try {
+            const todayStats = await storage.getDailyStats(user.id, msk);
+            if (todayStats.calories === 0) {
+              bot.sendMessage(user.telegramId!, `⚠️ Ты ещё ничего не записал сегодня. Не забудь залогировать еду!`);
+            }
+          } catch (e) {
+            console.error(`Failed to send no-log reminder to user ${user.id}:`, e);
+          }
         }
       }
     }
@@ -925,9 +1018,22 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
         await storage.updateUserReminder(user.id, 'breakfast', 'off');
         await storage.updateUserReminder(user.id, 'lunch', 'off');
         await storage.updateUserReminder(user.id, 'dinner', 'off');
+        await storage.updateUser(user.id, { noLogReminderTime: 'off' });
         bot.editMessageText("Все напоминания выключены.", {
           chat_id: chatId,
           message_id: query.message?.message_id
+        });
+      } else if (action === 'nolog') {
+        bot.editMessageText(`Напоминание если нет записей\n\nВыберите время (если к этому времени нет ни одной записи — бот напомнит):`, {
+          chat_id: chatId,
+          message_id: query.message?.message_id,
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "11:00", callback_data: "rmset_nolog_11:00" }, { text: "12:00", callback_data: "rmset_nolog_12:00" }, { text: "13:00", callback_data: "rmset_nolog_13:00" }],
+              [{ text: "14:00", callback_data: "rmset_nolog_14:00" }, { text: "15:00", callback_data: "rmset_nolog_15:00" }, { text: "16:00", callback_data: "rmset_nolog_16:00" }],
+              [{ text: "Своё время", callback_data: "rmcustom_nolog" }, { text: "Выкл", callback_data: "rmset_nolog_off" }]
+            ]
+          }
         });
       } else if (['breakfast', 'lunch', 'dinner'].includes(action)) {
         const meal = action as 'breakfast' | 'lunch' | 'dinner';
@@ -948,22 +1054,40 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
         });
       }
     } else if (query.data.startsWith("rmcustom_")) {
-      const meal = query.data.replace("rmcustom_", "") as 'breakfast' | 'lunch' | 'dinner';
-      userStates[telegramId] = { step: 'reminder_time', data: { reminderMeal: meal } };
-      bot.editMessageText(`Введите время для напоминания "${MEAL_LABELS[meal]}" в формате ЧЧ:ММ\nНапример: 07:30`, {
-        chat_id: chatId,
-        message_id: query.message?.message_id
-      });
+      const target = query.data.replace("rmcustom_", "");
+      if (target === 'nolog') {
+        userStates[telegramId] = { step: 'nolog_reminder_time', data: {} };
+        bot.editMessageText(`Введите время в формате ЧЧ:ММ\nНапример: 13:30`, {
+          chat_id: chatId,
+          message_id: query.message?.message_id
+        });
+      } else {
+        const meal = target as 'breakfast' | 'lunch' | 'dinner';
+        userStates[telegramId] = { step: 'reminder_time', data: { reminderMeal: meal } };
+        bot.editMessageText(`Введите время для напоминания "${MEAL_LABELS[meal]}" в формате ЧЧ:ММ\nНапример: 07:30`, {
+          chat_id: chatId,
+          message_id: query.message?.message_id
+        });
+      }
     } else if (query.data.startsWith("rmset_")) {
       const parts = query.data.replace("rmset_", "").split("_");
-      const meal = parts[0] as 'breakfast' | 'lunch' | 'dinner';
+      const meal = parts[0] as 'breakfast' | 'lunch' | 'dinner' | 'nolog';
       const time = parts[1];
-      await storage.updateUserReminder(user.id, meal, time);
-      const label = time === 'off' ? 'выкл' : time;
-      bot.editMessageText(`${MEAL_LABELS[meal]}: ${label}`, {
-        chat_id: chatId,
-        message_id: query.message?.message_id
-      });
+      if (meal === 'nolog') {
+        await storage.updateUser(user.id, { noLogReminderTime: time });
+        const label = time === 'off' ? 'выкл' : time;
+        bot.editMessageText(`⚠️ Нет записей к: ${label}`, {
+          chat_id: chatId,
+          message_id: query.message?.message_id
+        });
+      } else {
+        await storage.updateUserReminder(user.id, meal, time);
+        const label = time === 'off' ? 'выкл' : time;
+        bot.editMessageText(`${MEAL_LABELS[meal]}: ${label}`, {
+          chat_id: chatId,
+          message_id: query.message?.message_id
+        });
+      }
     } else if (query.data.startsWith("set_gender_")) {
       const gender = query.data.split("_")[2];
       userStates[telegramId] = { step: 'age', data: { gender } };
@@ -1063,6 +1187,18 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
           }
         });
       }
+    } else if (query.data.startsWith("goal_")) {
+      const goalMap: Record<string, string> = { lose: 'lose', maintain: 'maintain', gain: 'gain' };
+      const goalLabelMap: Record<string, string> = { lose: 'Похудение', maintain: 'Поддержание веса', gain: 'Набор массы' };
+      const goalKey = query.data.replace("goal_", "");
+      const newGoal = goalMap[goalKey];
+      if (!newGoal) return;
+      await storage.updateUser(user.id, { goal: newGoal });
+      const recalculated = await storage.calculateAndSetGoals(user.id);
+      bot.editMessageText(
+        `✅ Цель изменена: ${goalLabelMap[goalKey]}\n\nНормы на день:\nКкал: ${recalculated.caloriesGoal}\nБелки: ${recalculated.proteinGoal}г\nЖиры: ${recalculated.fatGoal}г\nУглеводы: ${recalculated.carbsGoal}г`,
+        { chat_id: chatId, message_id: query.message?.message_id }
+      );
     } else if (query.data.startsWith("admin_approve_")) {
       if (!user.isAdmin) return;
       const targetUserId = parseInt(query.data.split("_")[2]);
@@ -1137,6 +1273,23 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
           }
         }
         bot.sendMessage(chatId, "Неверный формат. Введите время в формате ЧЧ:ММ, например: 07:30");
+        return;
+      }
+
+      if (state.step === 'nolog_reminder_time') {
+        const timeMatch = (msg.text || '').trim().match(/^(\d{1,2}):(\d{2})$/);
+        if (timeMatch) {
+          const h = parseInt(timeMatch[1]);
+          const m = parseInt(timeMatch[2]);
+          if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+            const time = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+            await storage.updateUser(user.id, { noLogReminderTime: time });
+            delete userStates[telegramId];
+            bot.sendMessage(chatId, `⚠️ Напоминание «нет записей» установлено на ${time}`);
+            return;
+          }
+        }
+        bot.sendMessage(chatId, "Неверный формат. Введите время в формате ЧЧ:ММ, например: 13:30");
         return;
       }
 

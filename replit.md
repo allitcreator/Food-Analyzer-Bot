@@ -5,14 +5,17 @@
 Fullstack nutrition tracking application centered around a Telegram bot. Users log food via text, photo, or voice message; the bot analyses it with OpenAI, calculates КБЖУ, and stores everything in PostgreSQL. A minimal React frontend serves as a status page.
 
 **Core Features:**
-- Telegram bot for food logging via text, photo, or voice
-- GPT-4o for photo analysis (vision), GPT-4o-mini for text/reports, Whisper-1 for voice transcription
+- Telegram bot for food logging via text, photo, voice, or barcode photo
+- GPT-4o for photo/barcode analysis (vision), GPT-4o-mini for text/reports/coach, Whisper-1 for voice transcription
 - Multi-item recognition: one message → multiple food items, each editable before saving
 - Nutritional quality scoring (1–10) with personalized advice in Russian
 - Personal profile setup (age, weight, height, activity, goal) — auto-launches after /start if not filled
 - Mifflin-St Jeor calorie calculation, daily stats with progress bars
-- Configurable meal reminders and evening AI-powered diet reports
-- Excel export, admin whitelist system
+- Streak tracking (consecutive days with food logged), `/week` weekly breakdown, `/goal` quick goal change
+- `/ask` AI coach command with full profile + today's food context
+- Barcode scanning via Open Food Facts API (GPT-4o detects barcode → Open Food Facts lookup)
+- Configurable meal reminders (breakfast/lunch/dinner) + no-log reminder if no entries by a set time
+- Evening AI-powered diet reports, Excel export, admin whitelist system
 
 ## User Preferences
 
@@ -51,7 +54,7 @@ Preferred communication style: Simple, everyday language.
 - telegramId, username, isApproved, isAdmin
 - Profile: age, gender, weight (kg), height (cm), activityLevel, goal
 - Computed: caloriesGoal, proteinGoal, fatGoal, carbsGoal
-- Notifications: reportTime, breakfastReminder, lunchReminder, dinnerReminder
+- Notifications: reportTime, breakfastReminder, lunchReminder, dinnerReminder, noLogReminderTime
 
 **foodLogs** table:
 - userId (FK), foodName, calories, protein, fat, carbs, weight (g/ml), mealType

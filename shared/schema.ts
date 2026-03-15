@@ -23,6 +23,7 @@ export const users = pgTable("users", {
   breakfastReminder: text("breakfast_reminder").default("off"),
   lunchReminder: text("lunch_reminder").default("off"),
   dinnerReminder: text("dinner_reminder").default("off"),
+  noLogReminderTime: text("no_log_reminder_time").default("off"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
