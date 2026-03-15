@@ -736,7 +736,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
 
       const sortedWeightLogs = [...weightLogs].sort((a, b) => new Date(a.date!).getTime() - new Date(b.date!).getTime());
       const topFoods = extractTopFoods(allLogs);
-      const pdfBuffer = generateMonthlyPDF(user, weeklyStats, dailyStats, sortedWeightLogs, topFoods);
+      const pdfBuffer = await generateMonthlyPDF(user, weeklyStats, dailyStats, sortedWeightLogs, topFoods);
 
       const monthName = today.toLocaleString('ru-RU', { month: 'long', year: 'numeric' });
       await bot.sendDocument(chatId, pdfBuffer, {
