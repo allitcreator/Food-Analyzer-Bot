@@ -119,23 +119,67 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
   const userStates: Record<string, { step: string; data: Partial<User> & { reminderMeal?: string } }> = {};
   const pendingMulti: Record<string, FoodItem[]> = {};
 
-  function buildMultiSummary(items: FoodItem[]): string {
-    const MEAL_EMOJI: Record<string, string> = { breakfast: '🌅', lunch: '☀️', dinner: '🌙', snack: '🍎' };
+  const MEAL_EMOJI: Record<string, string> = { breakfast: '🌅', lunch: '☀️', dinner: '🌙', snack: '🍎' };
+
+  function buildMultiSummaryText(items: FoodItem[]): string {
     let text = `🍽 Распознано ${items.length} позиций:\n\n`;
     let totalCal = 0, totalP = 0, totalF = 0, totalC = 0;
-    for (const item of items) {
+    items.forEach((item, i) => {
       const unit = item.foodName.toLowerCase().match(LIQUID_PATTERN) ? 'мл' : 'г';
       const emoji = MEAL_EMOJI[item.mealType] || '🍴';
-      text += `${emoji} ${item.foodName} (${item.weight}${unit})\n`;
+      text += `${i + 1}. ${emoji} ${item.foodName} (${item.weight}${unit})\n`;
       text += `   ${item.calories} ккал | Б${item.protein} Ж${item.fat} У${item.carbs}\n\n`;
       totalCal += item.calories;
       totalP += item.protein;
       totalF += item.fat;
       totalC += item.carbs;
-    }
+    });
     text += `──────────────\n`;
     text += `📊 Итого: ${totalCal} ккал | Б${totalP} Ж${totalF} У${totalC}`;
     return text;
+  }
+
+  function buildMultiSummaryKeyboard(items: FoodItem[]) {
+    const editButtons = items.map((item, i) => {
+      const short = item.foodName.length > 22 ? item.foodName.slice(0, 21) + '…' : item.foodName;
+      return [{ text: `✏️ ${i + 1}. ${short}`, callback_data: `mi_e_${i}` }];
+    });
+    return {
+      inline_keyboard: [
+        ...editButtons,
+        [
+          { text: `✅ Сохранить все (${items.length})`, callback_data: 'save_all' },
+          { text: '❌ Отмена', callback_data: 'cancel_multi' }
+        ]
+      ]
+    };
+  }
+
+  function buildMultiItemEditorText(item: FoodItem, idx: number, total: number): string {
+    const unit = item.foodName.toLowerCase().match(LIQUID_PATTERN) ? 'мл' : 'г';
+    const emoji = MEAL_EMOJI[item.mealType] || '🍴';
+    return `✏️ Редактирование ${idx + 1}/${total}\n\n${emoji} ${item.foodName}\n${item.calories} ккал | Б${item.protein}г Ж${item.fat}г У${item.carbs}г\nВес: ${item.weight}${unit}`;
+  }
+
+  function buildMultiItemEditorKeyboard(idx: number, unit: string) {
+    return {
+      inline_keyboard: [
+        [
+          { text: `-50${unit}`, callback_data: `mi_wm_50_${idx}` },
+          { text: `-10${unit}`, callback_data: `mi_wm_10_${idx}` },
+          { text: `+10${unit}`, callback_data: `mi_wp_10_${idx}` },
+          { text: `+50${unit}`, callback_data: `mi_wp_50_${idx}` },
+        ],
+        [
+          { text: `-100${unit}`, callback_data: `mi_wm_100_${idx}` },
+          { text: `+100${unit}`, callback_data: `mi_wp_100_${idx}` },
+        ],
+        [
+          { text: '⬅️ К списку', callback_data: 'mi_back' },
+          { text: '🗑 Удалить', callback_data: `mi_del_${idx}` }
+        ]
+      ]
+    };
   }
 
   async function processFoodItems(chatId: number, telegramId: string, items: FoodItem[]) {
@@ -148,16 +192,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       });
     } else {
       pendingMulti[telegramId] = items;
-      const summary = buildMultiSummary(items);
-      bot.sendMessage(chatId, summary, {
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: `✅ Сохранить все (${items.length})`, callback_data: 'save_all' },
-              { text: '❌ Отмена', callback_data: 'cancel_multi' }
-            ]
-          ]
-        }
+      bot.sendMessage(chatId, buildMultiSummaryText(items), {
+        reply_markup: buildMultiSummaryKeyboard(items)
       });
     }
   }
@@ -689,6 +725,66 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       bot.editMessageText("❌ Отменено", {
         chat_id: chatId,
         message_id: query.message?.message_id
+      });
+    } else if (query.data.startsWith("mi_e_")) {
+      const idx = parseInt(query.data.slice(5));
+      const items = pendingMulti[telegramId];
+      if (!items || idx >= items.length) return;
+      const item = items[idx];
+      const unit = item.foodName.toLowerCase().match(LIQUID_PATTERN) ? 'мл' : 'г';
+      bot.editMessageText(buildMultiItemEditorText(item, idx, items.length), {
+        chat_id: chatId,
+        message_id: query.message?.message_id,
+        reply_markup: buildMultiItemEditorKeyboard(idx, unit)
+      });
+    } else if (query.data.startsWith("mi_wp_") || query.data.startsWith("mi_wm_")) {
+      const plus = query.data.startsWith("mi_wp_");
+      const parts = query.data.split("_");
+      const amount = parseInt(parts[2]);
+      const idx = parseInt(parts[3]);
+      const items = pendingMulti[telegramId];
+      if (!items || idx >= items.length) return;
+      const item = items[idx];
+      const oldWeight = item.weight;
+      const newWeight = plus ? oldWeight + amount : Math.max(5, oldWeight - amount);
+      if (newWeight === oldWeight) return;
+      const ratio = newWeight / oldWeight;
+      item.weight = newWeight;
+      item.calories = Math.round(item.calories * ratio);
+      item.protein = Math.round(item.protein * ratio);
+      item.fat = Math.round(item.fat * ratio);
+      item.carbs = Math.round(item.carbs * ratio);
+      const unit = item.foodName.toLowerCase().match(LIQUID_PATTERN) ? 'мл' : 'г';
+      bot.editMessageText(buildMultiItemEditorText(item, idx, items.length), {
+        chat_id: chatId,
+        message_id: query.message?.message_id,
+        reply_markup: buildMultiItemEditorKeyboard(idx, unit)
+      });
+    } else if (query.data.startsWith("mi_del_")) {
+      const idx = parseInt(query.data.slice(7));
+      const items = pendingMulti[telegramId];
+      if (!items) return;
+      items.splice(idx, 1);
+      if (items.length === 0) {
+        delete pendingMulti[telegramId];
+        bot.editMessageText("❌ Все позиции удалены", {
+          chat_id: chatId,
+          message_id: query.message?.message_id
+        });
+      } else {
+        bot.editMessageText(buildMultiSummaryText(items), {
+          chat_id: chatId,
+          message_id: query.message?.message_id,
+          reply_markup: buildMultiSummaryKeyboard(items)
+        });
+      }
+    } else if (query.data === "mi_back") {
+      const items = pendingMulti[telegramId];
+      if (!items) return;
+      bot.editMessageText(buildMultiSummaryText(items), {
+        chat_id: chatId,
+        message_id: query.message?.message_id,
+        reply_markup: buildMultiSummaryKeyboard(items)
       });
     } else if (query.data.startsWith("delete_log_")) {
       const logId = parseInt(query.data.split("_")[2]);
