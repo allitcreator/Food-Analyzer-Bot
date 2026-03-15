@@ -1,7 +1,7 @@
 import TelegramBot from "node-telegram-bot-api";
 import ExcelJS from "exceljs";
 import { IStorage } from "./storage";
-import { analyzeFoodText, analyzeFoodImage, generateEveningReport } from "./openai";
+import { analyzeFoodText, analyzeFoodImage, generateEveningReport, transcribeVoice } from "./openai";
 import { User } from "@shared/schema";
 
 const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
@@ -950,14 +950,27 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
 
     // Handle Voice
     if (msg.voice) {
-      console.log("Voice message received:", JSON.stringify(msg.voice, null, 2));
-      // Check for transcription in various possible fields
-      const telegramTranscript = (msg as any).voice.transcription?.text || (msg as any).voice.text;
-      
-      if (telegramTranscript) {
-        console.log("Using Telegram's transcription:", telegramTranscript);
-        bot.sendMessage(chatId, `Текст: "${telegramTranscript}"\nАнализирую...`);
-        const analysis = await analyzeFoodText(telegramTranscript);
+      bot.sendMessage(chatId, "🎤 Распознаю голосовое сообщение...");
+      try {
+        const file = await bot.getFile(msg.voice.file_id);
+        const botToken = process.env.TELEGRAM_BOT_TOKEN;
+        const fileLink = `https://api.telegram.org/file/bot${botToken}/${file.file_path}`;
+
+        const audioResponse = await fetch(fileLink);
+        if (!audioResponse.ok) throw new Error(`Failed to fetch voice: ${audioResponse.status}`);
+
+        const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+        const transcript = await transcribeVoice(audioBuffer);
+
+        if (!transcript) {
+          bot.sendMessage(chatId, "Не удалось распознать голосовое сообщение. Попробуйте ещё раз.");
+          return;
+        }
+
+        console.log("Voice transcription:", transcript);
+        bot.sendMessage(chatId, `🗣 "${transcript}"\n\nАнализирую...`);
+
+        const analysis = await analyzeFoodText(transcript);
         if (analysis && analysis.foodName) {
           (bot as any).pendingLogs = (bot as any).pendingLogs || {};
           (bot as any).pendingLogs[telegramId] = analysis;
@@ -967,13 +980,11 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
             reply_markup: buildConfirmKeyboard(unit)
           });
         } else {
-          bot.sendMessage(chatId, "Не удалось распознать еду в вашем сообщении.");
+          bot.sendMessage(chatId, "Не удалось распознать еду из голосового сообщения. Попробуй описать точнее.");
         }
-      } else {
-        // If not found in the immediate message, maybe it comes as a separate update or field
-        // For now, let's log the full message to see where the text might be
-        console.log("Full message object:", JSON.stringify(msg, null, 2));
-        bot.sendMessage(chatId, "Голос получен, но текст расшифровки не найден. Убедитесь, что в настройках Telegram включена расшифровка или подождите пару секунд.");
+      } catch (err) {
+        console.error("Error processing voice:", err);
+        bot.sendMessage(chatId, "Произошла ошибка при обработке голосового сообщения.");
       }
     }
   });

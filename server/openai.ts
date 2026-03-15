@@ -1,5 +1,7 @@
 import OpenAI from "openai";
 import fs from "fs";
+import path from "path";
+import os from "os";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || "dummy",
@@ -70,6 +72,24 @@ export async function generateEveningReport(foodItems: { foodName: string; calor
   } catch (error) {
     console.error("OpenAI Evening Report Error:", error);
     return null;
+  }
+}
+
+export async function transcribeVoice(audioBuffer: Buffer): Promise<string | null> {
+  const tmpFile = path.join(os.tmpdir(), `voice_${Date.now()}.ogg`);
+  try {
+    fs.writeFileSync(tmpFile, audioBuffer);
+    const response = await openai.audio.transcriptions.create({
+      model: "whisper-1",
+      file: fs.createReadStream(tmpFile),
+      language: "ru",
+    });
+    return response.text || null;
+  } catch (error) {
+    console.error("OpenAI Whisper Error:", error);
+    return null;
+  } finally {
+    try { fs.unlinkSync(tmpFile); } catch {}
   }
 }
 
