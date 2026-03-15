@@ -1,7 +1,7 @@
 import TelegramBot from "node-telegram-bot-api";
 import ExcelJS from "exceljs";
 import { IStorage } from "./storage";
-import { analyzeFoodText, analyzeFoodImage, generateEveningReport, transcribeVoice, FoodItem } from "./openai";
+import { analyzeFoodText, analyzeFoodImage, generateEveningReport, transcribeVoice, askCoach, FoodItem } from "./openai";
 import { User } from "@shared/schema";
 
 const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
@@ -140,11 +140,61 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       "/report - Вечерний отчёт с рекомендациями ИИ (вручную)",
       "/report_time - Настроить время автоматического отчёта",
       "/reminders - Напоминания о приёмах пищи (завтрак, обед, ужин)",
+      "/ask [вопрос] - Задать вопрос личному тренеру-нутрициологу",
       "/users - (Админ) Управление пользователями",
       "",
-      "Отправьте текст с описанием еды или фото - бот распознает продукты и посчитает КБЖУ."
+      "Отправьте текст с описанием еды или фото — бот распознает продукты и посчитает КБЖУ."
     ].join("\n");
     bot.sendMessage(chatId, helpText);
+  });
+
+  bot.onText(/\/ask(?:\s+(.+))?/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from?.id.toString();
+    if (!telegramId) return;
+
+    const user = await isUserAllowed(chatId, telegramId);
+    if (!user) return;
+
+    const question = match?.[1]?.trim();
+    if (!question) {
+      bot.sendMessage(chatId,
+        "🏋️ Задайте вопрос тренеру:\n\n" +
+        "/ask сколько можно съесть на ужин?\n" +
+        "/ask чем заменить творог?\n" +
+        "/ask хватит ли мне белка сегодня?\n" +
+        "/ask что лучше съесть перед тренировкой?"
+      );
+      return;
+    }
+
+    const thinking = await bot.sendMessage(chatId, "🤔 Думаю...");
+
+    const today = new Date();
+    const startOfDay = new Date(today); startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(today); endOfDay.setHours(23, 59, 59, 999);
+    const logs = await storage.getFoodLogsInRange(user.id, startOfDay, endOfDay);
+    const stats = await storage.getDailyStats(user.id, today);
+
+    const todayLog = logs.map(f => ({
+      foodName: f.foodName,
+      calories: f.calories,
+      protein: f.protein,
+      fat: f.fat,
+      carbs: f.carbs,
+      weight: f.weight
+    }));
+
+    const answer = await askCoach(question, user, todayLog, stats);
+
+    await bot.deleteMessage(chatId, thinking.message_id).catch(() => {});
+
+    if (!answer) {
+      bot.sendMessage(chatId, "Не удалось получить ответ. Попробуйте ещё раз.");
+      return;
+    }
+
+    bot.sendMessage(chatId, `🏋️ *Тренер:*\n\n${answer}`, { parse_mode: "Markdown" });
   });
 
   const userStates: Record<string, { step: string; data: Partial<User> & { reminderMeal?: string } }> = {};

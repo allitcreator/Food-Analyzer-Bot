@@ -123,6 +123,66 @@ export async function transcribeVoice(audioBuffer: Buffer): Promise<string | nul
   }
 }
 
+export async function askCoach(
+  question: string,
+  profile: {
+    age?: number | null; weight?: number | null; height?: number | null;
+    gender?: string | null; activityLevel?: string | null; goal?: string | null;
+    caloriesGoal?: number | null; proteinGoal?: number | null;
+    fatGoal?: number | null; carbsGoal?: number | null;
+  },
+  todayLog: { foodName: string; calories: number; protein: number; fat: number; carbs: number; weight: number }[],
+  todayStats: { calories: number; protein: number; fat: number; carbs: number }
+): Promise<string | null> {
+  try {
+    const genderMap: Record<string, string> = { male: 'мужской', female: 'женский' };
+    const activityMap: Record<string, string> = {
+      sedentary: 'малоподвижный', light: 'лёгкая активность',
+      moderate: 'умеренная активность', active: 'высокая активность', very_active: 'очень высокая активность'
+    };
+    const goalMap: Record<string, string> = { lose: 'похудение', maintain: 'поддержание веса', gain: 'набор массы' };
+
+    const profileLines = [
+      profile.age ? `Возраст: ${profile.age} лет` : null,
+      profile.gender ? `Пол: ${genderMap[profile.gender] ?? profile.gender}` : null,
+      profile.weight ? `Вес: ${profile.weight} кг` : null,
+      profile.height ? `Рост: ${profile.height} см` : null,
+      profile.activityLevel ? `Активность: ${activityMap[profile.activityLevel] ?? profile.activityLevel}` : null,
+      profile.goal ? `Цель: ${goalMap[profile.goal] ?? profile.goal}` : null,
+      profile.caloriesGoal ? `Дневная норма: ${profile.caloriesGoal} ккал, Б${profile.proteinGoal}г, Ж${profile.fatGoal}г, У${profile.carbsGoal}г` : null,
+    ].filter(Boolean).join('\n');
+
+    const logLines = todayLog.length > 0
+      ? todayLog.map(f => `• ${f.foodName} (${f.weight}г): ${f.calories} ккал, Б${f.protein} Ж${f.fat} У${f.carbs}`).join('\n')
+      : 'Пока ничего не записано';
+
+    const remaining = profile.caloriesGoal
+      ? `Осталось на сегодня: ${Math.max(0, profile.caloriesGoal - todayStats.calories)} ккал, Б${Math.max(0, (profile.proteinGoal ?? 0) - todayStats.protein)}г, Ж${Math.max(0, (profile.fatGoal ?? 0) - todayStats.fat)}г, У${Math.max(0, (profile.carbsGoal ?? 0) - todayStats.carbs)}г`
+      : '';
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `Ты персональный тренер-нутрициолог. Отвечай на русском языке, дружелюбно и по делу. Опирайся на конкретные данные пользователя.
+Не давай медицинских диагнозов. Если вопрос не по питанию или фитнесу — мягко перенаправь к теме.
+Пиши кратко: 3-5 предложений, без воды. Можно использовать эмодзи умеренно.`
+        },
+        {
+          role: "user",
+          content: `Профиль:\n${profileLines || 'Не заполнен'}\n\nЕда за сегодня:\n${logLines}\n\nИтого съедено: ${todayStats.calories} ккал, Б${todayStats.protein}г, Ж${todayStats.fat}г, У${todayStats.carbs}г\n${remaining}\n\nВопрос: ${question}`
+        }
+      ]
+    });
+
+    return response.choices[0].message.content || null;
+  } catch (error) {
+    console.error("OpenAI Coach Error:", error);
+    return null;
+  }
+}
+
 export async function analyzeFoodImage(imageBase64: string) {
   try {
     const response = await openai.chat.completions.create({
