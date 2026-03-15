@@ -90,7 +90,7 @@ export function generateMonthlyPDF(
 
     // ── Helpers ───────────────────────────────────────────────────
     const ensureSpace = (needed: number) => {
-      if (y + needed > 750) { doc.addPage(); y = 50; }
+      if (y + needed > 745) { doc.addPage(); y = 50; }
     };
 
     const sectionTitle = (title: string) => {
@@ -444,15 +444,20 @@ export function generateMonthlyPDF(
     });
 
     // ── Footer on all pages ───────────────────────────────────────
+    // Footer must stay within maxY (page.height - margin = 842 - 50 = 792).
+    // Drawing beyond maxY causes PDFKit to auto-insert blank pages.
+    const FOOTER_LINE_Y = 758;
+    const FOOTER_TEXT_Y = 763;
     const range = (doc as any).bufferedPageRange();
     const pageCount: number = range.count;
     for (let i = 0; i < pageCount; i++) {
       doc.switchToPage(i);
-      doc.rect(50, 806, W, 0.5).fill(LIGHT);
+      doc.moveTo(50, FOOTER_LINE_Y).lineTo(50 + W, FOOTER_LINE_Y)
+        .strokeColor(LIGHT).lineWidth(0.5).stroke();
       doc.fillColor(GRAY).font("Regular").fontSize(8)
         .text(
           `Calorie Tracker Bot  •  Страница ${i + 1} из ${pageCount}  •  ${new Date().toLocaleDateString("ru-RU")}`,
-          50, 810, { align: "center", width: W }
+          50, FOOTER_TEXT_Y, { align: "center", width: W, lineBreak: false }
         );
     }
 
