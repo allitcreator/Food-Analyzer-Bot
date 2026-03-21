@@ -17,7 +17,7 @@ export interface IStorage {
   deleteFoodLogsInRange(userId: number, startDate: Date, endDate: Date): Promise<void>;
   deleteFoodLog(id: number): Promise<void>;
 
-  getDailyStats(userId: number, date: Date): Promise<{ calories: number; protein: number; fat: number; carbs: number }>;
+  getDailyStats(userId: number, date: Date): Promise<{ calories: number; protein: number; fat: number; carbs: number; fiber: number; sugar: number; sodium: number; saturatedFat: number }>;
   getWeeklyStats(userId: number): Promise<{ date: string; calories: number }[]>;
   getWeeklyFullStats(userId: number): Promise<{ date: string; dayLabel: string; calories: number; protein: number; fat: number; carbs: number }[]>;
   getMonthlyStats(userId: number): Promise<{ weekLabel: string; calories: number; protein: number; fat: number; carbs: number; days: number }[]>;
@@ -92,6 +92,7 @@ export class DatabaseStorage implements IStorage {
   async deleteUser(id: number): Promise<void> {
     await db.delete(foodLogs).where(eq(foodLogs.userId, id));
     await db.delete(weightLogs).where(eq(weightLogs.userId, id));
+    await db.delete(workoutLogs).where(eq(workoutLogs.userId, id));
     await db.delete(users).where(eq(users.id, id));
   }
 
