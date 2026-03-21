@@ -12,8 +12,8 @@ export async function registerRoutes(
   // Drop health_token column if it still exists (migration from old webhook approach)
   try {
     await pool.query(`ALTER TABLE users DROP COLUMN IF EXISTS health_token`);
-  } catch {
-    // ignore — column may already not exist
+  } catch (err) {
+    console.error("Migration warning: failed to drop health_token column:", err);
   }
 
   // Start the bot
