@@ -1,4 +1,4 @@
-import { users, foodLogs, waterLogs, weightLogs, type User, type InsertUser, type FoodLog, type InsertFoodLog, type WeightLog } from "@shared/schema";
+import { users, foodLogs, waterLogs, weightLogs, workoutLogs, type User, type InsertUser, type FoodLog, type InsertFoodLog, type WeightLog, type WorkoutLog, type InsertWorkoutLog } from "@shared/schema";
 import { db } from "./db";
 import { eq, sql, desc, gte, lt } from "drizzle-orm";
 
@@ -33,6 +33,11 @@ export interface IStorage {
   logWeight(userId: number, weight: number): Promise<WeightLog>;
   getWeightLogs(userId: number, limit?: number): Promise<WeightLog[]>;
   getWeightLogsInRange(userId: number, startDate: Date, endDate: Date): Promise<WeightLog[]>;
+
+  createWorkoutLog(log: InsertWorkoutLog): Promise<WorkoutLog>;
+  getDailyWorkouts(userId: number, date: Date): Promise<WorkoutLog[]>;
+  getWorkoutLogs(userId: number, limit?: number): Promise<WorkoutLog[]>;
+  deleteWorkoutLog(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -251,6 +256,30 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(weightLogs).where(
       sql`${weightLogs.userId} = ${userId} AND ${weightLogs.date} >= ${startDate} AND ${weightLogs.date} <= ${endDate}`
     ).orderBy(weightLogs.date);
+  }
+
+  async createWorkoutLog(log: InsertWorkoutLog): Promise<WorkoutLog> {
+    const [entry] = await db.insert(workoutLogs).values(log).returning();
+    return entry;
+  }
+
+  async getDailyWorkouts(userId: number, date: Date): Promise<WorkoutLog[]> {
+    const start = new Date(date); start.setHours(0, 0, 0, 0);
+    const end = new Date(date); end.setHours(23, 59, 59, 999);
+    return db.select().from(workoutLogs).where(
+      sql`${workoutLogs.userId} = ${userId} AND ${workoutLogs.date} >= ${start} AND ${workoutLogs.date} <= ${end}`
+    ).orderBy(desc(workoutLogs.date));
+  }
+
+  async getWorkoutLogs(userId: number, limit = 10): Promise<WorkoutLog[]> {
+    return db.select().from(workoutLogs)
+      .where(eq(workoutLogs.userId, userId))
+      .orderBy(desc(workoutLogs.date))
+      .limit(limit);
+  }
+
+  async deleteWorkoutLog(id: number): Promise<void> {
+    await db.delete(workoutLogs).where(eq(workoutLogs.id, id));
   }
 }
 

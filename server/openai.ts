@@ -62,6 +62,86 @@ Example output: {"items": [{...}, {...}]}`
   }
 }
 
+export type MessageIntent = "food" | "workout" | "both" | "other";
+
+export async function classifyIntent(text: string): Promise<MessageIntent> {
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `Classify the user's message into one of these categories:
+- "food": describes food eaten, drinks, meals
+- "workout": describes physical activity (steps, running, gym, cycling, swimming, elliptical, etc.) or calories burned during exercise
+- "both": describes both food and physical activity
+- "other": unrelated to food or exercise (e.g. greetings, questions, emotions)
+
+Return ONLY a JSON object: {"intent": "food"|"workout"|"both"|"other"}`
+        },
+        { role: "user", content: text }
+      ],
+      response_format: { type: "json_object" }
+    });
+    const result = JSON.parse(response.choices[0].message.content || '{"intent":"other"}');
+    return (result.intent as MessageIntent) || "other";
+  } catch {
+    return "food"; // default to food on error
+  }
+}
+
+export interface WorkoutResult {
+  workoutType: string;   // e.g. "бег", "эллипс", "шаги", "силовая"
+  durationMin: number | null;
+  caloriesBurned: number;
+  description: string;   // human-readable summary in Russian
+}
+
+export async function analyzeWorkout(text: string, userWeightKg: number): Promise<WorkoutResult | null> {
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `You are a fitness expert. The user describes their physical activity.
+
+Extract workout information and estimate calories burned.
+User weight: ${userWeightKg} kg.
+
+Rules for calories:
+- If user explicitly states calories burned — use that value exactly
+- If steps are given: 10000 steps ≈ 400-500 kcal depending on weight
+- If activity type + duration given: use MET values (running ~10 MET, cycling ~8 MET, elliptical ~7 MET, walking ~3.5 MET, strength training ~5 MET, swimming ~8 MET)
+- Formula: kcal = MET × weight_kg × duration_hours
+- Round to nearest 10
+
+Return ONLY a JSON object:
+{
+  "workoutType": string (short type in Russian: "бег", "ходьба", "эллипс", "велосипед", "плавание", "силовая", "йога", "шаги", etc.),
+  "durationMin": number or null (if only steps/kcal given),
+  "caloriesBurned": number,
+  "description": string (short human-readable summary in Russian, e.g. "Бег 30 мин" or "10 000 шагов")
+}`
+        },
+        { role: "user", content: text }
+      ],
+      response_format: { type: "json_object" }
+    });
+    const result = JSON.parse(response.choices[0].message.content || "{}");
+    if (!result.workoutType || !result.caloriesBurned) return null;
+    return {
+      workoutType: result.workoutType,
+      durationMin: result.durationMin ?? null,
+      caloriesBurned: Math.round(result.caloriesBurned),
+      description: result.description || result.workoutType,
+    };
+  } catch (error) {
+    console.error("OpenAI Workout Analysis Error:", error);
+    return null;
+  }
+}
+
 export interface FoodItem {
   foodName: string;
   calories: number;

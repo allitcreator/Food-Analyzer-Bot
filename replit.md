@@ -20,6 +20,7 @@ Fullstack nutrition tracking application centered around a Telegram bot. Users l
 - Meal reminders (breakfast/lunch/dinner) + no-log reminder if no entries by a set time
 - Evening AI-powered diet reports, Excel export, admin whitelist system
 - **Micronutrients** (user-controlled toggle via `/settings`): fiber, sugar, sodium, saturated fat — estimated by AI per food item, shown in `/stats` and daily progress; scales with weight adjustments
+- **Workout tracking**: free-text or voice input ("ran 5km", "30 min elliptical", "10000 steps") → AI estimates calories burned using MET values; `workoutLogs` table; `/workout` shows today's summary; `/stats` and daily progress show net calories (consumed − burned)
 
 ## User Preferences
 
@@ -69,6 +70,9 @@ Preferred communication style: Simple, everyday language.
 
 **weightLogs** table:
 - userId (FK), weight (real, kg with decimals e.g. 85.3), date
+
+**workoutLogs** table:
+- userId (FK), description (e.g. "Бег 30 мин"), workoutType ("бег", "эллипс", "шаги" etc.), durationMin (nullable), caloriesBurned, date
 
 ### Build System
 

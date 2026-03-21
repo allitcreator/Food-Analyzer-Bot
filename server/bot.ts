@@ -1,7 +1,7 @@
 import TelegramBot from "node-telegram-bot-api";
 import ExcelJS from "exceljs";
 import { IStorage } from "./storage";
-import { analyzeFoodText, analyzeFoodImage, generateEveningReport, transcribeVoice, askCoach, detectBarcode, generateWeightAnalysis, FoodItem } from "./openai";
+import { analyzeFoodText, analyzeFoodImage, generateEveningReport, transcribeVoice, askCoach, detectBarcode, generateWeightAnalysis, classifyIntent, analyzeWorkout, FoodItem } from "./openai";
 import { generateMonthlyPDF, extractTopFoods } from "./pdf";
 import { User } from "@shared/schema";
 
@@ -65,6 +65,9 @@ async function lookupBarcodeProduct(barcode: string): Promise<(FoodItem & { barc
 async function buildDailyProgress(storage: IStorage, userId: number, user: User): Promise<string> {
   const today = new Date();
   const stats = await storage.getDailyStats(userId, today);
+  const workouts = await storage.getDailyWorkouts(userId, today);
+  const burnedTotal = workouts.reduce((s, w) => s + w.caloriesBurned, 0);
+  const netCalories = stats.calories - burnedTotal;
 
   let text = `\n\n📊 Прогресс за сегодня:\n`;
 
@@ -74,6 +77,10 @@ async function buildDailyProgress(storage: IStorage, userId: number, user: User)
     text += remaining > 0 ? `  (осталось ${remaining})` : `  ⚠️ норма превышена`;
   } else {
     text += `🔥 Калории: ${stats.calories} ккал`;
+  }
+
+  if (burnedTotal > 0) {
+    text += `\n🏋️ Сожжено: ${burnedTotal} ккал  →  чистые: ${netCalories} ккал`;
   }
 
   text += `\n💪 Б: ${stats.protein}г`;
@@ -185,6 +192,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     { command: "goal",           description: "Быстро изменить цель (похудение/поддержание/набор)" },
     { command: "profile",        description: "Настроить профиль полностью" },
     { command: "editprofile",    description: "Редактировать поля профиля по одному" },
+    { command: "workout",        description: "История тренировок за сегодня" },
     { command: "settings",       description: "Настройки (микронутриенты и др.)" },
     { command: "help",           description: "Список всех команд" },
   ]).catch(err => console.error("setMyCommands error:", err));
@@ -223,6 +231,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       "👤 *Профиль и цели*",
       "/profile — Настроить профиль полностью",
       "/editprofile — Редактировать поля профиля по одному",
+      "/workout — Тренировки сегодня \\+ история",
       "/settings — Настройки (микронутриенты и др.)",
       "/goal — Быстро изменить цель (похудение / поддержание / набор)",
       "",
@@ -295,6 +304,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
 
   const userStates: Record<string, { step: string; data: Partial<User> & { reminderMeal?: string } }> = {};
   const pendingMulti: Record<string, FoodItem[]> = {};
+  const pendingWorkouts: Record<string, { description: string; workoutType: string; durationMin: number | null; caloriesBurned: number }> = {};
 
   const MEAL_EMOJI: Record<string, string> = { breakfast: '🌅', lunch: '☀️', dinner: '🌙', snack: '🍎' };
 
@@ -485,9 +495,10 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     if (!user) return;
 
     const today = new Date();
-    const [stats, streak] = await Promise.all([
+    const [stats, streak, workouts] = await Promise.all([
       storage.getDailyStats(user.id, today),
       storage.getStreak(user.id),
+      storage.getDailyWorkouts(user.id, today),
     ]);
 
     let text = `📊 Статистика за сегодня\n`;
@@ -509,6 +520,16 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     text += `💪 Белки:    ${stats.protein}г${user.proteinGoal ? ` / ${user.proteinGoal}г` : ''}\n`;
     text += `🧈 Жиры:     ${stats.fat}г${user.fatGoal ? ` / ${user.fatGoal}г` : ''}\n`;
     text += `🍞 Углеводы: ${stats.carbs}г${user.carbsGoal ? ` / ${user.carbsGoal}г` : ''}`;
+
+    if (workouts.length > 0) {
+      const burnedTotal = workouts.reduce((s, w) => s + w.caloriesBurned, 0);
+      const netCalories = stats.calories - burnedTotal;
+      text += `\n\n🏋️ Тренировки сегодня:\n`;
+      workouts.forEach(w => {
+        text += `  • ${w.description} — ${w.caloriesBurned} ккал\n`;
+      });
+      text += `⚖️ Чистые калории: ${netCalories} ккал (съедено − сожжено)`;
+    }
 
     if (user.showMicronutrients) {
       const hasMicro = stats.fiber > 0 || stats.sugar > 0 || stats.sodium > 0 || stats.saturatedFat > 0;
@@ -679,6 +700,38 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       }
     });
   }
+
+  // ─── /workout ─────────────────────────────────────────────────────────────
+  bot.onText(/\/workout/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from?.id.toString();
+    if (!telegramId) return;
+    const user = await isUserAllowed(chatId, telegramId);
+    if (!user) return;
+
+    const workouts = await storage.getDailyWorkouts(user.id, new Date());
+    if (workouts.length === 0) {
+      bot.sendMessage(chatId,
+        `🏋️ Сегодня тренировок нет.\n\nПросто напиши что делал — например:\n• *"пробежал 5 км"*\n• *"30 мин на эллипсе"*\n• *"прошёл 10000 шагов"*\n• *"потратил 500 ккал на тренировке"*`,
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+
+    const total = workouts.reduce((s, w) => s + w.caloriesBurned, 0);
+    let text = `🏋️ *Тренировки сегодня:*\n\n`;
+    workouts.forEach(w => {
+      const dur = w.durationMin ? ` · ${w.durationMin} мин` : '';
+      text += `• ${w.description}${dur} — *${w.caloriesBurned} ккал*\n`;
+    });
+    text += `\n🔥 Итого сожжено: *${total} ккал*`;
+
+    const stats = await storage.getDailyStats(user.id, new Date());
+    const net = stats.calories - total;
+    text += `\n⚖️ Чистые калории за день: *${net} ккал* (съедено ${stats.calories} − сожжено ${total})`;
+
+    bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+  });
 
   // ─── /settings ────────────────────────────────────────────────────────────
   bot.onText(/\/settings/, async (msg) => {
@@ -1708,6 +1761,43 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       }
     }
     
+    // ─── workout_save / workout_cancel ────────────────────────────────────
+    if (query.data === "workout_save") {
+      const pending = pendingWorkouts[telegramId];
+      if (!pending) {
+        bot.answerCallbackQuery(query.id, { text: 'Данные устарели, попробуй ещё раз' });
+        return;
+      }
+      delete pendingWorkouts[telegramId];
+
+      await storage.createWorkoutLog({
+        userId: user.id,
+        description: pending.description,
+        workoutType: pending.workoutType,
+        durationMin: pending.durationMin,
+        caloriesBurned: pending.caloriesBurned,
+      });
+
+      const progress = await buildDailyProgress(storage, user.id, user);
+      bot.editMessageText(`✅ Тренировка сохранена: *${pending.description}* — ${pending.caloriesBurned} ккал${progress}`, {
+        chat_id: chatId,
+        message_id: query.message?.message_id,
+        parse_mode: 'Markdown',
+      });
+      bot.answerCallbackQuery(query.id, { text: '✅ Тренировка сохранена' });
+      return;
+    }
+
+    if (query.data === "workout_cancel") {
+      delete pendingWorkouts[telegramId];
+      bot.editMessageText("❌ Тренировка не сохранена", {
+        chat_id: chatId,
+        message_id: query.message?.message_id,
+      });
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
     // ─── toggle_micro ─────────────────────────────────────────────────────
     if (query.data === "toggle_micro") {
       const newVal = !user.showMicronutrients;
@@ -1902,17 +1992,52 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     // Handle Text
     if (msg.text) {
       console.log("Text received:", msg.text);
-      bot.sendMessage(chatId, "Анализирую...");
+      const statusMsg = await bot.sendMessage(chatId, "🔍 Анализирую...");
       try {
-        const items = await analyzeFoodText(msg.text);
-        console.log("Text analysis result:", items);
-        if (items && items.length > 0) {
-          await processFoodItems(chatId, telegramId, items);
-        } else {
-          bot.sendMessage(chatId, "Не удалось распознать еду. Попробуй описать точнее.");
+        const intent = await classifyIntent(msg.text);
+        console.log("Intent:", intent);
+
+        if (intent === "workout" || intent === "both") {
+          const weightKg = user.weight ?? 75;
+          const workout = await analyzeWorkout(msg.text, weightKg);
+          if (workout) {
+            pendingWorkouts[telegramId] = workout;
+            await bot.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
+            const durationText = workout.durationMin ? ` · ${workout.durationMin} мин` : '';
+            bot.sendMessage(chatId,
+              `🏋️ *${workout.description}*\n🔥 Сожжено: ~${workout.caloriesBurned} ккал${durationText}\n\nСохранить тренировку?`,
+              {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                  inline_keyboard: [[
+                    { text: "✅ Сохранить", callback_data: "workout_save" },
+                    { text: "❌ Отмена", callback_data: "workout_cancel" }
+                  ]]
+                }
+              }
+            );
+            if (intent === "both") {
+              const items = await analyzeFoodText(msg.text);
+              if (items && items.length > 0) await processFoodItems(chatId, telegramId, items);
+            }
+            return;
+          }
+        }
+
+        if (intent === "food" || intent === "both" || intent === "other") {
+          const items = await analyzeFoodText(msg.text);
+          await bot.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
+          if (items && items.length > 0) {
+            await processFoodItems(chatId, telegramId, items);
+          } else if (intent === "other") {
+            bot.sendMessage(chatId, "Не понял. Напиши что ты съел или какую тренировку сделал.");
+          } else {
+            bot.sendMessage(chatId, "Не удалось распознать еду. Попробуй описать точнее.");
+          }
         }
       } catch (err) {
         console.error("Error processing text:", err);
+        await bot.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
         bot.sendMessage(chatId, "Произошла ошибка при анализе текста.");
       }
     }

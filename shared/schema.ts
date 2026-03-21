@@ -64,10 +64,21 @@ export const weightLogs = pgTable("weight_logs", {
   date: timestamp("date").defaultNow(),
 });
 
+export const workoutLogs = pgTable("workout_logs", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id),
+  description: text("description").notNull(),   // "бег 30 мин", "эллипс 45 мин"
+  workoutType: text("workout_type").notNull(),   // "бег", "эллипс", "силовая", "шаги" etc.
+  durationMin: integer("duration_min"),          // null if only steps/kcal given
+  caloriesBurned: integer("calories_burned").notNull(),
+  date: timestamp("date").defaultNow(),
+});
+
 export const usersRelations = relations(users, ({ many }) => ({
   logs: many(foodLogs),
   waterLogs: many(waterLogs),
   weightLogs: many(weightLogs),
+  workoutLogs: many(workoutLogs),
 }));
 
 export const foodLogsRelations = relations(foodLogs, ({ one }) => ({
@@ -82,10 +93,15 @@ export const weightLogsRelations = relations(weightLogs, ({ one }) => ({
   user: one(users, { fields: [weightLogs.userId], references: [users.id] }),
 }));
 
+export const workoutLogsRelations = relations(workoutLogs, ({ one }) => ({
+  user: one(users, { fields: [workoutLogs.userId], references: [users.id] }),
+}));
+
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true });
 export const insertFoodLogSchema = createInsertSchema(foodLogs).omit({ id: true, date: true });
 export const insertWaterLogSchema = createInsertSchema(waterLogs).omit({ id: true, date: true });
 export const insertWeightLogSchema = createInsertSchema(weightLogs).omit({ id: true, date: true });
+export const insertWorkoutLogSchema = createInsertSchema(workoutLogs).omit({ id: true, date: true });
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -95,6 +111,8 @@ export type WaterLog = typeof waterLogs.$inferSelect;
 export type InsertWaterLog = z.infer<typeof insertWaterLogSchema>;
 export type WeightLog = typeof weightLogs.$inferSelect;
 export type InsertWeightLog = z.infer<typeof insertWeightLogSchema>;
+export type WorkoutLog = typeof workoutLogs.$inferSelect;
+export type InsertWorkoutLog = z.infer<typeof insertWorkoutLogSchema>;
 
 export type CreateFoodLogRequest = InsertFoodLog;
 export type StatsResponse = {
