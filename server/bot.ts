@@ -7,6 +7,23 @@ import { User } from "@shared/schema";
 
 const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
 
+let botInstance: TelegramBot | null = null;
+
+export async function sendAppleHealthConfirmation(telegramId: string, entries: string[]): Promise<void> {
+  if (!botInstance) return;
+  const list = entries.map(e => `  • ${e}`).join("\n");
+  const totalKcal = entries.reduce((sum, e) => {
+    const m = e.match(/(\d+)\s*ккал/);
+    return sum + (m ? parseInt(m[1]) : 0);
+  }, 0);
+  const text = `📲 *Apple Health синхронизация*\n\n${list}\n\n⚡️ Итого сожжено: *${totalKcal} ккал*`;
+  try {
+    await botInstance.sendMessage(telegramId, text, { parse_mode: "Markdown" });
+  } catch (err) {
+    console.error("sendAppleHealthConfirmation error:", err);
+  }
+}
+
 
 function getUnit(foodName: string): string {
   return foodName.toLowerCase().match(LIQUID_PATTERN) ? 'мл' : 'г';
@@ -174,6 +191,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     });
   }
 
+  botInstance = bot;
+
   // Register bot commands in Telegram menu
   bot.setMyCommands([
     { command: "stats",          description: "Статистика за сегодня + серия дней 🔥" },
@@ -193,6 +212,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     { command: "profile",        description: "Настроить профиль полностью" },
     { command: "editprofile",    description: "Редактировать поля профиля по одному" },
     { command: "workout",        description: "История тренировок за сегодня" },
+    { command: "token",          description: "Токен для синхронизации Apple Health" },
+    { command: "healthsetup",    description: "Инструкция по настройке Apple Health" },
     { command: "settings",       description: "Настройки (микронутриенты и др.)" },
     { command: "help",           description: "Список всех команд" },
   ]).catch(err => console.error("setMyCommands error:", err));
@@ -232,6 +253,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       "/profile — Настроить профиль полностью",
       "/editprofile — Редактировать поля профиля по одному",
       "/workout — Тренировки сегодня \\+ история",
+      "/token — Токен для синхронизации Apple Health",
+      "/healthsetup — Инструкция по настройке Apple Health",
       "/settings — Настройки (микронутриенты и др.)",
       "/goal — Быстро изменить цель (похудение / поддержание / набор)",
       "",
@@ -251,6 +274,65 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       "Отправьте текст, фото блюда, голосовое сообщение или фото штрихкода — бот распознает и посчитает КБЖУ автоматически."
     ].join("\n");
     bot.sendMessage(chatId, helpText, { parse_mode: "Markdown" });
+  });
+
+  bot.onText(/\/token/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from?.id.toString();
+    if (!telegramId) return;
+
+    const user = await isUserAllowed(chatId, telegramId);
+    if (!user) return;
+
+    let token = user.healthToken;
+    if (!token) {
+      token = await storage.generateHealthToken(user.id);
+    }
+
+    const text =
+      `🔑 *Ваш токен Apple Health*\n\n` +
+      `\`${token}\`\n\n` +
+      `Скопируйте токен и вставьте его в Ярлык при настройке.\n` +
+      `Используйте /healthsetup для пошаговой инструкции.`;
+    bot.sendMessage(chatId, text, { parse_mode: "Markdown" });
+  });
+
+  bot.onText(/\/healthsetup/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from?.id.toString();
+    if (!telegramId) return;
+
+    const user = await isUserAllowed(chatId, telegramId);
+    if (!user) return;
+
+    let token = user.healthToken;
+    if (!token) {
+      token = await storage.generateHealthToken(user.id);
+    }
+
+    const serverUrl = process.env.REPLIT_DEPLOYMENT_URL
+      ? `https://${process.env.REPLIT_DEPLOYMENT_URL}`
+      : "https://ВАШ_ДОМЕН";
+
+    const webhookUrl = `${serverUrl}/api/health/apple`;
+
+    const text =
+      `📱 *Настройка Apple Health*\n\n` +
+      `*Шаг 1 — Ваш токен:*\n\`${token}\`\n\n` +
+      `*Шаг 2 — Создайте Ярлык (Shortcuts):*\n` +
+      `Откройте приложение «Команды» на iPhone и добавьте три действия:\n\n` +
+      `1. «Найти образцы здоровья» → Шаги, за сегодня, сумма\n` +
+      `2. «Найти образцы здоровья» → Активная энергия, за сегодня, сумма\n` +
+      `3. «Получить содержимое URL» → POST, URL:\n` +
+      `\`${webhookUrl}\`\n\n` +
+      `Тело запроса (JSON):\n` +
+      `\`{"token":"${token}","steps":<шаги>,"active_calories":<калории>}\`\n\n` +
+      `*Шаг 3 — Автоматизация:*\n` +
+      `«Автоматизация» → «+» → «Время суток» → 22:00 → каждый день.\n\n` +
+      `✅ Данные будут приходить автоматически каждый вечер.\n` +
+      `Чтобы получить токен повторно — /token.`;
+
+    bot.sendMessage(chatId, text, { parse_mode: "Markdown" });
   });
 
   bot.onText(/\/ask(?:\s+(.+))?/, async (msg, match) => {
