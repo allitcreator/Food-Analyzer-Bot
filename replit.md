@@ -21,7 +21,7 @@ Fullstack nutrition tracking application centered around a Telegram bot. Users l
 - Evening AI-powered diet reports, Excel export, admin whitelist system
 - **Micronutrients** (user-controlled toggle via `/settings`): fiber, sugar, sodium, saturated fat — estimated by AI per food item, shown in `/stats` and daily progress; scales with weight adjustments
 - **Workout tracking**: free-text or voice input ("ran 5km", "30 min elliptical", "10000 steps") → AI estimates calories burned using MET values; `workoutLogs` table; `/workout` shows today's summary; `/stats` and daily progress show net calories (consumed − burned)
-- **Apple Health sync**: iPhone users generate a personal token via `/token`, set up an iOS Shortcut (no app needed), which POSTs daily steps + workouts to `POST /api/health/apple`; bot writes to `workoutLogs` with `source="apple_health"` and sends Telegram confirmation; re-sync replaces previous entries (idempotent); `/healthsetup` sends step-by-step guide
+- **Apple Health sync**: `/sync` sends an inline button `shortcuts://run-shortcut?name=HealthSync` that opens the iOS Shortcuts app; the "HealthSync" shortcut collects steps + active calories + workouts from Apple Health, then opens Telegram with a pre-filled `/health {json}` message; user taps Send and the bot saves everything to `workoutLogs` with `source="apple_health"`; re-sync is idempotent (replaces previous entries for that day); `/healthsetup` sends step-by-step shortcut creation guide
 
 ## User Preferences
 
@@ -63,7 +63,6 @@ Preferred communication style: Simple, everyday language.
 - Notifications: reportTime, breakfastReminder, lunchReminder, dinnerReminder, noLogReminderTime
 - Weight reminders: weightReminderTime (HH:MM|off), weightReminderDays ("1,3,5" = Mon,Wed,Fri; "" = all days)
 - showMicronutrients (boolean, default false) — user toggle for fiber/sugar/sodium/saturatedFat display
-- healthToken (text, unique, nullable) — personal token for Apple Health webhook authentication
 
 **foodLogs** table:
 - userId (FK), foodName, calories, protein, fat, carbs, weight (g/ml), mealType

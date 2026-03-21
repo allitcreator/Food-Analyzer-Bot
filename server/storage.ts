@@ -39,9 +39,6 @@ export interface IStorage {
   getWorkoutLogs(userId: number, limit?: number): Promise<WorkoutLog[]>;
   deleteWorkoutLog(id: number): Promise<void>;
   deleteWorkoutLogsBySource(userId: number, date: Date, source: string): Promise<void>;
-
-  generateHealthToken(userId: number): Promise<string>;
-  getUserByHealthToken(token: string): Promise<User | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -295,17 +292,6 @@ export class DatabaseStorage implements IStorage {
     );
   }
 
-  async generateHealthToken(userId: number): Promise<string> {
-    const { randomUUID } = await import("crypto");
-    const token = randomUUID();
-    await db.update(users).set({ healthToken: token }).where(eq(users.id, userId));
-    return token;
-  }
-
-  async getUserByHealthToken(token: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.healthToken, token));
-    return user;
-  }
 }
 
 export const storage = new DatabaseStorage();

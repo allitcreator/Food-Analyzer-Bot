@@ -1,127 +1,183 @@
 /**
- * Integration tests for Apple Health sync.
- * Uses real DB — creates + cleans up test user on each run.
+ * Integration tests for Apple Health /health command flow.
+ * Tests the storage layer that the bot's /health handler uses directly.
+ * Uses real DB — creates and cleans up a test user on each run.
  */
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { storage } from "../server/storage";
 
-const BASE = "http://localhost:5000";
-
-async function post(path: string, body: unknown) {
-  return fetch(`${BASE}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+/** Mirrors the step-calorie calculation logic in bot.ts /health handler */
+function calcStepsCalories(steps: number, activeCalories: number | null, workoutKcal: number): number {
+  return activeCalories !== null
+    ? Math.max(0, activeCalories - workoutKcal)
+    : Math.round(steps * 0.04);
 }
 
-describe("Apple Health full flow", () => {
-  let testUser: Awaited<ReturnType<typeof storage.createUser>>;
-  let token: string;
+describe("Apple Health /health command — storage layer", () => {
+  let testUserId: number;
 
   before(async () => {
-    testUser = await storage.createUser({
-      telegramId: "test_apple_health_999",
-      username: "test_apple_health",
+    const user = await storage.createUser({
+      telegramId: "test_health_cmd_9999",
+      username: "test_health_cmd",
       isApproved: true,
       isAdmin: false,
     });
-    token = await storage.generateHealthToken(testUser.id);
+    testUserId = user.id;
   });
 
   after(async () => {
-    await storage.deleteUser(testUser.id);
+    await storage.deleteUser(testUserId);
   });
 
-  test("generateHealthToken stores token in users table", async () => {
-    const found = await storage.getUserByHealthToken(token);
-    assert.ok(found, "user should be found by token");
-    assert.equal(found!.id, testUser.id);
-    assert.equal(found!.healthToken, token);
-  });
+  test("only steps — creates one apple_health entry", async () => {
+    await storage.deleteWorkoutLogsBySource(testUserId, new Date(), "apple_health");
 
-  test("webhook: only steps, no workouts", async () => {
-    const res = await post("/api/health/apple", {
-      token,
-      steps: 8000,
-      active_calories: 320,
+    const steps = 8000;
+    const stepsKcal = calcStepsCalories(steps, 320, 0);
+
+    await storage.createWorkoutLog({
+      userId: testUserId,
+      description: `${steps.toLocaleString("ru-RU")} шагов`,
+      workoutType: "шаги",
+      durationMin: null,
+      caloriesBurned: stepsKcal,
+      source: "apple_health",
     });
-    assert.equal(res.status, 200);
-    const body = await res.json() as any;
-    assert.equal(body.ok, true);
-    assert.equal(body.logged, 1);
 
-    const workouts = await storage.getDailyWorkouts(testUser.id, new Date());
+    const workouts = await storage.getDailyWorkouts(testUserId, new Date());
     const stepsEntry = workouts.find(w => w.workoutType === "шаги");
     assert.ok(stepsEntry, "steps workout log should exist");
     assert.equal(stepsEntry!.source, "apple_health");
     assert.equal(stepsEntry!.caloriesBurned, 320);
   });
 
-  test("webhook: workouts + steps, calories split correctly", async () => {
-    const res = await post("/api/health/apple", {
-      token,
-      steps: 6000,
-      active_calories: 500,
-      workouts: [{ type: "Бег", duration_min: 30, calories: 280 }],
-    });
-    assert.equal(res.status, 200);
-    const body = await res.json() as any;
-    assert.equal(body.logged, 2);
+  test("workout + steps — calories split correctly (active_calories − workout_kcal)", async () => {
+    await storage.deleteWorkoutLogsBySource(testUserId, new Date(), "apple_health");
 
-    const workouts = await storage.getDailyWorkouts(testUser.id, new Date());
+    const workoutKcal = 280;
+    await storage.createWorkoutLog({
+      userId: testUserId,
+      description: "Бег 30 мин",
+      workoutType: "бег",
+      durationMin: 30,
+      caloriesBurned: workoutKcal,
+      source: "apple_health",
+    });
+
+    const stepsKcal = calcStepsCalories(6000, 500, workoutKcal);
+    await storage.createWorkoutLog({
+      userId: testUserId,
+      description: "6 000 шагов",
+      workoutType: "шаги",
+      durationMin: null,
+      caloriesBurned: stepsKcal,
+      source: "apple_health",
+    });
+
+    const workouts = await storage.getDailyWorkouts(testUserId, new Date());
     const runEntry = workouts.find(w => w.workoutType === "бег");
     const stepsEntry = workouts.find(w => w.workoutType === "шаги");
 
     assert.ok(runEntry, "run entry should exist");
     assert.ok(stepsEntry, "steps entry should exist");
     assert.equal(runEntry!.caloriesBurned, 280);
-    assert.equal(stepsEntry!.caloriesBurned, 220, "steps calories = 500 - 280 = 220");
+    assert.equal(stepsEntry!.caloriesBurned, 220, "steps kcal = 500 − 280 = 220");
     assert.equal(stepsEntry!.source, "apple_health");
   });
 
-  test("webhook: idempotent — re-sync replaces previous apple_health entries", async () => {
-    await post("/api/health/apple", { token, steps: 5000, active_calories: 200 });
-    await post("/api/health/apple", { token, steps: 9000, active_calories: 380 });
+  test("idempotent — re-sync replaces all previous apple_health entries", async () => {
+    // First sync
+    await storage.deleteWorkoutLogsBySource(testUserId, new Date(), "apple_health");
+    await storage.createWorkoutLog({
+      userId: testUserId,
+      description: "5 000 шагов",
+      workoutType: "шаги",
+      durationMin: null,
+      caloriesBurned: 200,
+      source: "apple_health",
+    });
 
-    const workouts = await storage.getDailyWorkouts(testUser.id, new Date());
+    // Second sync (re-sync)
+    await storage.deleteWorkoutLogsBySource(testUserId, new Date(), "apple_health");
+    await storage.createWorkoutLog({
+      userId: testUserId,
+      description: "9 000 шагов",
+      workoutType: "шаги",
+      durationMin: null,
+      caloriesBurned: 380,
+      source: "apple_health",
+    });
+
+    const workouts = await storage.getDailyWorkouts(testUserId, new Date());
     const appleEntries = workouts.filter(w => w.source === "apple_health");
-    assert.equal(appleEntries.length, 1, "should have exactly 1 apple_health entry after re-sync");
+    assert.equal(appleEntries.length, 1, "exactly 1 apple_health entry after re-sync");
     assert.equal(appleEntries[0].caloriesBurned, 380);
   });
 
-  test("webhook: steps > 0 with zero-attributed calories still creates entry", async () => {
-    const res = await post("/api/health/apple", {
-      token,
-      steps: 3000,
-      active_calories: 100,
-      workouts: [{ type: "Силовая", duration_min: 60, calories: 100 }],
-    });
-    assert.equal(res.status, 200);
-    const workouts = await storage.getDailyWorkouts(testUser.id, new Date());
-    const stepsEntry = workouts.find(w => w.workoutType === "шаги");
-    assert.ok(stepsEntry, "steps entry must exist even if calories = 0");
-    assert.equal(stepsEntry!.caloriesBurned, 0, "steps calories = 100 - 100 = 0, allowed");
-  });
+  test("active_calories < workout_kcal — steps calories clamped to 0", async () => {
+    await storage.deleteWorkoutLogsBySource(testUserId, new Date(), "apple_health");
 
-  test("webhook: multiple workouts in one request", async () => {
-    const res = await post("/api/health/apple", {
-      token,
-      active_calories: 600,
-      workouts: [
-        { type: "Бег", duration_min: 30, calories: 300 },
-        { type: "Плавание", duration_min: 45, calories: 300 },
-      ],
-    });
-    assert.equal(res.status, 200);
-    const body = await res.json() as any;
-    assert.equal(body.logged, 2);
-  });
-
-  test("deleteWorkoutLogsBySource removes only apple_health entries", async () => {
+    const workoutKcal = 100;
     await storage.createWorkoutLog({
-      userId: testUser.id,
+      userId: testUserId,
+      description: "Силовая 60 мин",
+      workoutType: "силовая",
+      durationMin: 60,
+      caloriesBurned: workoutKcal,
+      source: "apple_health",
+    });
+
+    const stepsKcal = calcStepsCalories(3000, 100, workoutKcal); // 100 − 100 = 0
+    await storage.createWorkoutLog({
+      userId: testUserId,
+      description: "3 000 шагов",
+      workoutType: "шаги",
+      durationMin: null,
+      caloriesBurned: stepsKcal,
+      source: "apple_health",
+    });
+
+    const workouts = await storage.getDailyWorkouts(testUserId, new Date());
+    const stepsEntry = workouts.find(w => w.workoutType === "шаги");
+    assert.ok(stepsEntry, "steps entry exists even with 0 calories");
+    assert.equal(stepsEntry!.caloriesBurned, 0, "clamped to 0 when active_calories ≤ workout_kcal");
+  });
+
+  test("multiple workouts all saved correctly", async () => {
+    await storage.deleteWorkoutLogsBySource(testUserId, new Date(), "apple_health");
+
+    const workoutList = [
+      { type: "бег",      durationMin: 30, caloriesBurned: 300 },
+      { type: "плавание", durationMin: 45, caloriesBurned: 350 },
+    ];
+
+    for (const w of workoutList) {
+      await storage.createWorkoutLog({
+        userId: testUserId,
+        description: `${w.type} ${w.durationMin} мин`,
+        workoutType: w.type,
+        durationMin: w.durationMin,
+        caloriesBurned: w.caloriesBurned,
+        source: "apple_health",
+      });
+    }
+
+    const saved = await storage.getDailyWorkouts(testUserId, new Date());
+    const appleEntries = saved.filter(w => w.source === "apple_health");
+    assert.equal(appleEntries.length, 2, "both workouts saved");
+
+    const runEntry = appleEntries.find(w => w.workoutType === "бег");
+    assert.ok(runEntry, "run entry exists");
+    assert.equal(runEntry!.caloriesBurned, 300);
+  });
+
+  test("deleteWorkoutLogsBySource removes only apple_health, not manual entries", async () => {
+    await storage.deleteWorkoutLogsBySource(testUserId, new Date(), "apple_health");
+
+    await storage.createWorkoutLog({
+      userId: testUserId,
       description: "Ручная тренировка",
       workoutType: "силовая",
       durationMin: 30,
@@ -129,28 +185,33 @@ describe("Apple Health full flow", () => {
       source: "manual",
     });
 
-    await post("/api/health/apple", {
-      token,
-      steps: 10000,
-      active_calories: 400,
+    await storage.createWorkoutLog({
+      userId: testUserId,
+      description: "10 000 шагов",
+      workoutType: "шаги",
+      durationMin: null,
+      caloriesBurned: 400,
+      source: "apple_health",
     });
 
-    const workouts = await storage.getDailyWorkouts(testUser.id, new Date());
+    // Re-sync: clear apple_health only
+    await storage.deleteWorkoutLogsBySource(testUserId, new Date(), "apple_health");
+
+    const workouts = await storage.getDailyWorkouts(testUserId, new Date());
     const manual = workouts.filter(w => w.source === "manual");
     const apple = workouts.filter(w => w.source === "apple_health");
 
-    assert.ok(manual.length >= 1, "manual entries should survive apple_health sync");
-    assert.equal(apple.length, 1, "only one apple_health entry after sync");
+    assert.ok(manual.length >= 1, "manual entry survives apple_health sync");
+    assert.equal(apple.length, 0, "apple_health entries cleared after delete");
   });
 
-  test("GET /api/health/setup/:token serves HTML page", async () => {
-    const res = await fetch(`${BASE}/api/health/setup/${token}`);
-    assert.equal(res.status, 200);
-    const ct = res.headers.get("content-type") ?? "";
-    assert.ok(ct.includes("text/html"), `Expected HTML, got: ${ct}`);
-    const html = await res.text();
-    assert.ok(html.includes(token), "setup page should contain the token");
-    assert.ok(html.includes("/api/health/apple"), "setup page should contain webhook URL");
-    assert.ok(html.includes("Копировать"), "setup page should have copy buttons");
+  test("fallback calorie calc — steps * 0.04 when no active_calories", () => {
+    const kcal = calcStepsCalories(5000, null, 0);
+    assert.equal(kcal, Math.round(5000 * 0.04)); // 200
+  });
+
+  test("calorie clamping — negative result is floored to 0", () => {
+    const kcal = calcStepsCalories(1000, 50, 100); // 50 − 100 = −50 → 0
+    assert.equal(kcal, 0);
   });
 });
