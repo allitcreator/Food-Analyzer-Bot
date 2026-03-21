@@ -22,14 +22,6 @@ describe("parseHealthPayload — valid payloads", () => {
     assert.deepEqual(r.payload.workouts, []);
   });
 
-  test("active_calories only", () => {
-    const r = parseHealthPayload('{"active_calories":420}');
-    assert.ok(r.ok);
-    if (!r.ok) return;
-    assert.equal(r.payload.steps, null);
-    assert.equal(r.payload.activeCalories, 420);
-  });
-
   test("steps + active_calories", () => {
     const r = parseHealthPayload('{"steps":10000,"active_calories":500}');
     assert.ok(r.ok);
@@ -78,11 +70,12 @@ describe("parseHealthPayload — valid payloads", () => {
     assert.equal(r.payload.workouts[0].calories, 281);
   });
 
-  test("zero steps is valid", () => {
-    const r = parseHealthPayload('{"steps":0,"active_calories":100}');
+  test("steps=0 with workouts is valid (workouts provide storable data)", () => {
+    const r = parseHealthPayload('{"steps":0,"active_calories":100,"workouts":[{"type":"Бег","calories":200}]}');
     assert.ok(r.ok);
     if (!r.ok) return;
     assert.equal(r.payload.steps, 0);
+    assert.equal(r.payload.workouts.length, 1);
   });
 });
 
@@ -206,18 +199,32 @@ describe("parseHealthPayload — invalid payloads", () => {
     assert.equal(r.error, "workout_invalid_duration");
   });
 
-  test("empty object (no fields) → empty_payload", () => {
+  test("empty object (no fields) → no_storable_data", () => {
     const r = parseHealthPayload('{}');
     assert.ok(!r.ok);
     if (r.ok) return;
-    assert.equal(r.error, "empty_payload");
+    assert.equal(r.error, "no_storable_data");
   });
 
-  test("empty workouts array + no steps/calories → empty_payload", () => {
+  test("empty workouts array + no steps → no_storable_data", () => {
     const r = parseHealthPayload('{"workouts":[]}');
     assert.ok(!r.ok);
     if (r.ok) return;
-    assert.equal(r.error, "empty_payload");
+    assert.equal(r.error, "no_storable_data");
+  });
+
+  test("active_calories only (no steps, no workouts) → no_storable_data", () => {
+    const r = parseHealthPayload('{"active_calories":300}');
+    assert.ok(!r.ok);
+    if (r.ok) return;
+    assert.equal(r.error, "no_storable_data");
+  });
+
+  test("steps=0 + active_calories only → no_storable_data", () => {
+    const r = parseHealthPayload('{"steps":0,"active_calories":200}');
+    assert.ok(!r.ok);
+    if (r.ok) return;
+    assert.equal(r.error, "no_storable_data");
   });
 });
 

@@ -361,7 +361,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
         workout_missing_type: "❌ У каждой тренировки должно быть поле `type` (строка).",
         workout_invalid_calories: "❌ У каждой тренировки должно быть поле `calories` (неотрицательное число).",
         workout_invalid_duration: "❌ Поле `duration_min` тренировки должно быть положительным числом.",
-        empty_payload: "❌ Нет данных для сохранения. Передайте хотя бы `steps`, `active_calories` или `workouts`.",
+        no_storable_data: "❌ Нет данных для сохранения. Нужны `steps` (> 0) или непустой `workouts`. `active_calories` без шагов не сохраняется.",
       };
       bot.sendMessage(chatId, msgs[parsed.error] ?? "❌ Ошибка в данных. Используйте /sync для синхронизации.");
       return;

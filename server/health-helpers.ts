@@ -93,9 +93,12 @@ export function parseHealthPayload(rawText: string): HealthParseResult {
     }
   }
 
-  // Must have at least one data point
-  if (steps === null && activeCalories === null && workouts.length === 0) {
-    return { ok: false, error: "empty_payload" };
+  // Must have at least one entry that can actually be stored.
+  // active_calories alone is not storable — it is only used to split step calories.
+  const hasSteps = steps !== null && steps > 0;
+  const hasWorkouts = workouts.length > 0;
+  if (!hasSteps && !hasWorkouts) {
+    return { ok: false, error: "no_storable_data" };
   }
 
   return { ok: true, payload: { steps, activeCalories, workouts } };
