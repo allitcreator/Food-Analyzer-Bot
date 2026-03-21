@@ -4,6 +4,7 @@ import { IStorage } from "./storage";
 import { analyzeFoodText, analyzeFoodImage, generateEveningReport, transcribeVoice, askCoach, detectBarcode, generateWeightAnalysis, classifyIntent, analyzeWorkout, FoodItem } from "./openai";
 import { generateMonthlyPDF, extractTopFoods } from "./pdf";
 import { User } from "@shared/schema";
+import { parseHealthPayload, calcStepsCalories } from "./health-helpers";
 
 const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
 
@@ -307,17 +308,25 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       `1️⃣ «Найти образцы здоровья» → Шаги → Сегодня → Сумма`,
       `2️⃣ «Найти образцы здоровья» → Активная энергия → Сегодня → Сумма`,
       `3️⃣ (опц.) «Найти тренировки» → Сегодня`,
-      `4️⃣ «Текст» — введите JSON, вставив переменные шагов 1–2:`,
+      `4️⃣ «Текст» — введите JSON, вставив переменные из шагов 1–2:`,
       `\`{"steps":8000,"active_calories":320}\``,
+      ``,
+      `Если хотите добавить тренировки (шаг 3️⃣), расширьте JSON:`,
+      `\`{"steps":8000,"active_calories":430,"workouts":[{"type":"Бег","duration_min":30,"calories":280}]}\``,
       ``,
       `5️⃣ «Открыть URL» — вставьте ссылку:`,
       `\`tg://resolve?domain=${botName}&text=/health+[Текст из шага 4]\``,
-      `(Вместо [Текст из шага 4] вставьте переменную Текст из шага 4️⃣)`,
+      `(Вместо [Текст из шага 4] вставьте переменную «Текст» из действия 4️⃣)`,
       ``,
       `Назовите ярлык: *HealthSync* и сохраните.`,
       ``,
-      `*Пример сообщения боту:*`,
-      `/health {"steps":9842,"active_calories":430}`,
+      `*Формат JSON для команды /health:*`,
+      `• \`steps\` — шаги за день (целое число)`,
+      `• \`active_calories\` — активные калории (целое число)`,
+      `• \`workouts\` — массив тренировок (опц.):`,
+      `  – \`type\` — название (строка, обязательно)`,
+      `  – \`calories\` — сожжено ккал (обязательно)`,
+      `  – \`duration_min\` — длительность в минутах (опц.)`,
       ``,
       `*Автоматизация (опц.):*`,
       `«Автоматизация» → «+» → «Время суток» → 22:00 → HealthSync`,
@@ -340,21 +349,25 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       return;
     }
 
-    let data: any;
-    try {
-      data = JSON.parse(jsonText);
-    } catch {
-      bot.sendMessage(chatId, "❌ Не удалось разобрать данные. Используйте /sync для корректной синхронизации.");
+    const parsed = parseHealthPayload(jsonText);
+    if (!parsed.ok) {
+      const msgs: Record<string, string> = {
+        invalid_json: "❌ Неверный JSON. Используйте /sync — Shortcuts отправит правильный формат.",
+        not_object: "❌ Неверный формат данных.",
+        invalid_steps: "❌ Поле `steps` должно быть неотрицательным числом.",
+        invalid_active_calories: "❌ Поле `active_calories` должно быть неотрицательным числом.",
+        workouts_not_array: "❌ Поле `workouts` должно быть массивом.",
+        workout_not_object: "❌ Каждая тренировка в `workouts` должна быть объектом.",
+        workout_missing_type: "❌ У каждой тренировки должно быть поле `type` (строка).",
+        workout_invalid_calories: "❌ У каждой тренировки должно быть поле `calories` (неотрицательное число).",
+        workout_invalid_duration: "❌ Поле `duration_min` тренировки должно быть положительным числом.",
+        empty_payload: "❌ Нет данных для сохранения. Передайте хотя бы `steps`, `active_calories` или `workouts`.",
+      };
+      bot.sendMessage(chatId, msgs[parsed.error] ?? "❌ Ошибка в данных. Используйте /sync для синхронизации.");
       return;
     }
 
-    const steps = typeof data.steps === "number" && data.steps >= 0 ? Math.round(data.steps) : null;
-    const activeCalories = typeof data.active_calories === "number" && data.active_calories >= 0
-      ? Math.round(data.active_calories) : null;
-    const workoutsRaw: any[] = Array.isArray(data.workouts) ? data.workouts : [];
-    const workouts = workoutsRaw.filter(
-      (w: any) => w && typeof w.type === "string" && typeof w.calories === "number"
-    );
+    const { steps, activeCalories, workouts } = parsed.payload;
 
     const today = new Date();
     await storage.deleteWorkoutLogsBySource(user.id, today, "apple_health");
@@ -362,27 +375,23 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     const savedLabels: string[] = [];
 
     for (const w of workouts) {
-      const durationMin = typeof w.duration_min === "number" ? Math.round(w.duration_min) : null;
-      const kcal = Math.round(w.calories);
-      const description = durationMin ? `${w.type} ${durationMin} мин` : w.type;
+      const description = w.durationMin ? `${w.type} ${w.durationMin} мин` : w.type;
       await storage.createWorkoutLog({
         userId: user.id,
         description,
         workoutType: w.type.toLowerCase(),
-        durationMin,
-        caloriesBurned: kcal,
+        durationMin: w.durationMin,
+        caloriesBurned: w.calories,
         source: "apple_health",
       });
-      savedLabels.push(durationMin
-        ? `${w.type} ${durationMin} мин — ${kcal} ккал`
-        : `${w.type} — ${kcal} ккал`);
+      savedLabels.push(w.durationMin
+        ? `${w.type} ${w.durationMin} мин — ${w.calories} ккал`
+        : `${w.type} — ${w.calories} ккал`);
     }
 
     if (steps !== null && steps > 0) {
-      const workoutKcal = workouts.reduce((s: number, w: any) => s + Math.round(w.calories), 0);
-      const stepsKcal = activeCalories !== null
-        ? Math.max(0, activeCalories - workoutKcal)
-        : Math.round(steps * 0.04);
+      const workoutKcal = workouts.reduce((s, w) => s + w.calories, 0);
+      const stepsKcal = calcStepsCalories(steps, activeCalories, workoutKcal);
 
       await storage.createWorkoutLog({
         userId: user.id,
@@ -396,7 +405,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     }
 
     if (savedLabels.length === 0) {
-      bot.sendMessage(chatId, "Нет активности для сохранения. Проверьте JSON-данные.");
+      bot.sendMessage(chatId, "Нет активности для сохранения. Проверьте переданные данные.");
       return;
     }
 

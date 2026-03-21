@@ -1,20 +1,249 @@
 /**
- * Integration tests for Apple Health /health command flow.
- * Tests the storage layer that the bot's /health handler uses directly.
- * Uses real DB — creates and cleans up a test user on each run.
+ * Integration + unit tests for Apple Health /health command flow.
+ *
+ * Section 1: Pure parse/validation tests (no DB) — tests parseHealthPayload()
+ *            and calcStepsCalories() from server/health-helpers.ts
+ * Section 2: Storage integration tests — tests DB operations that the bot handler uses
  */
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { parseHealthPayload, calcStepsCalories } from "../server/health-helpers";
 import { storage } from "../server/storage";
 
-/** Mirrors the step-calorie calculation logic in bot.ts /health handler */
-function calcStepsCalories(steps: number, activeCalories: number | null, workoutKcal: number): number {
-  return activeCalories !== null
-    ? Math.max(0, activeCalories - workoutKcal)
-    : Math.round(steps * 0.04);
-}
+// ─── Section 1: parseHealthPayload — parse / validation ───────────────────────
 
-describe("Apple Health /health command — storage layer", () => {
+describe("parseHealthPayload — valid payloads", () => {
+  test("steps only", () => {
+    const r = parseHealthPayload('{"steps":8000}');
+    assert.ok(r.ok);
+    if (!r.ok) return;
+    assert.equal(r.payload.steps, 8000);
+    assert.equal(r.payload.activeCalories, null);
+    assert.deepEqual(r.payload.workouts, []);
+  });
+
+  test("active_calories only", () => {
+    const r = parseHealthPayload('{"active_calories":420}');
+    assert.ok(r.ok);
+    if (!r.ok) return;
+    assert.equal(r.payload.steps, null);
+    assert.equal(r.payload.activeCalories, 420);
+  });
+
+  test("steps + active_calories", () => {
+    const r = parseHealthPayload('{"steps":10000,"active_calories":500}');
+    assert.ok(r.ok);
+    if (!r.ok) return;
+    assert.equal(r.payload.steps, 10000);
+    assert.equal(r.payload.activeCalories, 500);
+  });
+
+  test("steps + active_calories + one workout", () => {
+    const json = '{"steps":9842,"active_calories":430,"workouts":[{"type":"Бег","duration_min":30,"calories":280}]}';
+    const r = parseHealthPayload(json);
+    assert.ok(r.ok);
+    if (!r.ok) return;
+    assert.equal(r.payload.workouts.length, 1);
+    assert.equal(r.payload.workouts[0].type, "Бег");
+    assert.equal(r.payload.workouts[0].durationMin, 30);
+    assert.equal(r.payload.workouts[0].calories, 280);
+  });
+
+  test("workout without duration_min — durationMin is null", () => {
+    const r = parseHealthPayload('{"workouts":[{"type":"Силовая","calories":200}]}');
+    assert.ok(r.ok);
+    if (!r.ok) return;
+    assert.equal(r.payload.workouts[0].durationMin, null);
+  });
+
+  test("multiple workouts", () => {
+    const json = '{"active_calories":600,"workouts":[{"type":"Бег","duration_min":30,"calories":300},{"type":"Плавание","duration_min":45,"calories":300}]}';
+    const r = parseHealthPayload(json);
+    assert.ok(r.ok);
+    if (!r.ok) return;
+    assert.equal(r.payload.workouts.length, 2);
+  });
+
+  test("fractional steps are rounded", () => {
+    const r = parseHealthPayload('{"steps":8000.7}');
+    assert.ok(r.ok);
+    if (!r.ok) return;
+    assert.equal(r.payload.steps, 8001);
+  });
+
+  test("fractional calories are rounded", () => {
+    const r = parseHealthPayload('{"workouts":[{"type":"Бег","calories":280.6}]}');
+    assert.ok(r.ok);
+    if (!r.ok) return;
+    assert.equal(r.payload.workouts[0].calories, 281);
+  });
+
+  test("zero steps is valid", () => {
+    const r = parseHealthPayload('{"steps":0,"active_calories":100}');
+    assert.ok(r.ok);
+    if (!r.ok) return;
+    assert.equal(r.payload.steps, 0);
+  });
+});
+
+describe("parseHealthPayload — invalid payloads", () => {
+  test("invalid JSON syntax → invalid_json", () => {
+    const r = parseHealthPayload("{not valid json");
+    assert.ok(!r.ok);
+    if (r.ok) return;
+    assert.equal(r.error, "invalid_json");
+  });
+
+  test("JSON array instead of object → not_object", () => {
+    const r = parseHealthPayload('[{"steps":1000}]');
+    assert.ok(!r.ok);
+    if (r.ok) return;
+    assert.equal(r.error, "not_object");
+  });
+
+  test("JSON string instead of object → not_object", () => {
+    const r = parseHealthPayload('"hello"');
+    assert.ok(!r.ok);
+    if (r.ok) return;
+    assert.equal(r.error, "not_object");
+  });
+
+  test("steps is string → invalid_steps", () => {
+    const r = parseHealthPayload('{"steps":"8000"}');
+    assert.ok(!r.ok);
+    if (r.ok) return;
+    assert.equal(r.error, "invalid_steps");
+  });
+
+  test("steps is negative → invalid_steps", () => {
+    const r = parseHealthPayload('{"steps":-100}');
+    assert.ok(!r.ok);
+    if (r.ok) return;
+    assert.equal(r.error, "invalid_steps");
+  });
+
+  test("steps is NaN (via string 'NaN') — not valid JSON number, so invalid JSON", () => {
+    const r = parseHealthPayload('{"steps":NaN}');
+    assert.ok(!r.ok);
+    if (r.ok) return;
+    assert.equal(r.error, "invalid_json");
+  });
+
+  test("steps is Infinity (via string 'Infinity') — invalid JSON", () => {
+    const r = parseHealthPayload('{"steps":Infinity}');
+    assert.ok(!r.ok);
+    if (r.ok) return;
+    assert.equal(r.error, "invalid_json");
+  });
+
+  test("active_calories is negative → invalid_active_calories", () => {
+    const r = parseHealthPayload('{"steps":5000,"active_calories":-10}');
+    assert.ok(!r.ok);
+    if (r.ok) return;
+    assert.equal(r.error, "invalid_active_calories");
+  });
+
+  test("active_calories is string → invalid_active_calories", () => {
+    const r = parseHealthPayload('{"active_calories":"много"}');
+    assert.ok(!r.ok);
+    if (r.ok) return;
+    assert.equal(r.error, "invalid_active_calories");
+  });
+
+  test("workouts is not array → workouts_not_array", () => {
+    const r = parseHealthPayload('{"workouts":"Бег 30 мин"}');
+    assert.ok(!r.ok);
+    if (r.ok) return;
+    assert.equal(r.error, "workouts_not_array");
+  });
+
+  test("workout item is null → workout_not_object", () => {
+    const r = parseHealthPayload('{"workouts":[null]}');
+    assert.ok(!r.ok);
+    if (r.ok) return;
+    assert.equal(r.error, "workout_not_object");
+  });
+
+  test("workout missing type → workout_missing_type", () => {
+    const r = parseHealthPayload('{"workouts":[{"calories":200}]}');
+    assert.ok(!r.ok);
+    if (r.ok) return;
+    assert.equal(r.error, "workout_missing_type");
+  });
+
+  test("workout empty type string → workout_missing_type", () => {
+    const r = parseHealthPayload('{"workouts":[{"type":"","calories":200}]}');
+    assert.ok(!r.ok);
+    if (r.ok) return;
+    assert.equal(r.error, "workout_missing_type");
+  });
+
+  test("workout missing calories → workout_invalid_calories", () => {
+    const r = parseHealthPayload('{"workouts":[{"type":"Бег"}]}');
+    assert.ok(!r.ok);
+    if (r.ok) return;
+    assert.equal(r.error, "workout_invalid_calories");
+  });
+
+  test("workout negative calories → workout_invalid_calories", () => {
+    const r = parseHealthPayload('{"workouts":[{"type":"Бег","calories":-50}]}');
+    assert.ok(!r.ok);
+    if (r.ok) return;
+    assert.equal(r.error, "workout_invalid_calories");
+  });
+
+  test("workout duration_min is 0 → workout_invalid_duration", () => {
+    const r = parseHealthPayload('{"workouts":[{"type":"Бег","calories":200,"duration_min":0}]}');
+    assert.ok(!r.ok);
+    if (r.ok) return;
+    assert.equal(r.error, "workout_invalid_duration");
+  });
+
+  test("workout duration_min is negative → workout_invalid_duration", () => {
+    const r = parseHealthPayload('{"workouts":[{"type":"Бег","calories":200,"duration_min":-5}]}');
+    assert.ok(!r.ok);
+    if (r.ok) return;
+    assert.equal(r.error, "workout_invalid_duration");
+  });
+
+  test("empty object (no fields) → empty_payload", () => {
+    const r = parseHealthPayload('{}');
+    assert.ok(!r.ok);
+    if (r.ok) return;
+    assert.equal(r.error, "empty_payload");
+  });
+
+  test("empty workouts array + no steps/calories → empty_payload", () => {
+    const r = parseHealthPayload('{"workouts":[]}');
+    assert.ok(!r.ok);
+    if (r.ok) return;
+    assert.equal(r.error, "empty_payload");
+  });
+});
+
+// ─── Section 2: calcStepsCalories ─────────────────────────────────────────────
+
+describe("calcStepsCalories", () => {
+  test("returns active_calories − workoutKcal", () => {
+    assert.equal(calcStepsCalories(8000, 400, 200), 200);
+  });
+
+  test("clamps negative result to 0", () => {
+    assert.equal(calcStepsCalories(1000, 50, 200), 0);
+  });
+
+  test("fallback steps * 0.04 when activeCalories is null", () => {
+    assert.equal(calcStepsCalories(5000, null, 0), Math.round(5000 * 0.04));
+  });
+
+  test("zero activeCalories − zero workoutKcal = 0", () => {
+    assert.equal(calcStepsCalories(10000, 0, 0), 0);
+  });
+});
+
+// ─── Section 3: Storage integration — what the bot handler does ───────────────
+
+describe("Apple Health storage integration", () => {
   let testUserId: number;
 
   before(async () => {
@@ -31,63 +260,72 @@ describe("Apple Health /health command — storage layer", () => {
     await storage.deleteUser(testUserId);
   });
 
-  test("only steps — creates one apple_health entry", async () => {
+  test("valid payload: steps only — stores one apple_health entry", async () => {
     await storage.deleteWorkoutLogsBySource(testUserId, new Date(), "apple_health");
 
-    const steps = 8000;
-    const stepsKcal = calcStepsCalories(steps, 320, 0);
+    const r = parseHealthPayload('{"steps":8000,"active_calories":320}');
+    assert.ok(r.ok);
+    if (!r.ok) return;
+    const { steps, activeCalories, workouts } = r.payload;
+    const workoutKcal = workouts.reduce((s, w) => s + w.calories, 0);
+    const stepsKcal = calcStepsCalories(steps!, activeCalories, workoutKcal);
 
     await storage.createWorkoutLog({
       userId: testUserId,
-      description: `${steps.toLocaleString("ru-RU")} шагов`,
+      description: `${steps!.toLocaleString("ru-RU")} шагов`,
       workoutType: "шаги",
       durationMin: null,
       caloriesBurned: stepsKcal,
       source: "apple_health",
     });
 
-    const workouts = await storage.getDailyWorkouts(testUserId, new Date());
-    const stepsEntry = workouts.find(w => w.workoutType === "шаги");
-    assert.ok(stepsEntry, "steps workout log should exist");
-    assert.equal(stepsEntry!.source, "apple_health");
-    assert.equal(stepsEntry!.caloriesBurned, 320);
+    const saved = await storage.getDailyWorkouts(testUserId, new Date());
+    const entry = saved.find(w => w.workoutType === "шаги");
+    assert.ok(entry, "steps entry saved");
+    assert.equal(entry!.source, "apple_health");
+    assert.equal(entry!.caloriesBurned, 320);
   });
 
-  test("workout + steps — calories split correctly (active_calories − workout_kcal)", async () => {
+  test("valid payload: workouts + steps — correct calorie split", async () => {
     await storage.deleteWorkoutLogsBySource(testUserId, new Date(), "apple_health");
 
-    const workoutKcal = 280;
-    await storage.createWorkoutLog({
-      userId: testUserId,
-      description: "Бег 30 мин",
-      workoutType: "бег",
-      durationMin: 30,
-      caloriesBurned: workoutKcal,
-      source: "apple_health",
-    });
+    const r = parseHealthPayload('{"steps":6000,"active_calories":500,"workouts":[{"type":"Бег","duration_min":30,"calories":280}]}');
+    assert.ok(r.ok);
+    if (!r.ok) return;
+    const { steps, activeCalories, workouts } = r.payload;
+    const workoutKcal = workouts.reduce((s, w) => s + w.calories, 0);
 
-    const stepsKcal = calcStepsCalories(6000, 500, workoutKcal);
+    for (const w of workouts) {
+      await storage.createWorkoutLog({
+        userId: testUserId,
+        description: w.durationMin ? `${w.type} ${w.durationMin} мин` : w.type,
+        workoutType: w.type.toLowerCase(),
+        durationMin: w.durationMin,
+        caloriesBurned: w.calories,
+        source: "apple_health",
+      });
+    }
+
+    const stepsKcal = calcStepsCalories(steps!, activeCalories, workoutKcal);
     await storage.createWorkoutLog({
       userId: testUserId,
-      description: "6 000 шагов",
+      description: `${steps!.toLocaleString("ru-RU")} шагов`,
       workoutType: "шаги",
       durationMin: null,
       caloriesBurned: stepsKcal,
       source: "apple_health",
     });
 
-    const workouts = await storage.getDailyWorkouts(testUserId, new Date());
-    const runEntry = workouts.find(w => w.workoutType === "бег");
-    const stepsEntry = workouts.find(w => w.workoutType === "шаги");
-
+    const saved = await storage.getDailyWorkouts(testUserId, new Date());
+    const runEntry = saved.find(w => w.workoutType === "бег");
+    const stepsEntry = saved.find(w => w.workoutType === "шаги");
     assert.ok(runEntry, "run entry should exist");
     assert.ok(stepsEntry, "steps entry should exist");
     assert.equal(runEntry!.caloriesBurned, 280);
     assert.equal(stepsEntry!.caloriesBurned, 220, "steps kcal = 500 − 280 = 220");
-    assert.equal(stepsEntry!.source, "apple_health");
   });
 
-  test("idempotent — re-sync replaces all previous apple_health entries", async () => {
+  test("idempotent — re-sync replaces previous apple_health entries", async () => {
     // First sync
     await storage.deleteWorkoutLogsBySource(testUserId, new Date(), "apple_health");
     await storage.createWorkoutLog({
@@ -99,7 +337,7 @@ describe("Apple Health /health command — storage layer", () => {
       source: "apple_health",
     });
 
-    // Second sync (re-sync)
+    // Re-sync
     await storage.deleteWorkoutLogsBySource(testUserId, new Date(), "apple_health");
     await storage.createWorkoutLog({
       userId: testUserId,
@@ -110,70 +348,13 @@ describe("Apple Health /health command — storage layer", () => {
       source: "apple_health",
     });
 
-    const workouts = await storage.getDailyWorkouts(testUserId, new Date());
-    const appleEntries = workouts.filter(w => w.source === "apple_health");
-    assert.equal(appleEntries.length, 1, "exactly 1 apple_health entry after re-sync");
-    assert.equal(appleEntries[0].caloriesBurned, 380);
-  });
-
-  test("active_calories < workout_kcal — steps calories clamped to 0", async () => {
-    await storage.deleteWorkoutLogsBySource(testUserId, new Date(), "apple_health");
-
-    const workoutKcal = 100;
-    await storage.createWorkoutLog({
-      userId: testUserId,
-      description: "Силовая 60 мин",
-      workoutType: "силовая",
-      durationMin: 60,
-      caloriesBurned: workoutKcal,
-      source: "apple_health",
-    });
-
-    const stepsKcal = calcStepsCalories(3000, 100, workoutKcal); // 100 − 100 = 0
-    await storage.createWorkoutLog({
-      userId: testUserId,
-      description: "3 000 шагов",
-      workoutType: "шаги",
-      durationMin: null,
-      caloriesBurned: stepsKcal,
-      source: "apple_health",
-    });
-
-    const workouts = await storage.getDailyWorkouts(testUserId, new Date());
-    const stepsEntry = workouts.find(w => w.workoutType === "шаги");
-    assert.ok(stepsEntry, "steps entry exists even with 0 calories");
-    assert.equal(stepsEntry!.caloriesBurned, 0, "clamped to 0 when active_calories ≤ workout_kcal");
-  });
-
-  test("multiple workouts all saved correctly", async () => {
-    await storage.deleteWorkoutLogsBySource(testUserId, new Date(), "apple_health");
-
-    const workoutList = [
-      { type: "бег",      durationMin: 30, caloriesBurned: 300 },
-      { type: "плавание", durationMin: 45, caloriesBurned: 350 },
-    ];
-
-    for (const w of workoutList) {
-      await storage.createWorkoutLog({
-        userId: testUserId,
-        description: `${w.type} ${w.durationMin} мин`,
-        workoutType: w.type,
-        durationMin: w.durationMin,
-        caloriesBurned: w.caloriesBurned,
-        source: "apple_health",
-      });
-    }
-
     const saved = await storage.getDailyWorkouts(testUserId, new Date());
-    const appleEntries = saved.filter(w => w.source === "apple_health");
-    assert.equal(appleEntries.length, 2, "both workouts saved");
-
-    const runEntry = appleEntries.find(w => w.workoutType === "бег");
-    assert.ok(runEntry, "run entry exists");
-    assert.equal(runEntry!.caloriesBurned, 300);
+    const apple = saved.filter(w => w.source === "apple_health");
+    assert.equal(apple.length, 1, "exactly 1 entry after re-sync");
+    assert.equal(apple[0].caloriesBurned, 380);
   });
 
-  test("deleteWorkoutLogsBySource removes only apple_health, not manual entries", async () => {
+  test("deleteWorkoutLogsBySource does not remove manual entries", async () => {
     await storage.deleteWorkoutLogsBySource(testUserId, new Date(), "apple_health");
 
     await storage.createWorkoutLog({
@@ -194,24 +375,12 @@ describe("Apple Health /health command — storage layer", () => {
       source: "apple_health",
     });
 
-    // Re-sync: clear apple_health only
     await storage.deleteWorkoutLogsBySource(testUserId, new Date(), "apple_health");
 
-    const workouts = await storage.getDailyWorkouts(testUserId, new Date());
-    const manual = workouts.filter(w => w.source === "manual");
-    const apple = workouts.filter(w => w.source === "apple_health");
-
-    assert.ok(manual.length >= 1, "manual entry survives apple_health sync");
-    assert.equal(apple.length, 0, "apple_health entries cleared after delete");
-  });
-
-  test("fallback calorie calc — steps * 0.04 when no active_calories", () => {
-    const kcal = calcStepsCalories(5000, null, 0);
-    assert.equal(kcal, Math.round(5000 * 0.04)); // 200
-  });
-
-  test("calorie clamping — negative result is floored to 0", () => {
-    const kcal = calcStepsCalories(1000, 50, 100); // 50 − 100 = −50 → 0
-    assert.equal(kcal, 0);
+    const saved = await storage.getDailyWorkouts(testUserId, new Date());
+    const manual = saved.filter(w => w.source === "manual");
+    const apple = saved.filter(w => w.source === "apple_health");
+    assert.ok(manual.length >= 1, "manual entry survives");
+    assert.equal(apple.length, 0, "apple_health cleared");
   });
 });
