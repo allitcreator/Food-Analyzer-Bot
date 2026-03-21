@@ -315,8 +315,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       `\`{"steps":8000,"active_calories":430,"workouts":[{"type":"Бег","duration_min":30,"calories":280}]}\``,
       ``,
       `5️⃣ «Открыть URL» — вставьте ссылку:`,
-      `\`tg://resolve?domain=${botName}&text=/health+[Текст из шага 4]\``,
-      `(Вместо [Текст из шага 4] вставьте переменную «Текст» из действия 4️⃣)`,
+      `\`tg://resolve?domain=${botName}&text=/health+JSON\``,
+      `(Вместо JSON подставьте переменную «Текст» из шага 4️⃣)`,
       ``,
       `Назовите ярлык: *HealthSync* и сохраните.`,
       ``,
@@ -332,7 +332,10 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       `«Автоматизация» → «+» → «Время суток» → 22:00 → HealthSync`,
     ].join("\n");
 
-    bot.sendMessage(chatId, text, { parse_mode: "Markdown" });
+    bot.sendMessage(chatId, text, { parse_mode: "Markdown" }).catch(err => {
+      console.error("/healthsetup sendMessage error:", err?.response?.body ?? err);
+      bot.sendMessage(chatId, text.replace(/[`*_]/g, ""));
+    });
   });
 
   bot.onText(/^\/health(@\w+)?(?:\s+([\s\S]+))?$/, async (msg, match) => {
