@@ -289,11 +289,18 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       token = await storage.generateHealthToken(user.id);
     }
 
+    const baseUrl = process.env.REPLIT_DEPLOYMENT_URL
+      ? `https://${process.env.REPLIT_DEPLOYMENT_URL}`
+      : null;
+    const setupLink = baseUrl ? `${baseUrl}/api/health/setup/${token}` : null;
+
     const text =
       `🔑 *Ваш токен Apple Health*\n\n` +
       `\`${token}\`\n\n` +
-      `Скопируйте токен и вставьте его в Ярлык при настройке.\n` +
-      `Используйте /healthsetup для пошаговой инструкции.`;
+      (setupLink
+        ? `📲 [Открыть страницу настройки Ярлыка](${setupLink})\n_(откройте на iPhone — всё уже заполнено)_\n\n`
+        : ``) +
+      `Используйте /healthsetup для текстовой инструкции.`;
     bot.sendMessage(chatId, text, { parse_mode: "Markdown" });
   });
 
@@ -316,21 +323,28 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
 
     const webhookUrl = `${serverUrl}/api/health/apple`;
 
+    const setupLink = serverUrl !== "https://ВАШ_ДОМЕН"
+      ? `${serverUrl}/api/health/setup/${token}`
+      : null;
+
     const text =
       `📱 *Настройка Apple Health*\n\n` +
-      `*Шаг 1 — Ваш токен:*\n\`${token}\`\n\n` +
+      (setupLink
+        ? `📲 *Готовая страница настройки:*\n[Открыть на iPhone](${setupLink})\n_(все поля уже заполнены — просто копируйте)_\n\n`
+        : ``) +
+      `*Токен:* \`${token}\`\n` +
+      `*URL вебхука:* \`${webhookUrl}\`\n\n` +
       `*Шаг 2 — Создайте Ярлык (Shortcuts):*\n` +
-      `Откройте приложение «Команды» на iPhone и добавьте три действия:\n\n` +
-      `1. «Найти образцы здоровья» → Шаги, за сегодня, сумма\n` +
-      `2. «Найти образцы здоровья» → Активная энергия, за сегодня, сумма\n` +
-      `3. «Получить содержимое URL» → POST, URL:\n` +
-      `\`${webhookUrl}\`\n\n` +
-      `Тело запроса (JSON):\n` +
-      `\`{"token":"${token}","steps":<шаги>,"active_calories":<калории>}\`\n\n` +
+      `Откройте «Команды» на iPhone и добавьте действия:\n\n` +
+      `1. «Найти образцы здоровья» → Шаги, сегодня, сумма\n` +
+      `2. «Найти образцы здоровья» → Активная энергия, сегодня, сумма\n` +
+      `3. (опц.) «Найти тренировки» → сегодня\n` +
+      `4. «Получить содержимое URL» → метод POST, URL выше\n\n` +
+      `Пример тела запроса (JSON):\n` +
+      `\`\`\`\n{"token":"${token}","steps":9842,"active_calories":430,"workouts":[{"type":"Бег","duration_min":30,"calories":280}]}\`\`\`\n\n` +
       `*Шаг 3 — Автоматизация:*\n` +
       `«Автоматизация» → «+» → «Время суток» → 22:00 → каждый день.\n\n` +
-      `✅ Данные будут приходить автоматически каждый вечер.\n` +
-      `Чтобы получить токен повторно — /token.`;
+      `✅ Данные будут приходить автоматически. Повторная синхронизация не создаёт дублей.`;
 
     bot.sendMessage(chatId, text, { parse_mode: "Markdown" });
   });
