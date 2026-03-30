@@ -1495,9 +1495,9 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
         weight: `вес (${unit})`, calories: 'ккал',
         protein: 'белки (г)', fat: 'жиры (г)', carbs: 'углеводы (г)'
       };
-      userStates[telegramId] = { step: 'edit_field_input', data: { field, messageId: query.message?.message_id } };
       bot.answerCallbackQuery(query.id);
-      bot.sendMessage(chatId, `Введите ${labels[field]}:`);
+      const promptMsg = await bot.sendMessage(chatId, `Введите ${labels[field]}:`);
+      userStates[telegramId] = { step: 'edit_field_input', data: { field, messageId: query.message?.message_id, promptMessageId: promptMsg.message_id } };
 
     } else if (query.data === "save_all") {
       const items = pendingMulti[telegramId];
@@ -2072,6 +2072,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
         }
         const field = state.data.field as string;
         const messageId = state.data.messageId as number;
+        const promptMessageId = state.data.promptMessageId as number;
 
         // If weight changed — recalculate micronutrients proportionally
         if (field === 'weight' && pending.weight > 0) {
@@ -2084,6 +2085,10 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
 
         (pending as any)[field] = field === 'weight' ? Math.round(val) : Math.round(val * 10) / 10;
         delete userStates[telegramId];
+
+        // Delete prompt and user's input message
+        bot.deleteMessage(chatId, promptMessageId).catch(() => {});
+        bot.deleteMessage(chatId, msg.message_id).catch(() => {});
 
         const unit = getUnit(pending.foodName);
         bot.editMessageText(buildConfirmMessage(pending, user.showMicronutrients ?? false), {
