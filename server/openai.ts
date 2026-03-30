@@ -1,8 +1,9 @@
 import OpenAI from "openai";
+import { config } from "./config";
 
 // Chat + Vision via OpenRouter
 const openai = new OpenAI({
-  apiKey: process.env.OPENROUTER_API_KEY,
+  apiKey: config.openrouterApiKey,
   baseURL: "https://openrouter.ai/api/v1",
   defaultHeaders: {
     "HTTP-Referer": "https://alxthecreatortg.ru",

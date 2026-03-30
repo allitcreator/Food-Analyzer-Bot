@@ -1,4 +1,5 @@
 import TelegramBot from "node-telegram-bot-api";
+import { config } from "./config";
 import ExcelJS from "exceljs";
 import { IStorage } from "./storage";
 import { analyzeFoodText, analyzeFoodImage, generateEveningReport, transcribeVoice, askCoach, detectBarcode, generateWeightAnalysis, classifyIntent, analyzeWorkout, FoodItem } from "./openai";
@@ -133,16 +134,10 @@ function buildConfirmKeyboard(unit: string) {
 }
 
 export function setupBot(storage: IStorage, app?: import("express").Express) {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID;
-
-  if (!token) {
-    console.warn("TELEGRAM_BOT_TOKEN not set. Bot will not start.");
-    return;
-  }
-
-  const WEBHOOK_URL = process.env.WEBHOOK_URL;
-  const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
+  const token = config.telegramBotToken;
+  const ADMIN_TELEGRAM_ID = config.adminTelegramId;
+  const WEBHOOK_URL = config.webhookUrl;
+  const WEBHOOK_SECRET = config.webhookSecret;
   const useWebhook = !!WEBHOOK_URL && !!WEBHOOK_SECRET && !!app;
 
   let bot: TelegramBot;
@@ -2222,7 +2217,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       const fileId = msg.photo[msg.photo.length - 1].file_id;
       try {
         const file = await bot.getFile(fileId);
-        const botToken = process.env.TELEGRAM_BOT_TOKEN;
+        const botToken = config.telegramBotToken;
         const fileLink = `https://api.telegram.org/file/bot${botToken}/${file.file_path}`;
 
         const imgResponse = await fetch(fileLink);
@@ -2290,7 +2285,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       bot.sendMessage(chatId, "🎤 Распознаю голосовое сообщение...");
       try {
         const file = await bot.getFile(msg.voice.file_id);
-        const botToken = process.env.TELEGRAM_BOT_TOKEN;
+        const botToken = config.telegramBotToken;
         const fileLink = `https://api.telegram.org/file/bot${botToken}/${file.file_path}`;
 
         const audioResponse = await fetch(fileLink);
@@ -2300,11 +2295,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
         const transcript = await transcribeVoice(audioBuffer);
 
         if (!transcript) {
-          const hasKey = !!process.env.OPENAI_API_KEY;
-          bot.sendMessage(chatId, hasKey
-            ? "Не удалось распознать голосовое сообщение. Попробуйте ещё раз."
-            : "Голосовые сообщения требуют личного ключа OpenAI. Добавьте OPENAI_API_KEY в секреты проекта."
-          );
+          bot.sendMessage(chatId, "Не удалось распознать голосовое сообщение. Попробуйте ещё раз.");
           return;
         }
 
