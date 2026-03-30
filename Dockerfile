@@ -14,9 +14,8 @@ FROM node:20-alpine AS runner
 
 WORKDIR /app
 
-# Install only production deps
-COPY package*.json ./
-RUN npm ci --omit=dev
+# Copy all node_modules from builder (includes drizzle-kit needed for db:push)
+COPY --from=builder /app/node_modules ./node_modules
 
 # Copy built artifacts
 COPY --from=builder /app/dist ./dist
@@ -28,6 +27,7 @@ COPY --from=builder /app/server/fonts ./server/fonts
 COPY --from=builder /app/drizzle.config.ts ./drizzle.config.ts
 COPY --from=builder /app/shared ./shared
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
+COPY --from=builder /app/package.json ./package.json
 
 # Copy migration entrypoint script
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
