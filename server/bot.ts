@@ -2086,11 +2086,14 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
         delete userStates[telegramId];
 
         const unit = getUnit(pending.foodName);
-        // Update the original message with new edit keyboard
-        bot.editMessageReplyMarkup(buildEditKeyboard(pending, unit), {
+        const newText = buildConfirmMessage(pending, user.showMicronutrients ?? false);
+        console.log(`[edit_field] field=${field} val=${val} messageId=${messageId}`);
+        bot.editMessageText(newText, {
           chat_id: chatId,
-          message_id: messageId
-        }).catch(() => {});
+          message_id: messageId,
+          parse_mode: 'Markdown',
+          reply_markup: buildEditKeyboard(pending, unit)
+        }).catch((err: any) => console.error('[edit_field] editMessageText error:', err?.message || err));
         return;
       }
       if (state.step === 'reminder_time') {
