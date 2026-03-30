@@ -1,22 +1,20 @@
 import OpenAI from "openai";
-import fs from "fs";
-import path from "path";
-import os from "os";
 
+// Chat + Vision via OpenRouter
 const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || "dummy",
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+  apiKey: process.env.OPENROUTER_API_KEY,
+  baseURL: "https://openrouter.ai/api/v1",
+  defaultHeaders: {
+    "HTTP-Referer": "https://alxthecreatortg.ru",
+    "X-Title": "Food Analyzer Bot",
+  },
 });
 
-// Whisper is not supported by the Replit AI proxy — needs direct OpenAI access
-const whisperClient = process.env.OPENAI_API_KEY
-  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-  : null;
 
 export async function analyzeFoodText(text: string): Promise<FoodItem[] | null> {
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "openai/gpt-4o-mini",
       messages: [
         {
           role: "system",
@@ -67,7 +65,7 @@ export type MessageIntent = "food" | "workout" | "both" | "other";
 export async function classifyIntent(text: string): Promise<MessageIntent> {
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "openai/gpt-4o-mini",
       messages: [
         {
           role: "system",
@@ -100,7 +98,7 @@ export interface WorkoutResult {
 export async function analyzeWorkout(text: string, userWeightKg: number): Promise<WorkoutResult | null> {
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "openai/gpt-4o-mini",
       messages: [
         {
           role: "system",
@@ -165,7 +163,7 @@ export async function generateEveningReport(foodItems: { foodName: string; calor
     const goalsText = goals.caloriesGoal ? `Цели: ${goals.caloriesGoal} ккал, Б${goals.proteinGoal}г, Ж${goals.fatGoal}г, У${goals.carbsGoal}г` : 'Цели не установлены';
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "openai/gpt-4o-mini",
       messages: [
         {
           role: "system",
@@ -192,31 +190,37 @@ export async function generateEveningReport(foodItems: { foodName: string; calor
 }
 
 export async function transcribeVoice(audioBuffer: Buffer): Promise<string | null> {
-  if (!whisperClient) {
-    console.error("Whisper: OPENAI_API_KEY not set — voice transcription unavailable");
-    return null;
-  }
-  const tmpFile = path.join(os.tmpdir(), `voice_${Date.now()}.ogg`);
   try {
-    fs.writeFileSync(tmpFile, audioBuffer);
-    const response = await whisperClient.audio.transcriptions.create({
-      model: "whisper-1",
-      file: fs.createReadStream(tmpFile),
-      language: "ru",
+    const audioBase64 = audioBuffer.toString("base64");
+    const response = await openai.chat.completions.create({
+      model: "google/gemini-2.0-flash",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_audio",
+              input_audio: { data: audioBase64, format: "ogg" },
+            } as any,
+            {
+              type: "text",
+              text: "Транскрибируй аудио на русском языке. Верни только текст без пояснений.",
+            },
+          ],
+        },
+      ],
     });
-    return response.text || null;
+    return response.choices[0].message.content?.trim() || null;
   } catch (error) {
-    console.error("OpenAI Whisper Error:", error);
+    console.error("Gemini Voice Transcription Error:", error);
     return null;
-  } finally {
-    try { fs.unlinkSync(tmpFile); } catch {}
   }
 }
 
 export async function detectBarcode(imageBase64: string): Promise<string | null> {
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "openai/gpt-4o",
       max_tokens: 30,
       messages: [{
         role: "user",
@@ -277,7 +281,7 @@ export async function askCoach(
       : '';
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "openai/gpt-4o-mini",
       messages: [
         {
           role: "system",
@@ -318,7 +322,7 @@ export async function generateWeightAnalysis(
     const goalMap: Record<string, string> = { lose: 'похудение', maintain: 'поддержание веса', gain: 'набор массы' };
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "openai/gpt-4o-mini",
       messages: [
         {
           role: "system",
@@ -346,7 +350,7 @@ export async function generateWeightAnalysis(
 export async function analyzeFoodImage(imageBase64: string) {
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "openai/gpt-4o",
       temperature: 0,
       messages: [
         {

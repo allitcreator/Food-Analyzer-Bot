@@ -141,16 +141,16 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     return;
   }
 
-  const isProduction = process.env.NODE_ENV === "production";
-  const REPLIT_DEPLOYMENT_URL = process.env.REPLIT_DEPLOYMENT_URL;
-  const useWebhook = isProduction && !!REPLIT_DEPLOYMENT_URL && !!app;
+  const WEBHOOK_URL = process.env.WEBHOOK_URL;
+  const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
+  const useWebhook = !!WEBHOOK_URL && !!WEBHOOK_SECRET && !!app;
 
   let bot: TelegramBot;
 
   if (useWebhook) {
     bot = new TelegramBot(token);
-    const webhookPath = `/api/telegram-webhook/${token}`;
-    const webhookUrl = `https://${REPLIT_DEPLOYMENT_URL}${webhookPath}`;
+    const webhookPath = `/api/telegram-webhook/${WEBHOOK_SECRET}`;
+    const webhookUrl = `${WEBHOOK_URL}${webhookPath}`;
     bot.setWebHook(webhookUrl).then(() => {
       console.log("Telegram webhook set:", webhookUrl);
     }).catch(err => {
@@ -164,10 +164,12 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     bot = new TelegramBot(token);
     bot.getWebHookInfo().then(info => {
       if (info.url) {
-        console.log(`Production webhook is active (${info.url}). Skipping dev polling to avoid conflicts.`);
-        console.log("To test bot in dev, first shut down the published app.");
+        bot.deleteWebHook().then(() => {
+          console.log("Removed stale webhook, starting polling...");
+          bot.startPolling();
+        });
       } else {
-        console.log("No webhook active, starting polling...");
+        console.log("Starting polling...");
         bot.startPolling();
       }
     }).catch(err => {
