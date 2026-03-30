@@ -128,6 +128,27 @@ function buildConfirmKeyboard(_unit: string) {
   };
 }
 
+function buildEditKeyboard(pending: any, unit: string) {
+  return {
+    inline_keyboard: [
+      [
+        { text: `⚖️ Вес: ${pending.weight}${unit}`,    callback_data: "ef_weight" },
+        { text: `🔥 Ккал: ${pending.calories}`,         callback_data: "ef_calories" }
+      ],
+      [
+        { text: `💪 Белки: ${pending.protein}г`,        callback_data: "ef_protein" },
+        { text: `🧈 Жиры: ${pending.fat}г`,             callback_data: "ef_fat" }
+      ],
+      [
+        { text: `🍞 Углеводы: ${pending.carbs}г`,       callback_data: "ef_carbs" }
+      ],
+      [
+        { text: "← Назад", callback_data: "ef_back" }
+      ]
+    ]
+  };
+}
+
 export function setupBot(storage: IStorage, app?: import("express").Express) {
   const token = config.telegramBotToken;
   const ADMIN_TELEGRAM_ID = config.adminTelegramId;
@@ -1449,15 +1470,35 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       const pending = (bot as any).pendingLogs?.[telegramId];
       if (!pending) return;
       const unit = getUnit(pending.foodName);
-      userStates[telegramId] = { step: 'edit_food_fields' };
       bot.answerCallbackQuery(query.id);
-      bot.sendMessage(chatId,
-        `✏️ Введите новые значения через пробел:\n` +
-        `*вес(${unit}) белки(г) жиры(г) углеводы(г) ккал*\n\n` +
-        `Текущие: ${pending.weight}${unit} Б${pending.protein} Ж${pending.fat} У${pending.carbs} ${pending.calories}ккал\n\n` +
-        `Пример: \`250 20 8 35 290\``,
-        { parse_mode: 'Markdown' }
-      );
+      bot.editMessageReplyMarkup(buildEditKeyboard(pending, unit), {
+        chat_id: chatId,
+        message_id: query.message?.message_id
+      });
+
+    } else if (query.data.startsWith("ef_")) {
+      const pending = (bot as any).pendingLogs?.[telegramId];
+      if (!pending) return;
+      const field = query.data.slice(3); // weight | calories | protein | fat | carbs | back
+      const unit = getUnit(pending.foodName);
+
+      if (field === "back") {
+        bot.answerCallbackQuery(query.id);
+        bot.editMessageReplyMarkup(buildConfirmKeyboard(unit), {
+          chat_id: chatId,
+          message_id: query.message?.message_id
+        });
+        return;
+      }
+
+      const labels: Record<string, string> = {
+        weight: `вес (${unit})`, calories: 'ккал',
+        protein: 'белки (г)', fat: 'жиры (г)', carbs: 'углеводы (г)'
+      };
+      userStates[telegramId] = { step: 'edit_field_input', data: { field, messageId: query.message?.message_id } };
+      bot.answerCallbackQuery(query.id);
+      bot.sendMessage(chatId, `Введите ${labels[field]}:`);
+
     } else if (query.data === "save_all") {
       const items = pendingMulti[telegramId];
       if (!items || items.length === 0) {
@@ -2017,38 +2058,39 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     // Handle Profile Flow
     const state = userStates[telegramId];
     if (state) {
-      if (state.step === 'edit_food_fields') {
+      if (state.step === 'edit_field_input') {
         const pending = (bot as any).pendingLogs?.[telegramId];
         if (!pending) {
           delete userStates[telegramId];
           bot.sendMessage(chatId, "Данные устарели, попробуйте заново.");
           return;
         }
-        const parts = (msg.text || '').trim().split(/\s+/).map(Number);
-        if (parts.length !== 5 || parts.some(isNaN) || parts.some(v => v < 0)) {
-          bot.sendMessage(chatId, "❌ Нужно ровно 5 чисел через пробел: *вес белки жиры углеводы ккал*\nПример: `250 20 8 35 290`", { parse_mode: 'Markdown' });
+        const val = parseFloat((msg.text || '').replace(',', '.'));
+        if (isNaN(val) || val < 0) {
+          bot.sendMessage(chatId, "❌ Введите положительное число.");
           return;
         }
-        const [weight, protein, fat, carbs, calories] = parts;
-        // Recalculate micronutrients proportionally based on weight change
-        if (pending.weight > 0) {
-          const ratio = weight / pending.weight;
+        const field = state.data.field as string;
+        const messageId = state.data.messageId as number;
+
+        // If weight changed — recalculate micronutrients proportionally
+        if (field === 'weight' && pending.weight > 0) {
+          const ratio = val / pending.weight;
           if (pending.fiber != null) pending.fiber = Math.round(pending.fiber * ratio * 10) / 10;
           if (pending.sugar != null) pending.sugar = Math.round(pending.sugar * ratio * 10) / 10;
           if (pending.sodium != null) pending.sodium = Math.round(pending.sodium * ratio);
           if (pending.saturatedFat != null) pending.saturatedFat = Math.round(pending.saturatedFat * ratio * 10) / 10;
         }
-        pending.weight = weight;
-        pending.protein = protein;
-        pending.fat = fat;
-        pending.carbs = carbs;
-        pending.calories = calories;
+
+        (pending as any)[field] = field === 'weight' ? Math.round(val) : Math.round(val * 10) / 10;
         delete userStates[telegramId];
+
         const unit = getUnit(pending.foodName);
-        bot.sendMessage(chatId, buildConfirmMessage(pending, user.showMicronutrients ?? false), {
-          parse_mode: 'Markdown',
-          reply_markup: buildConfirmKeyboard(unit)
-        });
+        // Update the original message with new edit keyboard
+        bot.editMessageReplyMarkup(buildEditKeyboard(pending, unit), {
+          chat_id: chatId,
+          message_id: messageId
+        }).catch(() => {});
         return;
       }
       if (state.step === 'reminder_time') {
