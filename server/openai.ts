@@ -213,8 +213,13 @@ export async function transcribeVoice(audioBuffer: Buffer): Promise<string | nul
       ],
     });
     return response.choices[0].message.content?.trim() || null;
-  } catch (error) {
-    console.error("Gemini Voice Transcription Error:", error);
+  } catch (error: any) {
+    console.error("Gemini Voice Transcription Error:", JSON.stringify({
+      message: error?.message,
+      status: error?.status,
+      code: error?.code,
+      body: error?.error,
+    }, null, 2));
     return null;
   }
 }
