@@ -1,4 +1,5 @@
 import express, { type Request, Response, NextFunction } from "express";
+import rateLimit from "express-rate-limit";
 import { config } from "./config";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
@@ -12,6 +13,25 @@ declare module "http" {
     rawBody: unknown;
   }
 }
+
+// Webhook rate limit: max 30 requests/sec per IP (Telegram sends from few IPs)
+const webhookLimiter = rateLimit({
+  windowMs: 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: "Too many requests",
+});
+app.use("/api/telegram-webhook", webhookLimiter);
+
+// Health endpoint: max 60 requests/min
+const healthLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use("/api/health", healthLimiter);
 
 app.use(
   express.json({

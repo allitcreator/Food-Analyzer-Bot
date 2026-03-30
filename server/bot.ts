@@ -146,12 +146,17 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     bot = new TelegramBot(token);
     const webhookPath = `/api/telegram-webhook/${WEBHOOK_SECRET}`;
     const webhookUrl = `${WEBHOOK_URL}${webhookPath}`;
-    bot.setWebHook(webhookUrl).then(() => {
+    bot.setWebHook(webhookUrl, { secret_token: WEBHOOK_SECRET } as any).then(() => {
       console.log("Telegram webhook set:", webhookUrl);
     }).catch(err => {
       console.error("Failed to set webhook:", err);
     });
     app.post(webhookPath, (req, res) => {
+      const secretHeader = req.headers["x-telegram-bot-api-secret-token"];
+      if (secretHeader !== WEBHOOK_SECRET) {
+        res.sendStatus(403);
+        return;
+      }
       bot.processUpdate(req.body);
       res.sendStatus(200);
     });
