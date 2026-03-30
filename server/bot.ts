@@ -114,7 +114,7 @@ function buildConfirmMessage(analysis: any, showMicronutrients = false): string 
   return msg;
 }
 
-function buildConfirmKeyboard(unit: string) {
+function buildConfirmKeyboard(_unit: string) {
   return {
     inline_keyboard: [
       [
@@ -122,12 +122,7 @@ function buildConfirmKeyboard(unit: string) {
         { text: "❌ Нет", callback_data: "confirm_no" }
       ],
       [
-        { text: `-50${unit}`, callback_data: "weight_minus_50" },
-        { text: `+50${unit}`, callback_data: "weight_plus_50" }
-      ],
-      [
-        { text: `-100${unit}`, callback_data: "weight_minus_100" },
-        { text: `+100${unit}`, callback_data: "weight_plus_100" }
+        { text: "✏️ Изменить", callback_data: "edit_fields" }
       ]
     ]
   };
@@ -1450,6 +1445,19 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
         parse_mode: 'Markdown',
         reply_markup: buildConfirmKeyboard(unit)
       });
+    } else if (query.data === "edit_fields") {
+      const pending = (bot as any).pendingLogs?.[telegramId];
+      if (!pending) return;
+      const unit = getUnit(pending.foodName);
+      userStates[telegramId] = { step: 'edit_food_fields' };
+      bot.answerCallbackQuery(query.id);
+      bot.sendMessage(chatId,
+        `✏️ Введите новые значения через пробел:\n` +
+        `*вес(${unit}) белки(г) жиры(г) углеводы(г) ккал*\n\n` +
+        `Текущие: ${pending.weight}${unit} Б${pending.protein} Ж${pending.fat} У${pending.carbs} ${pending.calories}ккал\n\n` +
+        `Пример: \`250 20 8 35 290\``,
+        { parse_mode: 'Markdown' }
+      );
     } else if (query.data === "save_all") {
       const items = pendingMulti[telegramId];
       if (!items || items.length === 0) {
@@ -2009,6 +2017,40 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     // Handle Profile Flow
     const state = userStates[telegramId];
     if (state) {
+      if (state.step === 'edit_food_fields') {
+        const pending = (bot as any).pendingLogs?.[telegramId];
+        if (!pending) {
+          delete userStates[telegramId];
+          bot.sendMessage(chatId, "Данные устарели, попробуйте заново.");
+          return;
+        }
+        const parts = (msg.text || '').trim().split(/\s+/).map(Number);
+        if (parts.length !== 5 || parts.some(isNaN) || parts.some(v => v < 0)) {
+          bot.sendMessage(chatId, "❌ Нужно ровно 5 чисел через пробел: *вес белки жиры углеводы ккал*\nПример: `250 20 8 35 290`", { parse_mode: 'Markdown' });
+          return;
+        }
+        const [weight, protein, fat, carbs, calories] = parts;
+        // Recalculate micronutrients proportionally based on weight change
+        if (pending.weight > 0) {
+          const ratio = weight / pending.weight;
+          if (pending.fiber != null) pending.fiber = Math.round(pending.fiber * ratio * 10) / 10;
+          if (pending.sugar != null) pending.sugar = Math.round(pending.sugar * ratio * 10) / 10;
+          if (pending.sodium != null) pending.sodium = Math.round(pending.sodium * ratio);
+          if (pending.saturatedFat != null) pending.saturatedFat = Math.round(pending.saturatedFat * ratio * 10) / 10;
+        }
+        pending.weight = weight;
+        pending.protein = protein;
+        pending.fat = fat;
+        pending.carbs = carbs;
+        pending.calories = calories;
+        delete userStates[telegramId];
+        const unit = getUnit(pending.foodName);
+        bot.sendMessage(chatId, buildConfirmMessage(pending, user.showMicronutrients ?? false), {
+          parse_mode: 'Markdown',
+          reply_markup: buildConfirmKeyboard(unit)
+        });
+        return;
+      }
       if (state.step === 'reminder_time') {
         const timeMatch = (msg.text || '').trim().match(/^(\d{1,2}):(\d{2})$/);
         if (timeMatch) {
