@@ -195,7 +195,7 @@ export async function transcribeVoice(audioBuffer: Buffer): Promise<string | nul
     const audioBase64 = audioBuffer.toString("base64");
     // Gemini via OpenRouter accepts audio as image_url with audio data URI
     const response = await openai.chat.completions.create({
-      model: "google/gemini-2.0-flash",
+      model: "google/gemini-3-flash-preview",
       messages: [
         {
           role: "user",
