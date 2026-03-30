@@ -20,15 +20,20 @@ export type HealthParseResult =
   | { ok: false; error: string };
 
 /**
- * Parse and validate the JSON argument of the /health command.
+ * Parse and validate the JSON argument of the /health command or HTTP webhook body.
+ * Accepts either a JSON string or a pre-parsed object (from express req.body).
  * Returns { ok: true, payload } on success or { ok: false, error } on failure.
  */
-export function parseHealthPayload(rawText: string): HealthParseResult {
+export function parseHealthPayload(rawText: string | unknown): HealthParseResult {
   let data: unknown;
-  try {
-    data = JSON.parse(rawText);
-  } catch {
-    return { ok: false, error: "invalid_json" };
+  if (typeof rawText === "string") {
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      return { ok: false, error: "invalid_json" };
+    }
+  } else {
+    data = rawText;
   }
 
   if (typeof data !== "object" || data === null || Array.isArray(data)) {

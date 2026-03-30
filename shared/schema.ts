@@ -27,6 +27,7 @@ export const users = pgTable("users", {
   weightReminderTime: text("weight_reminder_time").default("off"),
   weightReminderDays: text("weight_reminder_days").default(""), // "1,3,5" = Mon,Wed,Fri (JS getDay: 0=Sun)
   showMicronutrients: boolean("show_micronutrients").default(false), // toggle micronutrient display
+  healthSyncToken: text("health_sync_token").unique(), // token for Apple Health HTTP webhook
   createdAt: timestamp("created_at").defaultNow(),
 });
 

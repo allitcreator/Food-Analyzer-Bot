@@ -1,4 +1,5 @@
 import TelegramBot from "node-telegram-bot-api";
+import { randomBytes } from "crypto";
 import { config } from "./config";
 import ExcelJS from "exceljs";
 import { IStorage } from "./storage";
@@ -149,7 +150,78 @@ function buildEditKeyboard(pending: any, unit: string) {
   };
 }
 
-export function setupBot(storage: IStorage, app?: import("express").Express) {
+// ─── Apple Health processing (shared by /health command and HTTP webhook) ───
+
+export async function processHealthData(
+  bot: TelegramBot,
+  storage: IStorage,
+  user: import("@shared/schema").User,
+  rawBody: unknown
+): Promise<{ ok: true; saved: string[] } | { ok: false; error: string }> {
+  const parsed = parseHealthPayload(rawBody);
+  if (!parsed.ok) {
+    return { ok: false, error: parsed.error };
+  }
+
+  const { steps, activeCalories, workouts } = parsed.payload;
+  const today = new Date();
+  await storage.deleteWorkoutLogsBySource(user.id, today, "apple_health");
+
+  const savedLabels: string[] = [];
+
+  for (const w of workouts) {
+    const description = w.durationMin ? `${w.type} ${w.durationMin} мин` : w.type;
+    await storage.createWorkoutLog({
+      userId: user.id,
+      description,
+      workoutType: w.type.toLowerCase(),
+      durationMin: w.durationMin,
+      caloriesBurned: w.calories,
+      source: "apple_health",
+    });
+    savedLabels.push(w.durationMin
+      ? `${w.type} ${w.durationMin} мин — ${w.calories} ккал`
+      : `${w.type} — ${w.calories} ккал`);
+  }
+
+  if (steps !== null && steps > 0) {
+    const workoutKcal = workouts.reduce((s, w) => s + w.calories, 0);
+    const stepsKcal = calcStepsCalories(steps, activeCalories, workoutKcal);
+    await storage.createWorkoutLog({
+      userId: user.id,
+      description: `${steps.toLocaleString("ru-RU")} шагов`,
+      workoutType: "шаги",
+      durationMin: null,
+      caloriesBurned: stepsKcal,
+      source: "apple_health",
+    });
+    savedLabels.push(`${steps.toLocaleString("ru-RU")} шагов — ${stepsKcal} ккал`);
+  }
+
+  if (savedLabels.length === 0) {
+    return { ok: false, error: "no_storable_data" };
+  }
+
+  // Send Telegram notification to user
+  if (user.telegramId) {
+    const list = savedLabels.map(l => `  • ${l}`).join("\n");
+    const totalKcal = savedLabels.reduce((sum, l) => {
+      const m = l.match(/(\d+)\s*ккал/);
+      return sum + (m ? parseInt(m[1]) : 0);
+    }, 0);
+    bot.sendMessage(
+      parseInt(user.telegramId),
+      `📲 *Apple Health синхронизация*\n\n${list}\n\n⚡️ Итого сожжено: *${totalKcal} ккал*`,
+      { parse_mode: "Markdown" }
+    ).catch(err => console.error("Health sync notification error:", err));
+  }
+
+  return { ok: true, saved: savedLabels };
+}
+
+// ─── Bot setup ───────────────────────────────────────────────────────────────
+
+export function setupBot(storage: IStorage, app?: import("express").Express): TelegramBot {
   const token = config.telegramBotToken;
   const ADMIN_TELEGRAM_ID = config.adminTelegramId;
   const WEBHOOK_URL = config.webhookUrl;
@@ -215,8 +287,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     { command: "profile",        description: "Настроить профиль полностью" },
     { command: "editprofile",    description: "Редактировать поля профиля по одному" },
     { command: "workout",        description: "История тренировок за сегодня" },
-    { command: "sync",           description: "Синхронизировать Apple Health" },
-    { command: "healthsetup",    description: "Инструкция по настройке Apple Health (Shortcuts)" },
+    { command: "sync",           description: "Получить URL для синхронизации Apple Health" },
+    { command: "healthsetup",    description: "Инструкция по настройке шортката Apple Health" },
     { command: "settings",       description: "Настройки (микронутриенты и др.)" },
     { command: "help",           description: "Список всех команд" },
   ]).catch(err => console.error("setMyCommands error:", err));
@@ -256,8 +328,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
       "/profile — Настроить профиль полностью",
       "/editprofile — Редактировать поля профиля по одному",
       "/workout — Тренировки сегодня \\+ история",
-      "/sync — Синхронизировать Apple Health (запустить шорткат)",
-      "/healthsetup — Инструкция по настройке шортката Apple Health",
+      "/sync — Ваш URL для синхронизации Apple Health",
+      "/healthsetup — Инструкция по созданию шортката Apple Health",
       "/settings — Настройки (микронутриенты и др.)",
       "/goal — Быстро изменить цель (похудение / поддержание / набор)",
       "",
@@ -287,17 +359,38 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
 
-    bot.sendMessage(chatId,
-      `📱 *Синхронизация Apple Health*\n\nНажмите кнопку ниже — откроется шорткат "HealthSync" на iPhone.\n\nShortcuts соберёт данные и откроет Telegram с готовым сообщением. Просто нажмите *Отправить* — и всё готово.\n\n_Нет шортката? Используйте /healthsetup для инструкции по настройке._`,
-      {
-        parse_mode: "Markdown",
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "🍎 Запустить HealthSync", url: "shortcuts://run-shortcut?name=HealthSync" }]
-          ]
-        }
+    // Generate token if not set
+    let token = user.healthSyncToken;
+    if (!token) {
+      token = randomBytes(24).toString("hex");
+      await storage.setHealthSyncToken(user.id, token);
+    }
+
+    const baseUrl = config.webhookUrl || "https://alxthecreatortg.ru";
+    const webhookUrl = `${baseUrl}/api/health-sync/${token}`;
+
+    const text = [
+      `📱 *Синхронизация Apple Health*`,
+      ``,
+      `Ваш персональный URL для шортката:`,
+      `\`${webhookUrl}\``,
+      ``,
+      `Шорткат отправляет данные напрямую на сервер — никаких ручных действий. После синхронизации придёт уведомление в этот чат.`,
+      ``,
+      `_Нет шортката? /healthsetup — инструкция по настройке за 2 минуты._`,
+    ].join("\n");
+
+    bot.sendMessage(chatId, text, {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🔄 Сбросить токен", callback_data: "health_reset_token" }]
+        ]
       }
-    );
+    }).catch(err => {
+      console.error("/sync sendMessage error:", err?.response?.body ?? err);
+      bot.sendMessage(chatId, text.replace(/[`*_]/g, ""));
+    });
   });
 
   bot.onText(/^\/healthsetup(@\w+)?$/, async (msg) => {
@@ -308,138 +401,49 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
 
-    const me = await bot.getMe().catch(() => null);
-    const botName = me?.username ?? "ВАШ_БОТ";
-
     const text = [
-      `📱 *Настройка Apple Health*`,
+      `📱 *Настройка Apple Health — новый способ*`,
       ``,
       `*Как это работает:*`,
-      `1. /sync → кнопка "Запустить HealthSync"`,
-      `2. Открывается шорткат на iPhone`,
-      `3. Шорткат собирает данные и открывает Telegram`,
-      `4. Нажмите *Отправить* — данные сохранены ✅`,
+      `Шорткат делает POST-запрос напрямую на сервер в фоне — без открытия Telegram и нажатия кнопок.`,
       ``,
-      `*Создайте ярлык "HealthSync":*`,
-      `В приложении «Команды» («+») добавьте действия:`,
+      `*Создайте ярлык "HealthSync" в приложении «Команды»:*`,
       ``,
-      `1️⃣ «Найти образцы здоровья» → Шаги → Сегодня → Сумма`,
-      `2️⃣ «Найти образцы здоровья» → Активная энергия → Сегодня → Сумма`,
-      `3️⃣ (опц.) «Найти тренировки» → Сегодня`,
-      `4️⃣ «Текст» — введите JSON, вставив переменные из шагов 1–2:`,
-      `\`{"steps":8000,"active_calories":320}\``,
+      `1️⃣ «+» → добавьте действие «Найти образцы здоровья»`,
+      `   • Тип: *Шаги* | Промежуток: *Сегодня* | Агрегация: *Сумма*`,
+      `   • Сохраните переменную как: *Шаги*`,
       ``,
-      `Если хотите добавить тренировки (шаг 3️⃣), расширьте JSON:`,
-      `\`{"steps":8000,"active_calories":430,"workouts":[{"type":"Бег","duration_min":30,"calories":280}]}\``,
+      `2️⃣ Добавьте ещё «Найти образцы здоровья»`,
+      `   • Тип: *Активная энергия* | Промежуток: *Сегодня* | Агрегация: *Сумма*`,
+      `   • Сохраните переменную как: *Калории*`,
       ``,
-      `5️⃣ «Открыть URL» — вставьте ссылку:`,
-      `\`tg://resolve?domain=${botName}&text=/health+JSON\``,
-      `(Вместо JSON подставьте переменную «Текст» из шага 4️⃣)`,
+      `3️⃣ (опционально) «Найти тренировки» → Сегодня`,
       ``,
-      `Назовите ярлык: *HealthSync* и сохраните.`,
+      `4️⃣ Добавьте действие «Словарь» и задайте ключи:`,
+      `   • \`steps\` → переменная *Шаги*`,
+      `   • \`active_calories\` → переменная *Калории*`,
       ``,
-      `*Формат JSON для команды /health:*`,
-      `• \`steps\` — шаги за день (целое число)`,
-      `• \`active_calories\` — активные калории (целое число)`,
+      `5️⃣ Добавьте действие «Получить содержимое URL»:`,
+      `   • URL: (вставьте ваш URL из /sync)`,
+      `   • Метод: *POST*`,
+      `   • Тело запроса: *JSON* → используйте словарь из шага 4`,
+      ``,
+      `Назовите ярлык *HealthSync* и сохраните.`,
+      ``,
+      `*Автоматизация:*`,
+      `«Автоматизация» → «+» → «Время суток» → 22:00 → запустить HealthSync`,
+      ``,
+      `*Формат данных (JSON):*`,
+      `• \`steps\` — шаги за день`,
+      `• \`active_calories\` — активные калории`,
       `• \`workouts\` — массив тренировок (опц.):`,
-      `  – \`type\` — название (строка, обязательно)`,
-      `  – \`calories\` — сожжено ккал (обязательно)`,
-      `  – \`duration_min\` — длительность в минутах (опц.)`,
-      ``,
-      `*Автоматизация (опц.):*`,
-      `«Автоматизация» → «+» → «Время суток» → 22:00 → HealthSync`,
+      `  – \`type\`: название  – \`calories\`: ккал  – \`duration_min\`: минуты (опц.)`,
     ].join("\n");
 
     bot.sendMessage(chatId, text, { parse_mode: "Markdown" }).catch(err => {
       console.error("/healthsetup sendMessage error:", err?.response?.body ?? err);
       bot.sendMessage(chatId, text.replace(/[`*_]/g, ""));
     });
-  });
-
-  bot.onText(/^\/health(@\w+)?(?:\s+([\s\S]+))?$/, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const telegramId = msg.from?.id.toString();
-    if (!telegramId) return;
-
-    const user = await isUserAllowed(chatId, telegramId);
-    if (!user) return;
-
-    const jsonText = match?.[2]?.trim();
-    if (!jsonText) {
-      bot.sendMessage(chatId, "Используйте /sync для запуска синхронизации Apple Health.");
-      return;
-    }
-
-    const parsed = parseHealthPayload(jsonText);
-    if (!parsed.ok) {
-      const msgs: Record<string, string> = {
-        invalid_json: "❌ Неверный JSON. Используйте /sync — Shortcuts отправит правильный формат.",
-        not_object: "❌ Неверный формат данных.",
-        invalid_steps: "❌ Поле `steps` должно быть неотрицательным числом.",
-        invalid_active_calories: "❌ Поле `active_calories` должно быть неотрицательным числом.",
-        workouts_not_array: "❌ Поле `workouts` должно быть массивом.",
-        workout_not_object: "❌ Каждая тренировка в `workouts` должна быть объектом.",
-        workout_missing_type: "❌ У каждой тренировки должно быть поле `type` (строка).",
-        workout_invalid_calories: "❌ У каждой тренировки должно быть поле `calories` (неотрицательное число).",
-        workout_invalid_duration: "❌ Поле `duration_min` тренировки должно быть положительным числом.",
-        no_storable_data: "❌ Нет данных для сохранения. Нужны `steps` (> 0) или непустой `workouts`. `active_calories` без шагов не сохраняется.",
-      };
-      bot.sendMessage(chatId, msgs[parsed.error] ?? "❌ Ошибка в данных. Используйте /sync для синхронизации.");
-      return;
-    }
-
-    const { steps, activeCalories, workouts } = parsed.payload;
-
-    const today = new Date();
-    await storage.deleteWorkoutLogsBySource(user.id, today, "apple_health");
-
-    const savedLabels: string[] = [];
-
-    for (const w of workouts) {
-      const description = w.durationMin ? `${w.type} ${w.durationMin} мин` : w.type;
-      await storage.createWorkoutLog({
-        userId: user.id,
-        description,
-        workoutType: w.type.toLowerCase(),
-        durationMin: w.durationMin,
-        caloriesBurned: w.calories,
-        source: "apple_health",
-      });
-      savedLabels.push(w.durationMin
-        ? `${w.type} ${w.durationMin} мин — ${w.calories} ккал`
-        : `${w.type} — ${w.calories} ккал`);
-    }
-
-    if (steps !== null && steps > 0) {
-      const workoutKcal = workouts.reduce((s, w) => s + w.calories, 0);
-      const stepsKcal = calcStepsCalories(steps, activeCalories, workoutKcal);
-
-      await storage.createWorkoutLog({
-        userId: user.id,
-        description: `${steps.toLocaleString("ru-RU")} шагов`,
-        workoutType: "шаги",
-        durationMin: null,
-        caloriesBurned: stepsKcal,
-        source: "apple_health",
-      });
-      savedLabels.push(`${steps.toLocaleString("ru-RU")} шагов — ${stepsKcal} ккал`);
-    }
-
-    if (savedLabels.length === 0) {
-      bot.sendMessage(chatId, "Нет активности для сохранения. Проверьте переданные данные.");
-      return;
-    }
-
-    const list = savedLabels.map(l => `  • ${l}`).join("\n");
-    const totalKcal = savedLabels.reduce((sum, l) => {
-      const m = l.match(/(\d+)\s*ккал/);
-      return sum + (m ? parseInt(m[1]) : 0);
-    }, 0);
-
-    bot.sendMessage(chatId,
-      `📲 *Apple Health синхронизация*\n\n${list}\n\n⚡️ Итого сожжено: *${totalKcal} ккал*`,
-      { parse_mode: "Markdown" }
-    );
   });
 
   bot.onText(/\/ask(?:\s+(.+))?/, async (msg, match) => {
@@ -491,7 +495,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
     bot.sendMessage(chatId, `🏋️ *Тренер:*\n\n${answer}`, { parse_mode: "Markdown" });
   });
 
-  const userStates: Record<string, { step: string; data: Partial<User> & { reminderMeal?: string } }> = {};
+  const userStates: Record<string, { step: string; data: Partial<User> & { reminderMeal?: string; field?: string; messageId?: number; promptMessageId?: number } }> = {};
   const pendingMulti: Record<string, FoodItem[]> = {};
   const pendingWorkouts: Record<string, { description: string; workoutType: string; durationMin: number | null; caloriesBurned: number }> = {};
 
@@ -1435,6 +1439,18 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
         message_id: query.message?.message_id
       });
       if ((bot as any).pendingLogs) delete (bot as any).pendingLogs[telegramId];
+    } else if (query.data === "health_reset_token") {
+      const newToken = randomBytes(24).toString("hex");
+      await storage.setHealthSyncToken(user.id, newToken);
+      const baseUrl = config.webhookUrl || "https://alxthecreatortg.ru";
+      const webhookUrl = `${baseUrl}/api/health-sync/${newToken}`;
+      bot.answerCallbackQuery(query.id, { text: "Токен обновлён!" }).catch(() => {});
+      bot.sendMessage(chatId,
+        `🔄 *Токен обновлён*\n\nНовый URL для шортката:\n\`${webhookUrl}\`\n\n_Не забудьте обновить URL в настройках шортката._`,
+        { parse_mode: "Markdown" }
+      ).catch(err => {
+        bot.sendMessage(chatId, `Новый URL: ${webhookUrl}`);
+      });
     } else if (query.data.startsWith("weight_")) {
       const pending = (bot as any).pendingLogs?.[telegramId];
       if (!pending) return;
@@ -2411,4 +2427,5 @@ export function setupBot(storage: IStorage, app?: import("express").Express) {
   });
 
   console.log("Telegram Bot started!");
+  return bot;
 }
