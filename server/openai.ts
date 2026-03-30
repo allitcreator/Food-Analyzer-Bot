@@ -193,6 +193,7 @@ export async function generateEveningReport(foodItems: { foodName: string; calor
 export async function transcribeVoice(audioBuffer: Buffer): Promise<string | null> {
   try {
     const audioBase64 = audioBuffer.toString("base64");
+    // Gemini via OpenRouter accepts audio as image_url with audio data URI
     const response = await openai.chat.completions.create({
       model: "google/gemini-2.0-flash",
       messages: [
@@ -200,8 +201,8 @@ export async function transcribeVoice(audioBuffer: Buffer): Promise<string | nul
           role: "user",
           content: [
             {
-              type: "input_audio",
-              input_audio: { data: audioBase64, format: "ogg" },
+              type: "image_url",
+              image_url: { url: `data:audio/ogg;base64,${audioBase64}` },
             } as any,
             {
               type: "text",
