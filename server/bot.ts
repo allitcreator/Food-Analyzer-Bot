@@ -495,7 +495,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     bot.sendMessage(chatId, `🏋️ *Тренер:*\n\n${answer}`, { parse_mode: "Markdown" });
   });
 
-  const userStates: Record<string, { step: string; data: Partial<User> & { reminderMeal?: string; field?: string; messageId?: number; promptMessageId?: number } }> = {};
+  const userStates: Record<string, { step: string; data: Partial<User> & { reminderMeal?: string; field?: string; messageId?: number; promptMessageId?: number; idx?: number } }> = {};
   const pendingMulti: Record<string, FoodItem[]> = {};
   const pendingWorkouts: Record<string, { description: string; workoutType: string; durationMin: number | null; caloriesBurned: number }> = {};
 
@@ -541,22 +541,24 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     return `✏️ Редактирование ${idx + 1}/${total}\n\n${emoji} ${item.foodName}\n${item.calories} ккал | Б${item.protein}г Ж${item.fat}г У${item.carbs}г\nВес: ${item.weight}${unit}`;
   }
 
-  function buildMultiItemEditorKeyboard(idx: number, unit: string) {
+  function buildMultiItemEditKeyboard(item: FoodItem, idx: number) {
+    const unit = item.foodName.toLowerCase().match(LIQUID_PATTERN) ? 'мл' : 'г';
     return {
       inline_keyboard: [
         [
-          { text: `-50${unit}`, callback_data: `mi_wm_50_${idx}` },
-          { text: `-10${unit}`, callback_data: `mi_wm_10_${idx}` },
-          { text: `+10${unit}`, callback_data: `mi_wp_10_${idx}` },
-          { text: `+50${unit}`, callback_data: `mi_wp_50_${idx}` },
+          { text: `⚖️ Вес: ${item.weight}${unit}`, callback_data: `mi_ef_weight_${idx}` },
+          { text: `🔥 Ккал: ${item.calories}`,      callback_data: `mi_ef_calories_${idx}` }
         ],
         [
-          { text: `-100${unit}`, callback_data: `mi_wm_100_${idx}` },
-          { text: `+100${unit}`, callback_data: `mi_wp_100_${idx}` },
+          { text: `💪 Белки: ${item.protein}г`,     callback_data: `mi_ef_protein_${idx}` },
+          { text: `🧈 Жиры: ${item.fat}г`,           callback_data: `mi_ef_fat_${idx}` }
+        ],
+        [
+          { text: `🍞 Углеводы: ${item.carbs}г`,    callback_data: `mi_ef_carbs_${idx}` }
         ],
         [
           { text: '⬅️ К списку', callback_data: 'mi_back' },
-          { text: '🗑 Удалить', callback_data: `mi_del_${idx}` }
+          { text: '🗑 Удалить',  callback_data: `mi_del_${idx}` }
         ]
       ]
     };
@@ -1563,39 +1565,27 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       const items = pendingMulti[telegramId];
       if (!items || idx >= items.length) return;
       const item = items[idx];
-      const unit = item.foodName.toLowerCase().match(LIQUID_PATTERN) ? 'мл' : 'г';
       bot.editMessageText(buildMultiItemEditorText(item, idx, items.length), {
         chat_id: chatId,
         message_id: query.message?.message_id,
-        reply_markup: buildMultiItemEditorKeyboard(idx, unit)
+        reply_markup: buildMultiItemEditKeyboard(item, idx)
       });
-    } else if (query.data.startsWith("mi_wp_") || query.data.startsWith("mi_wm_")) {
-      const plus = query.data.startsWith("mi_wp_");
-      const parts = query.data.split("_");
-      const amount = parseInt(parts[2]);
-      const idx = parseInt(parts[3]);
+    } else if (query.data.startsWith("mi_ef_")) {
+      // mi_ef_<field>_<idx>  e.g. mi_ef_weight_2
+      const parts = query.data.split("_"); // ["mi", "ef", field, idx]
+      const idx = parseInt(parts[parts.length - 1]);
+      const field = parts.slice(2, parts.length - 1).join("_"); // handles multi-underscore field names
       const items = pendingMulti[telegramId];
       if (!items || idx >= items.length) return;
-      const item = items[idx];
-      const oldWeight = item.weight;
-      const newWeight = plus ? oldWeight + amount : Math.max(5, oldWeight - amount);
-      if (newWeight === oldWeight) return;
-      const ratio = newWeight / oldWeight;
-      item.weight = newWeight;
-      item.calories = Math.round(item.calories * ratio);
-      item.protein = Math.round(item.protein * ratio);
-      item.fat = Math.round(item.fat * ratio);
-      item.carbs = Math.round(item.carbs * ratio);
-      if (item.fiber != null) item.fiber = Math.round(item.fiber * ratio * 10) / 10;
-      if (item.sugar != null) item.sugar = Math.round(item.sugar * ratio * 10) / 10;
-      if (item.sodium != null) item.sodium = Math.round(item.sodium * ratio);
-      if (item.saturatedFat != null) item.saturatedFat = Math.round(item.saturatedFat * ratio * 10) / 10;
-      const unit = item.foodName.toLowerCase().match(LIQUID_PATTERN) ? 'мл' : 'г';
-      bot.editMessageText(buildMultiItemEditorText(item, idx, items.length), {
-        chat_id: chatId,
-        message_id: query.message?.message_id,
-        reply_markup: buildMultiItemEditorKeyboard(idx, unit)
-      });
+      const fieldLabels: Record<string, string> = {
+        weight: 'вес', calories: 'ккал', protein: 'белки (г)', fat: 'жиры (г)', carbs: 'углеводы (г)'
+      };
+      bot.answerCallbackQuery(query.id);
+      const promptMsg = await bot.sendMessage(chatId, `Введите ${fieldLabels[field] ?? field}:`);
+      userStates[telegramId] = {
+        step: 'mi_edit_field_input',
+        data: { field, idx, messageId: query.message?.message_id, promptMessageId: promptMsg.message_id }
+      };
     } else if (query.data.startsWith("mi_del_")) {
       const idx = parseInt(query.data.slice(7));
       const items = pendingMulti[telegramId];
@@ -2115,6 +2105,54 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         }).catch(() => {});
         return;
       }
+
+      if (state.step === 'mi_edit_field_input') {
+        const items = pendingMulti[telegramId];
+        const idx = state.data.idx as number;
+        if (!items || idx == null || idx >= items.length) {
+          delete userStates[telegramId];
+          bot.sendMessage(chatId, "Данные устарели, попробуйте заново.");
+          return;
+        }
+        const val = parseFloat((msg.text || '').replace(',', '.'));
+        if (isNaN(val) || val < 0) {
+          bot.sendMessage(chatId, "❌ Введите положительное число.");
+          return;
+        }
+        const field = state.data.field as string;
+        const messageId = state.data.messageId as number;
+        const promptMessageId = state.data.promptMessageId as number;
+        const item = items[idx];
+
+        // If weight changed — recalculate macros proportionally
+        if (field === 'weight' && item.weight > 0) {
+          const ratio = val / item.weight;
+          item.calories = Math.round(item.calories * ratio);
+          item.protein = Math.round(item.protein * ratio);
+          item.fat = Math.round(item.fat * ratio);
+          item.carbs = Math.round(item.carbs * ratio);
+          if (item.fiber != null) item.fiber = Math.round(item.fiber * ratio * 10) / 10;
+          if (item.sugar != null) item.sugar = Math.round(item.sugar * ratio * 10) / 10;
+          if (item.sodium != null) item.sodium = Math.round(item.sodium * ratio);
+          if (item.saturatedFat != null) item.saturatedFat = Math.round(item.saturatedFat * ratio * 10) / 10;
+        }
+
+        (item as any)[field] = field === 'weight' ? Math.round(val) : Math.round(val * 10) / 10;
+        delete userStates[telegramId];
+
+        // Delete prompt and user's input message
+        bot.deleteMessage(chatId, promptMessageId).catch(() => {});
+        bot.deleteMessage(chatId, msg.message_id).catch(() => {});
+
+        // Update editor message — same item, updated values
+        bot.editMessageText(buildMultiItemEditorText(item, idx, items.length), {
+          chat_id: chatId,
+          message_id: messageId,
+          reply_markup: buildMultiItemEditKeyboard(item, idx)
+        }).catch(() => {});
+        return;
+      }
+
       if (state.step === 'reminder_time') {
         const timeMatch = (msg.text || '').trim().match(/^(\d{1,2}):(\d{2})$/);
         if (timeMatch) {
