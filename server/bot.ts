@@ -196,6 +196,17 @@ export async function processHealthData(
       source: "apple_health",
     });
     savedLabels.push(`${steps.toLocaleString("ru-RU")} шагов — ${stepsKcal} ккал`);
+  } else if (activeCalories !== null && activeCalories > 0 && workouts.length === 0) {
+    // No steps and no explicit workouts — save active calories as generic activity
+    await storage.createWorkoutLog({
+      userId: user.id,
+      description: `Активность — ${activeCalories} ккал`,
+      workoutType: "активность",
+      durationMin: null,
+      caloriesBurned: activeCalories,
+      source: "apple_health",
+    });
+    savedLabels.push(`Активность — ${activeCalories} ккал`);
   }
 
   if (savedLabels.length === 0) {

@@ -98,11 +98,11 @@ export function parseHealthPayload(rawText: string | unknown): HealthParseResult
     }
   }
 
-  // Must have at least one entry that can actually be stored.
-  // active_calories alone is not storable — it is only used to split step calories.
+  // Must have at least one value that can be stored.
   const hasSteps = steps !== null && steps > 0;
   const hasWorkouts = workouts.length > 0;
-  if (!hasSteps && !hasWorkouts) {
+  const hasActiveCalories = activeCalories !== null && activeCalories > 0;
+  if (!hasSteps && !hasWorkouts && !hasActiveCalories) {
     return { ok: false, error: "no_storable_data" };
   }
 
