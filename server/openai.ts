@@ -16,6 +16,7 @@ export async function analyzeFoodText(text: string): Promise<FoodItem[] | null> 
   try {
     const response = await openai.chat.completions.create({
       model: "openai/gpt-4o-mini",
+      max_tokens: 1024,
       messages: [
         {
           role: "system",
@@ -67,6 +68,7 @@ export async function classifyIntent(text: string): Promise<MessageIntent> {
   try {
     const response = await openai.chat.completions.create({
       model: "openai/gpt-4o-mini",
+      max_tokens: 50,
       messages: [
         {
           role: "system",
@@ -100,6 +102,7 @@ export async function analyzeWorkout(text: string, userWeightKg: number): Promis
   try {
     const response = await openai.chat.completions.create({
       model: "openai/gpt-4o-mini",
+      max_tokens: 256,
       messages: [
         {
           role: "system",
@@ -165,6 +168,7 @@ export async function generateEveningReport(foodItems: { foodName: string; calor
 
     const response = await openai.chat.completions.create({
       model: "openai/gpt-4o-mini",
+      max_tokens: 1024,
       messages: [
         {
           role: "system",
@@ -290,6 +294,7 @@ export async function askCoach(
 
     const response = await openai.chat.completions.create({
       model: "openai/gpt-4o-mini",
+      max_tokens: 1024,
       messages: [
         {
           role: "system",
@@ -331,6 +336,7 @@ export async function generateWeightAnalysis(
 
     const response = await openai.chat.completions.create({
       model: "openai/gpt-4o-mini",
+      max_tokens: 1024,
       messages: [
         {
           role: "system",
@@ -360,6 +366,7 @@ export async function analyzeFoodImage(imageBase64: string) {
     const response = await openai.chat.completions.create({
       model: "openai/gpt-4o",
       temperature: 0,
+      max_tokens: 1024,
       messages: [
         {
           role: "system",
