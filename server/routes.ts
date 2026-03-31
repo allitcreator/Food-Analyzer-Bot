@@ -36,13 +36,16 @@ export async function registerRoutes(
     }
 
     const body = req.body;
+    console.log("[health-sync] body received:", JSON.stringify(body));
+
     if (!body || typeof body !== "object") {
       return res.status(400).json({ error: "Invalid JSON body" });
     }
 
     const result = await processHealthData(bot, storage, user, body);
     if (!result.ok) {
-      return res.status(400).json({ error: result.error });
+      console.log("[health-sync] parse error:", result.error, "| keys in body:", Object.keys(body));
+      return res.status(400).json({ error: result.error, received_keys: Object.keys(body) });
     }
 
     return res.json({ ok: true, saved: result.saved });
