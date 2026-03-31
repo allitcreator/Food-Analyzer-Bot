@@ -30,6 +30,8 @@ export async function registerRoutes(
   app.post("/api/health-sync/:token", async (req, res) => {
     const { token } = req.params;
 
+    console.log("[health-sync] headers:", JSON.stringify(req.headers));
+
     const user = await storage.getUserByHealthSyncToken(token).catch(() => null);
     if (!user) {
       return res.status(401).json({ error: "Invalid token" });
