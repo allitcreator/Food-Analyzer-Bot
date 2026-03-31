@@ -26,32 +26,41 @@ export async function registerRoutes(
   // Start the bot
   const bot = setupBot(storage, app);
 
-  // Apple Health HTTP webhook — called by iOS Shortcut in the background
-  app.post("/api/health-sync/:token", async (req, res) => {
-    const { token } = req.params;
-
-    console.log("[health-sync] headers:", JSON.stringify(req.headers));
+  // Apple Health HTTP webhook — called by iOS Shortcut (POST or GET)
+  // iOS test mode sends POST without Content-Length (nginx rejects it),
+  // so we also support GET with query params: ?steps=1000&active_calories=300
+  const handleHealthSync = async (req: import("express").Request, res: import("express").Response) => {
+    const token = req.params.token as string;
 
     const user = await storage.getUserByHealthSyncToken(token).catch(() => null);
     if (!user) {
       return res.status(401).json({ error: "Invalid token" });
     }
 
-    const body = req.body;
-    console.log("[health-sync] body received:", JSON.stringify(body));
-
-    if (!body || typeof body !== "object") {
-      return res.status(400).json({ error: "Invalid JSON body" });
+    // Accept data from JSON body (POST) or query params (GET / fallback)
+    let data: Record<string, unknown>;
+    if (req.method === "GET" || !req.body || Object.keys(req.body || {}).length === 0) {
+      const steps = req.query.steps as string | undefined;
+      const active_calories = req.query.active_calories as string | undefined;
+      data = {};
+      if (steps !== undefined) data.steps = Number(steps);
+      if (active_calories !== undefined) data.active_calories = Number(active_calories);
+    } else {
+      data = req.body;
     }
 
-    const result = await processHealthData(bot, storage, user, body);
+    console.log("[health-sync]", req.method, "data:", JSON.stringify(data));
+
+    const result = await processHealthData(bot, storage, user, data);
     if (!result.ok) {
-      console.log("[health-sync] parse error:", result.error, "| keys in body:", Object.keys(body));
-      return res.status(400).json({ error: result.error, received_keys: Object.keys(body) });
+      return res.status(400).json({ error: result.error });
     }
 
     return res.json({ ok: true, saved: result.saved });
-  });
+  };
+
+  app.post("/api/health-sync/:token", handleHealthSync);
+  app.get("/api/health-sync/:token", handleHealthSync);
 
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", timestamp: Date.now() });
