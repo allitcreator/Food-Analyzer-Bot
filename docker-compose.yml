@@ -25,7 +25,7 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-bot}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-foodbot}
     ports:
-      - "8082:5000"
+      - "127.0.0.1:8082:5000"
 
 volumes:
   postgres_data:

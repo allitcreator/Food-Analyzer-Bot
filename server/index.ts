@@ -27,6 +27,16 @@ const webhookLimiter = rateLimit({
 });
 app.use("/api/telegram-webhook", webhookLimiter);
 
+// Health-sync endpoint: max 30 requests/min per IP (brute-force token protection)
+const healthSyncLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: "Too many requests",
+});
+app.use("/api/health-sync", healthSyncLimiter);
+
 // Health endpoint: max 60 requests/min
 const healthLimiter = rateLimit({
   windowMs: 60 * 1000,
