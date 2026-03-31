@@ -115,6 +115,19 @@ function buildConfirmMessage(analysis: any, showMicronutrients = false): string 
   return msg;
 }
 
+// Format a single workout entry for display.
+// Steps entries show steps count and burned calories on separate lines.
+function formatWorkoutLine(w: { description: string; workoutType: string; durationMin: number | null; caloriesBurned: number }, indent = ""): string {
+  if (w.workoutType === "шаги") {
+    return `${indent}👟 ${w.description}\n${indent}🔥 ${w.caloriesBurned} ккал сожжено`;
+  }
+  if (w.workoutType === "активность") {
+    return `${indent}🔥 ${w.caloriesBurned} ккал сожжено (активность)`;
+  }
+  const dur = w.durationMin ? ` · ${w.durationMin} мин` : "";
+  return `${indent}${w.description}${dur} — ${w.caloriesBurned} ккал`;
+}
+
 function buildConfirmKeyboard(_unit: string) {
   return {
     inline_keyboard: [
@@ -195,7 +208,7 @@ export async function processHealthData(
       caloriesBurned: stepsKcal,
       source: "apple_health",
     });
-    savedLabels.push(`${steps.toLocaleString("ru-RU")} шагов — ${stepsKcal} ккал`);
+    savedLabels.push(`👟 ${steps.toLocaleString("ru-RU")} шагов\n🔥 ${stepsKcal} ккал сожжено`);
   } else if (activeCalories !== null && activeCalories > 0 && workouts.length === 0) {
     // No steps and no explicit workouts — save active calories as generic activity
     await storage.createWorkoutLog({
@@ -206,7 +219,7 @@ export async function processHealthData(
       caloriesBurned: activeCalories,
       source: "apple_health",
     });
-    savedLabels.push(`Активность — ${activeCalories} ккал`);
+    savedLabels.push(`🔥 ${activeCalories} ккал сожжено (активность)`);
   }
 
   if (savedLabels.length === 0) {
@@ -215,10 +228,10 @@ export async function processHealthData(
 
   // Send Telegram notification to user
   if (user.telegramId) {
-    const list = savedLabels.map(l => `  • ${l}`).join("\n");
+    const list = savedLabels.map(l => `  ${l}`).join("\n\n");
     const totalKcal = savedLabels.reduce((sum, l) => {
-      const m = l.match(/(\d+)\s*ккал/);
-      return sum + (m ? parseInt(m[1]) : 0);
+      const m = l.match(/(\d[\d\s]+)\s*ккал/);
+      return sum + (m ? parseInt(m[1].replace(/\s/g, "")) : 0);
     }, 0);
     bot.sendMessage(
       parseInt(user.telegramId),
@@ -737,7 +750,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       const netCalories = stats.calories - burnedTotal;
       text += `\n\n🏋️ Тренировки сегодня:\n`;
       workouts.forEach(w => {
-        text += `  • ${w.description} — ${w.caloriesBurned} ккал\n`;
+        text += `${formatWorkoutLine(w, "  ")}\n`;
       });
       text += `⚖️ Чистые калории: ${netCalories} ккал (съедено − сожжено)`;
     }
@@ -932,8 +945,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     const total = workouts.reduce((s, w) => s + w.caloriesBurned, 0);
     let text = `🏋️ *Тренировки сегодня:*\n\n`;
     workouts.forEach(w => {
-      const dur = w.durationMin ? ` · ${w.durationMin} мин` : '';
-      text += `• ${w.description}${dur} — *${w.caloriesBurned} ккал*\n`;
+      text += `• ${formatWorkoutLine(w)}\n`;
     });
     text += `\n🔥 Итого сожжено: *${total} ккал*`;
 
