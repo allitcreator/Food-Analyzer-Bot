@@ -2108,9 +2108,13 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         const messageId = state.data.messageId as number;
         const promptMessageId = state.data.promptMessageId as number;
 
-        // If weight changed — recalculate micronutrients proportionally
+        // If weight changed — recalculate КБЖУ and micronutrients proportionally
         if (field === 'weight' && pending.weight > 0) {
           const ratio = val / pending.weight;
+          pending.calories = Math.round(pending.calories * ratio);
+          pending.protein  = Math.round(pending.protein  * ratio * 10) / 10;
+          pending.fat      = Math.round(pending.fat      * ratio * 10) / 10;
+          pending.carbs    = Math.round(pending.carbs    * ratio * 10) / 10;
           if (pending.fiber != null) pending.fiber = Math.round(pending.fiber * ratio * 10) / 10;
           if (pending.sugar != null) pending.sugar = Math.round(pending.sugar * ratio * 10) / 10;
           if (pending.sodium != null) pending.sodium = Math.round(pending.sodium * ratio);
@@ -2156,9 +2160,9 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         if (field === 'weight' && item.weight > 0) {
           const ratio = val / item.weight;
           item.calories = Math.round(item.calories * ratio);
-          item.protein = Math.round(item.protein * ratio);
-          item.fat = Math.round(item.fat * ratio);
-          item.carbs = Math.round(item.carbs * ratio);
+          item.protein  = Math.round(item.protein  * ratio * 10) / 10;
+          item.fat      = Math.round(item.fat      * ratio * 10) / 10;
+          item.carbs    = Math.round(item.carbs    * ratio * 10) / 10;
           if (item.fiber != null) item.fiber = Math.round(item.fiber * ratio * 10) / 10;
           if (item.sugar != null) item.sugar = Math.round(item.sugar * ratio * 10) / 10;
           if (item.sodium != null) item.sodium = Math.round(item.sodium * ratio);
