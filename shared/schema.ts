@@ -9,6 +9,7 @@ export const users = pgTable("users", {
   username: text("username"),
   isApproved: boolean("is_approved").default(false),
   isAdmin: boolean("is_admin").default(false),
+  isBlocked: boolean("is_blocked").default(false),
   age: integer("age"),
   gender: text("gender"), // male, female
   weight: integer("weight"), // in kg (profile weight)

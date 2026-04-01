@@ -23,6 +23,13 @@ export async function registerRoutes(
     console.error("Migration warning: failed to add health_sync_token column:", err);
   }
 
+  // Add is_blocked column if not exists (migration)
+  try {
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN DEFAULT false`);
+  } catch (err) {
+    console.error("Migration warning: failed to add is_blocked column:", err);
+  }
+
   // Start the bot
   const bot = setupBot(storage, app);
 

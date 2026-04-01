@@ -324,6 +324,10 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       return null;
     }
     const isAdmin = ADMIN_TELEGRAM_ID && String(telegramId).trim() === String(ADMIN_TELEGRAM_ID).trim();
+    if (user.isBlocked && !isAdmin) {
+      bot.sendMessage(chatId, "🚫 Ваш доступ к боту ограничен администратором.");
+      return false;
+    }
     if (!user.isApproved && !user.isAdmin && !isAdmin) {
       bot.sendMessage(chatId, "Ваша заявка на рассмотрении у администратора.");
       return false;
@@ -705,18 +709,41 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       return;
     }
 
-    let text = "Список пользователей:\n";
-    allUsers.forEach(u => {
-      const isUAdmin = u.isAdmin || (ADMIN_TELEGRAM_ID && String(u.telegramId).trim() === String(ADMIN_TELEGRAM_ID).trim());
-      text += `${u.id}: @${u.username || 'N/A'} [${u.isApproved ? '✅' : '⏳'}] ${isUAdmin ? '(Admin)' : ''}\n`;
-    });
-    bot.sendMessage(chatId, text, {
-      reply_markup: {
-        inline_keyboard: allUsers
-          .filter(u => u.telegramId !== telegramId) // Don't allow self-deletion
-          .map(u => [{ text: `❌ Удалить @${u.username || u.id}`, callback_data: `admin_delete_${u.id}` }])
+    bot.sendMessage(chatId, `👥 Пользователи: ${allUsers.length}`);
+
+    for (const u of allUsers) {
+      const isSelf = u.telegramId === telegramId;
+      const isUGlobalAdmin = ADMIN_TELEGRAM_ID && String(u.telegramId).trim() === String(ADMIN_TELEGRAM_ID).trim();
+      const isUAdmin = u.isAdmin || isUGlobalAdmin;
+
+      let statusBadge = u.isBlocked ? '🚫 Заблокирован' : u.isApproved ? '✅ Активен' : '⏳ Ожидает';
+      if (isUAdmin) statusBadge += ' 👑';
+
+      const cardText = `👤 @${u.username || 'N/A'} | ${statusBadge} | ID: ${u.id}`;
+
+      if (isSelf) {
+        bot.sendMessage(chatId, `${cardText}\n_(это вы)_`, { parse_mode: 'Markdown' });
+        continue;
       }
-    });
+
+      const buttons: any[][] = [];
+
+      // Row 1: block/unblock + delete
+      const blockBtn = u.isBlocked
+        ? { text: '✅ Разблокировать', callback_data: `admin_unblock_${u.id}` }
+        : { text: '🚫 Заблокировать',  callback_data: `admin_block_${u.id}` };
+      buttons.push([blockBtn, { text: '🗑 Удалить', callback_data: `admin_delete_${u.id}` }]);
+
+      // Row 2: toggle admin (only for non-global-admins)
+      if (!isUGlobalAdmin) {
+        const adminBtn = isUAdmin
+          ? { text: '👤 Убрать права админа', callback_data: `admin_removeadmin_${u.id}` }
+          : { text: '👑 Сделать админом',     callback_data: `admin_makeadmin_${u.id}` };
+        buttons.push([adminBtn]);
+      }
+
+      bot.sendMessage(chatId, cardText, { reply_markup: { inline_keyboard: buttons } });
+    }
   });
 
   bot.onText(/\/stats/, async (msg) => {
@@ -2162,14 +2189,98 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
           return;
         }
         await storage.deleteUser(targetUserId);
-        bot.editMessageText(`🗑 Пользователь @${targetUser.username || targetUserId} полностью удален из системы.`, {
+        bot.editMessageText(`🗑 Пользователь @${targetUser.username || targetUserId} удалён из системы.`, {
           chat_id: chatId,
           message_id: query.message?.message_id
         });
-        bot.sendMessage(targetUser.telegramId!, "Ваш доступ к боту был аннулирован администратором.");
+        bot.sendMessage(targetUser.telegramId!, "❌ Ваш аккаунт был удалён администратором. Все данные удалены.").catch(() => {});
+      }
+    } else if (query.data.startsWith("admin_block_")) {
+      if (!user.isAdmin) return;
+      const targetUserId = parseInt(query.data.split("_")[2]);
+      const targetUser = await storage.getUser(targetUserId);
+      if (targetUser) {
+        const isTargetGlobalAdmin = ADMIN_TELEGRAM_ID && String(targetUser.telegramId).trim() === String(ADMIN_TELEGRAM_ID).trim();
+        if (isTargetGlobalAdmin) {
+          bot.answerCallbackQuery(query.id, { text: 'Нельзя заблокировать главного администратора' });
+          return;
+        }
+        await storage.updateUser(targetUserId, { isBlocked: true });
+        bot.editMessageText(`🚫 @${targetUser.username || targetUserId} | Заблокирован | ID: ${targetUserId}`, {
+          chat_id: chatId,
+          message_id: query.message?.message_id,
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '✅ Разблокировать', callback_data: `admin_unblock_${targetUserId}` },
+               { text: '🗑 Удалить', callback_data: `admin_delete_${targetUserId}` }],
+            ]
+          }
+        });
+        bot.sendMessage(targetUser.telegramId!, "🚫 Ваш доступ к боту ограничен администратором.").catch(() => {});
+        bot.answerCallbackQuery(query.id, { text: 'Пользователь заблокирован' });
+      }
+    } else if (query.data.startsWith("admin_unblock_")) {
+      if (!user.isAdmin) return;
+      const targetUserId = parseInt(query.data.split("_")[2]);
+      const targetUser = await storage.getUser(targetUserId);
+      if (targetUser) {
+        await storage.updateUser(targetUserId, { isBlocked: false });
+        const isUAdmin = targetUser.isAdmin;
+        bot.editMessageText(`✅ @${targetUser.username || targetUserId} | Активен${isUAdmin ? ' 👑' : ''} | ID: ${targetUserId}`, {
+          chat_id: chatId,
+          message_id: query.message?.message_id,
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🚫 Заблокировать', callback_data: `admin_block_${targetUserId}` },
+               { text: '🗑 Удалить', callback_data: `admin_delete_${targetUserId}` }],
+              ...(isUAdmin ? [] : [[{ text: '👑 Сделать админом', callback_data: `admin_makeadmin_${targetUserId}` }]])
+            ]
+          }
+        });
+        bot.sendMessage(targetUser.telegramId!, "✅ Ваш доступ к боту восстановлен. Отправьте /start чтобы продолжить.").catch(() => {});
+        bot.answerCallbackQuery(query.id, { text: 'Пользователь разблокирован' });
+      }
+    } else if (query.data.startsWith("admin_makeadmin_")) {
+      if (!user.isAdmin) return;
+      const targetUserId = parseInt(query.data.split("_")[2]);
+      const targetUser = await storage.getUser(targetUserId);
+      if (targetUser) {
+        await storage.updateUser(targetUserId, { isAdmin: true });
+        bot.editMessageText(`✅ @${targetUser.username || targetUserId} | Активен 👑 | ID: ${targetUserId}`, {
+          chat_id: chatId,
+          message_id: query.message?.message_id,
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🚫 Заблокировать', callback_data: `admin_block_${targetUserId}` },
+               { text: '🗑 Удалить', callback_data: `admin_delete_${targetUserId}` }],
+              [{ text: '👤 Убрать права админа', callback_data: `admin_removeadmin_${targetUserId}` }]
+            ]
+          }
+        });
+        bot.sendMessage(targetUser.telegramId!, "👑 Вам выданы права администратора.").catch(() => {});
+        bot.answerCallbackQuery(query.id, { text: 'Права выданы' });
+      }
+    } else if (query.data.startsWith("admin_removeadmin_")) {
+      if (!user.isAdmin) return;
+      const targetUserId = parseInt(query.data.split("_")[2]);
+      const targetUser = await storage.getUser(targetUserId);
+      if (targetUser) {
+        await storage.updateUser(targetUserId, { isAdmin: false });
+        bot.editMessageText(`✅ @${targetUser.username || targetUserId} | Активен | ID: ${targetUserId}`, {
+          chat_id: chatId,
+          message_id: query.message?.message_id,
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🚫 Заблокировать', callback_data: `admin_block_${targetUserId}` },
+               { text: '🗑 Удалить', callback_data: `admin_delete_${targetUserId}` }],
+              [{ text: '👑 Сделать админом', callback_data: `admin_makeadmin_${targetUserId}` }]
+            ]
+          }
+        });
+        bot.answerCallbackQuery(query.id, { text: 'Права убраны' });
       }
     }
-    
+
     // ─── workout_save / workout_cancel ────────────────────────────────────
     if (query.data === "workout_save") {
       const pending = pendingWorkouts[telegramId];
