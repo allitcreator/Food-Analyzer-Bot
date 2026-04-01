@@ -23,6 +23,15 @@ export async function registerRoutes(
     console.error("Migration warning: failed to add health_sync_token column:", err);
   }
 
+  // Add AI toggles columns (migration)
+  try {
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_week_analysis BOOLEAN DEFAULT TRUE`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_month_analysis BOOLEAN DEFAULT TRUE`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_evening_report BOOLEAN DEFAULT TRUE`);
+  } catch (err) {
+    console.error("Migration warning: failed to add AI toggle columns:", err);
+  }
+
   // Add is_blocked column if not exists (migration)
   try {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN DEFAULT false`);

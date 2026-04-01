@@ -28,6 +28,9 @@ export const users = pgTable("users", {
   weightReminderTime: text("weight_reminder_time").default("off"),
   weightReminderDays: text("weight_reminder_days").default(""), // "1,3,5" = Mon,Wed,Fri (JS getDay: 0=Sun)
   showMicronutrients: boolean("show_micronutrients").default(false), // toggle micronutrient display
+  aiWeekAnalysis: boolean("ai_week_analysis").default(true),     // AI block after /week
+  aiMonthAnalysis: boolean("ai_month_analysis").default(true),   // AI block after /month
+  aiEveningReport: boolean("ai_evening_report").default(true),   // AI text in evening report
   healthSyncToken: text("health_sync_token").unique(), // token for Apple Health HTTP webhook
   createdAt: timestamp("created_at").defaultNow(),
 });

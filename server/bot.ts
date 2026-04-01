@@ -878,6 +878,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     const weightStart = weightLogs.length > 0 ? weightLogs[0].weight : null;
     const weightEnd   = weightLogs.length > 0 ? weightLogs[weightLogs.length - 1].weight : null;
 
+    if (user.aiWeekAnalysis === false) return;
     bot.sendMessage(chatId, "⏳ Готовлю AI-анализ...");
     const analysis = await generatePeriodAnalysis({
       period: 'week',
@@ -978,7 +979,10 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     if (!telegramId) return;
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
-    sendWeightReminderSetup(chatId, user);
+    bot.sendMessage(chatId, buildSettingsText(user), {
+      parse_mode: 'Markdown',
+      reply_markup: buildSettingsKeyboard(user)
+    });
   });
 
   function sendWeightReminderSetup(chatId: number, user: User) {
@@ -1042,6 +1046,59 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
   });
 
+  // ─── /settings helpers ────────────────────────────────────────────────────
+  function buildSettingsText(u: User): string {
+    const bool = (v: boolean | null | undefined, def = true) => (v ?? def) ? '✅' : '❌';
+    const fmt = (t: string | null | undefined) => (!t || t === 'off') ? 'выкл' : t;
+
+    const remParts = [
+      u.breakfastReminder && u.breakfastReminder !== 'off' ? `Завтрак ${u.breakfastReminder}` : null,
+      u.lunchReminder     && u.lunchReminder !== 'off'     ? `Обед ${u.lunchReminder}`         : null,
+      u.dinnerReminder    && u.dinnerReminder !== 'off'    ? `Ужин ${u.dinnerReminder}`         : null,
+      u.noLogReminderTime && u.noLogReminderTime !== 'off' ? `📝 ${u.noLogReminderTime}`        : null,
+    ].filter(Boolean).join(' · ') || 'выкл';
+
+    const DAY_NAMES = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+    const wDays = u.weightReminderDays ? u.weightReminderDays.split(',').filter(Boolean).map(Number) : [];
+    const weightR = u.weightReminderTime && u.weightReminderTime !== 'off'
+      ? `${u.weightReminderTime}${wDays.length ? ' · ' + wDays.map(d => DAY_NAMES[d]).join(',') : ''}`
+      : 'выкл';
+
+    return [
+      `⚙️ *Настройки*`,
+      ``,
+      `📊 *Аналитика и ИИ*`,
+      `🔬 Микронутриенты: *${bool(u.showMicronutrients, false)}*`,
+      `🤖 AI-анализ /week: *${bool(u.aiWeekAnalysis)}*`,
+      `🤖 AI-анализ /month: *${bool(u.aiMonthAnalysis)}*`,
+      `📋 AI в вечернем отчёте: *${bool(u.aiEveningReport)}*`,
+      ``,
+      `⏰ *Авторепорт:* ${fmt(u.reportTime) === 'выкл' ? 'выкл' : u.reportTime || '21:00'}`,
+      `🍽 *Напоминания о еде:* ${remParts}`,
+      `⚖️ *Напоминание о весе:* ${weightR}`,
+    ].join('\n');
+  }
+
+  function buildSettingsKeyboard(u: User) {
+    const bool = (v: boolean | null | undefined, def = true) => (v ?? def);
+    const reportLabel = (!u.reportTime || u.reportTime === 'off') ? 'выкл' : u.reportTime;
+    return {
+      inline_keyboard: [
+        [
+          { text: `🔬 Микро ${bool(u.showMicronutrients, false) ? '✅' : '❌'}`, callback_data: 'toggle_micro' },
+          { text: `🤖 /week ${bool(u.aiWeekAnalysis) ? '✅' : '❌'}`,           callback_data: 'toggle_ai_week' },
+        ],
+        [
+          { text: `🤖 /month ${bool(u.aiMonthAnalysis) ? '✅' : '❌'}`,         callback_data: 'toggle_ai_month' },
+          { text: `📋 Отчёт ${bool(u.aiEveningReport) ? '✅' : '❌'}`,          callback_data: 'toggle_ai_report' },
+        ],
+        [{ text: `⏰ Авторепорт: ${reportLabel}`, callback_data: 'settings_report_time' }],
+        [{ text: '🍽 Напоминания о еде →',        callback_data: 'settings_reminders' }],
+        [{ text: '⚖️ Напоминание о весе →',       callback_data: 'settings_weight_reminder' }],
+      ]
+    };
+  }
+
   // ─── /settings ────────────────────────────────────────────────────────────
   bot.onText(/\/settings/, async (msg) => {
     const chatId = msg.chat.id;
@@ -1050,18 +1107,10 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
 
-    const on = user.showMicronutrients;
-    bot.sendMessage(chatId,
-      `⚙️ *Настройки*\n\n🔬 Микронутриенты (клетчатка, сахар, натрий, нас. жиры): *${on ? 'Включены ✅' : 'Выключены ❌'}*\n\nПри включении ИИ будет дополнительно рассчитывать клетчатку, сахар, натрий и насыщенные жиры для каждого продукта.`,
-      {
-        parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [[
-            { text: on ? '❌ Выключить микронутриенты' : '✅ Включить микронутриенты', callback_data: 'toggle_micro' }
-          ]]
-        }
-      }
-    );
+    bot.sendMessage(chatId, buildSettingsText(user), {
+      parse_mode: 'Markdown',
+      reply_markup: buildSettingsKeyboard(user)
+    });
   });
 
   // ─── /editprofile ─────────────────────────────────────────────────────────
@@ -1169,6 +1218,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     const weightStart = weightLogs.length > 0 ? weightLogs[0].weight : null;
     const weightEnd   = weightLogs.length > 0 ? weightLogs[weightLogs.length - 1].weight : null;
 
+    if (user.aiMonthAnalysis === false) return;
     bot.sendMessage(chatId, "⏳ Готовлю AI-анализ...");
     const analysis = await generatePeriodAnalysis({
       period: 'month',
@@ -1289,6 +1339,12 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       text += `\n🏋️ Тренировки: ${workouts.map(w => w.description).join(', ')} — ${totalBurned} ккал`;
     }
 
+    // Send stats block always; AI part is optional
+    if (user.aiEveningReport === false) {
+      bot.sendMessage(user.telegramId!, text.trimEnd());
+      return;
+    }
+
     text += '\n\n';
 
     const report = await generateEveningReport(
@@ -1301,8 +1357,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
 
     if (report) {
       text += report;
-      bot.sendMessage(user.telegramId!, text);
     }
+    bot.sendMessage(user.telegramId!, text.trimEnd());
   }
 
   bot.onText(/\/report$/, async (msg) => {
@@ -1317,51 +1373,15 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     await sendEveningReport(user, true);
   });
 
-  bot.onText(/\/report_time(?:\s+(.+))?/, async (msg, match) => {
+  bot.onText(/\/report_time/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
-
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
-
-    const arg = match?.[1]?.trim();
-    if (arg) {
-      if (arg.toLowerCase() === 'off') {
-        await storage.updateUserReportTime(user.id, 'off');
-        bot.sendMessage(chatId, "Вечерний отчёт: выключен");
-        return;
-      }
-      const timeMatch = arg.match(/^(\d{1,2}):(\d{2})$/);
-      if (timeMatch) {
-        const h = parseInt(timeMatch[1]);
-        const m = parseInt(timeMatch[2]);
-        if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
-          const time = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-          await storage.updateUserReportTime(user.id, time);
-          bot.sendMessage(chatId, `Вечерний отчёт: ${time}`);
-          return;
-        }
-      }
-      bot.sendMessage(chatId, "Неверный формат. Укажите время в формате ЧЧ:ММ или off.\nНапример: /report_time 20:30");
-      return;
-    }
-
-    bot.sendMessage(chatId, `Текущее время отчёта: ${user.reportTime || '21:00'}\n\nВыберите новое время или отправьте /report_time ЧЧ:ММ :`, {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "19:00", callback_data: "rtime_19:00" },
-            { text: "20:00", callback_data: "rtime_20:00" },
-            { text: "21:00", callback_data: "rtime_21:00" }
-          ],
-          [
-            { text: "22:00", callback_data: "rtime_22:00" },
-            { text: "23:00", callback_data: "rtime_23:00" },
-            { text: "Выкл", callback_data: "rtime_off" }
-          ]
-        ]
-      }
+    bot.sendMessage(chatId, buildSettingsText(user), {
+      parse_mode: 'Markdown',
+      reply_markup: buildSettingsKeyboard(user)
     });
   });
 
@@ -1371,28 +1391,11 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
-
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
-
-    const br = user.breakfastReminder || 'off';
-    const lu = user.lunchReminder || 'off';
-    const di = user.dinnerReminder || 'off';
-    const nl = user.noLogReminderTime || 'off';
-
-    const formatTime = (t: string) => t === 'off' ? 'выкл' : t;
-
-    bot.sendMessage(chatId,
-      `Напоминания:\n\nЗавтрак: ${formatTime(br)}\nОбед: ${formatTime(lu)}\nУжин: ${formatTime(di)}\nНет записей к: ${formatTime(nl)}\n\nВыберите, что настроить:`, {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: `Завтрак (${formatTime(br)})`, callback_data: "rmnd_breakfast" }],
-          [{ text: `Обед (${formatTime(lu)})`, callback_data: "rmnd_lunch" }],
-          [{ text: `Ужин (${formatTime(di)})`, callback_data: "rmnd_dinner" }],
-          [{ text: `⚠️ Нет записей к (${formatTime(nl)})`, callback_data: "rmnd_nolog" }],
-          [{ text: "Выключить все", callback_data: "rmnd_all_off" }]
-        ]
-      }
+    bot.sendMessage(chatId, buildSettingsText(user), {
+      parse_mode: 'Markdown',
+      reply_markup: buildSettingsKeyboard(user)
     });
   });
 
@@ -2321,25 +2324,74 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       return;
     }
 
-    // ─── toggle_micro ─────────────────────────────────────────────────────
-    if (query.data === "toggle_micro") {
-      const newVal = !user.showMicronutrients;
-      await storage.updateUser(user.id, { showMicronutrients: newVal });
-      const statusText = newVal ? 'Включены ✅' : 'Выключены ❌';
-      bot.editMessageText(
-        `⚙️ *Настройки*\n\n🔬 Микронутриенты (клетчатка, сахар, натрий, нас. жиры): *${statusText}*\n\nПри включении ИИ будет дополнительно рассчитывать клетчатку, сахар, натрий и насыщенные жиры для каждого продукта.`,
+    // ─── Settings toggles ─────────────────────────────────────────────────
+    const settingsToggles: Record<string, { field: keyof User; label: string; def: boolean }> = {
+      toggle_micro:      { field: 'showMicronutrients', label: 'Микронутриенты',         def: false },
+      toggle_ai_week:    { field: 'aiWeekAnalysis',     label: 'AI-анализ /week',         def: true  },
+      toggle_ai_month:   { field: 'aiMonthAnalysis',    label: 'AI-анализ /month',        def: true  },
+      toggle_ai_report:  { field: 'aiEveningReport',    label: 'AI в вечернем отчёте',    def: true  },
+    };
+    if (settingsToggles[query.data]) {
+      const { field, label, def } = settingsToggles[query.data];
+      const newVal = !((user as any)[field] ?? def);
+      await storage.updateUser(user.id, { [field]: newVal } as any);
+      const updated = { ...user, [field]: newVal } as User;
+      bot.editMessageText(buildSettingsText(updated), {
+        chat_id: chatId,
+        message_id: query.message?.message_id,
+        parse_mode: 'Markdown',
+        reply_markup: buildSettingsKeyboard(updated)
+      }).catch(() => {});
+      bot.answerCallbackQuery(query.id, { text: `${label}: ${newVal ? '✅ вкл' : '❌ выкл'}` });
+      return;
+    }
+
+    // ─── Settings sub-menus ───────────────────────────────────────────────
+    if (query.data === 'settings_report_time') {
+      bot.answerCallbackQuery(query.id);
+      bot.sendMessage(chatId,
+        `⏰ Вечерний отчёт сейчас: *${(!user.reportTime || user.reportTime === 'off') ? 'выкл' : user.reportTime}*\n\nВыберите новое время:`,
         {
-          chat_id: chatId,
-          message_id: query.message?.message_id,
           parse_mode: 'Markdown',
           reply_markup: {
-            inline_keyboard: [[
-              { text: newVal ? '❌ Выключить микронутриенты' : '✅ Включить микронутриенты', callback_data: 'toggle_micro' }
-            ]]
+            inline_keyboard: [
+              [{ text: '19:00', callback_data: 'rtime_19:00' }, { text: '20:00', callback_data: 'rtime_20:00' }, { text: '21:00', callback_data: 'rtime_21:00' }],
+              [{ text: '22:00', callback_data: 'rtime_22:00' }, { text: '23:00', callback_data: 'rtime_23:00' }, { text: '⛔ Выкл', callback_data: 'rtime_off' }],
+            ]
           }
         }
       );
-      bot.answerCallbackQuery(query.id, { text: newVal ? '✅ Микронутриенты включены' : '❌ Микронутриенты выключены' });
+      return;
+    }
+
+    if (query.data === 'settings_reminders') {
+      bot.answerCallbackQuery(query.id);
+      const br = user.breakfastReminder || 'off';
+      const lu = user.lunchReminder || 'off';
+      const di = user.dinnerReminder || 'off';
+      const nl = user.noLogReminderTime || 'off';
+      const fmt = (t: string) => t === 'off' ? 'выкл' : t;
+      bot.sendMessage(chatId,
+        `🍽 *Напоминания о еде*\n\nЗавтрак: ${fmt(br)}\nОбед: ${fmt(lu)}\nУжин: ${fmt(di)}\nНет записей к: ${fmt(nl)}\n\nВыберите, что настроить:`,
+        {
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: `🌅 Завтрак (${fmt(br)})`, callback_data: 'rmnd_breakfast' }],
+              [{ text: `🍽 Обед (${fmt(lu)})`,     callback_data: 'rmnd_lunch' }],
+              [{ text: `🌙 Ужин (${fmt(di)})`,     callback_data: 'rmnd_dinner' }],
+              [{ text: `📝 Нет записей к (${fmt(nl)})`, callback_data: 'rmnd_nolog' }],
+              [{ text: '⛔ Выключить все', callback_data: 'rmnd_all_off' }],
+            ]
+          }
+        }
+      );
+      return;
+    }
+
+    if (query.data === 'settings_weight_reminder') {
+      bot.answerCallbackQuery(query.id);
+      sendWeightReminderSetup(chatId, user);
       return;
     }
 
