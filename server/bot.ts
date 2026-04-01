@@ -709,10 +709,18 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       return;
     }
 
-    bot.sendMessage(chatId, `👥 Пользователи: ${allUsers.length}`);
+    const others = allUsers.filter(u => u.telegramId !== telegramId);
+    bot.sendMessage(chatId, `👥 Пользователей: ${allUsers.length} (других: ${others.length})`);
+
+    if (others.length === 0) {
+      bot.sendMessage(chatId, "Других пользователей нет.");
+      return;
+    }
 
     for (const u of allUsers) {
       const isSelf = u.telegramId === telegramId;
+      if (isSelf) continue;
+
       const isUGlobalAdmin = ADMIN_TELEGRAM_ID && String(u.telegramId).trim() === String(ADMIN_TELEGRAM_ID).trim();
       const isUAdmin = u.isAdmin || isUGlobalAdmin;
 
@@ -720,11 +728,6 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       if (isUAdmin) statusBadge += ' 👑';
 
       const cardText = `👤 @${u.username || 'N/A'} | ${statusBadge} | ID: ${u.id}`;
-
-      if (isSelf) {
-        bot.sendMessage(chatId, `${cardText}\n_(это вы)_`, { parse_mode: 'Markdown' });
-        continue;
-      }
 
       const buttons: any[][] = [];
 
