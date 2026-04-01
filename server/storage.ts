@@ -276,6 +276,12 @@ export class DatabaseStorage implements IStorage {
     ).orderBy(desc(workoutLogs.date));
   }
 
+  async getWorkoutLogsInRange(userId: number, startDate: Date, endDate: Date): Promise<WorkoutLog[]> {
+    return db.select().from(workoutLogs).where(
+      sql`${workoutLogs.userId} = ${userId} AND ${workoutLogs.date} >= ${startDate} AND ${workoutLogs.date} <= ${endDate}`
+    ).orderBy(workoutLogs.date);
+  }
+
   async getWorkoutLogs(userId: number, limit = 10): Promise<WorkoutLog[]> {
     return db.select().from(workoutLogs)
       .where(eq(workoutLogs.userId, userId))

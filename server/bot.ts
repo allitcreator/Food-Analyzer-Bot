@@ -3,7 +3,7 @@ import { randomBytes } from "crypto";
 import { config } from "./config";
 import ExcelJS from "exceljs";
 import { IStorage } from "./storage";
-import { analyzeFoodText, analyzeFoodImage, generateEveningReport, transcribeVoice, askCoach, detectBarcode, generateWeightAnalysis, classifyIntent, analyzeWorkout, FoodItem } from "./openai";
+import { analyzeFoodText, analyzeFoodImage, generateEveningReport, generatePeriodAnalysis, transcribeVoice, askCoach, detectBarcode, generateWeightAnalysis, classifyIntent, analyzeWorkout, FoodItem } from "./openai";
 import { generateMonthlyPDF, extractTopFoods } from "./pdf";
 import { User } from "@shared/schema";
 import { parseHealthPayload, calcStepsCalories } from "./health-helpers";
@@ -646,7 +646,16 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       if (isGlobalAdmin) {
         bot.sendMessage(chatId, "Вы зарегистрированы как администратор (через секреты).");
       } else {
-        bot.sendMessage(chatId, "Ваша заявка отправлена администратору. Ожидайте подтверждения.");
+        bot.sendMessage(chatId,
+          "🤖 Заявка отправлена!\n\n" +
+          "Что умеет этот бот:\n" +
+          "• 📸 Распознавать еду на фото и считать КБЖУ\n" +
+          "• 🏋️ Учитывать тренировки и калории\n" +
+          "• 📊 Строить недельную и месячную статистику с AI-анализом\n" +
+          "• 💡 Давать персональные рекомендации по питанию\n\n" +
+          "Как только администратор одобрит вашу заявку, вы получите уведомление.\n" +
+          "После одобрения отправьте /start чтобы настроить профиль."
+        );
         // Notify admins
         const allUsers = await storage.getAllUsers();
         const admins = allUsers.filter(u => u.isAdmin || (ADMIN_TELEGRAM_ID && String(u.telegramId).trim() === String(ADMIN_TELEGRAM_ID).trim()));
@@ -776,11 +785,17 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
 
+    const end = new Date(); end.setHours(23, 59, 59, 999);
+    const start = new Date(); start.setDate(start.getDate() - 6); start.setHours(0, 0, 0, 0);
+
     const days = await storage.getWeeklyFullStats(user.id);
     const daysWithData = days.filter(d => d.calories > 0);
     const avgCal = daysWithData.length
       ? Math.round(daysWithData.reduce((s, d) => s + d.calories, 0) / daysWithData.length)
       : 0;
+    const avgProt = daysWithData.length ? Math.round(daysWithData.reduce((s, d) => s + d.protein, 0) / daysWithData.length) : 0;
+    const avgFat  = daysWithData.length ? Math.round(daysWithData.reduce((s, d) => s + d.fat, 0) / daysWithData.length) : 0;
+    const avgCarbs= daysWithData.length ? Math.round(daysWithData.reduce((s, d) => s + d.carbs, 0) / daysWithData.length) : 0;
 
     let text = `📅 Статистика за 7 дней\n\n`;
     for (const d of days) {
@@ -805,6 +820,47 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     }
 
     bot.sendMessage(chatId, text);
+
+    if (daysWithData.length === 0) return;
+
+    // Collect extra data for AI analysis
+    const [foodLogs, workoutLogs, weightLogs] = await Promise.all([
+      storage.getFoodLogsInRange(user.id, start, end),
+      storage.getWorkoutLogsInRange(user.id, start, end),
+      storage.getWeightLogsInRange(user.id, start, end),
+    ]);
+
+    const foodCountMap = new Map<string, { count: number; scoreSum: number; scoreCount: number }>();
+    for (const f of foodLogs) {
+      const key = f.foodName.toLowerCase();
+      const entry = foodCountMap.get(key) ?? { count: 0, scoreSum: 0, scoreCount: 0 };
+      entry.count++;
+      if (f.foodScore) { entry.scoreSum += f.foodScore; entry.scoreCount++; }
+      foodCountMap.set(key, entry);
+    }
+    const topFoods = [...foodCountMap.entries()]
+      .sort((a, b) => b[1].count - a[1].count)
+      .slice(0, 10)
+      .map(([name, v]) => ({ name, count: v.count, avgScore: v.scoreCount > 0 ? v.scoreSum / v.scoreCount : null }));
+
+    const totalCaloriesBurned = workoutLogs.reduce((s, w) => s + w.caloriesBurned, 0);
+    const workoutTypes = [...new Set(workoutLogs.map(w => w.workoutType))];
+    const weightStart = weightLogs.length > 0 ? weightLogs[0].weight : null;
+    const weightEnd   = weightLogs.length > 0 ? weightLogs[weightLogs.length - 1].weight : null;
+
+    bot.sendMessage(chatId, "⏳ Готовлю AI-анализ...");
+    const analysis = await generatePeriodAnalysis({
+      period: 'week',
+      dailyStats: days,
+      avgCalories: avgCal, avgProtein: avgProt, avgFat, avgCarbs,
+      topFoods,
+      totalCaloriesBurned,
+      workoutTypes,
+      weightStart,
+      weightEnd,
+      user: { goal: user.goal, caloriesGoal: user.caloriesGoal, proteinGoal: user.proteinGoal },
+    });
+    if (analysis) bot.sendMessage(chatId, `💡 Анализ:\n\n${analysis}`);
   });
 
   bot.onText(/\/goal/, async (msg) => {
@@ -1013,6 +1069,10 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     if (!user) return;
 
     bot.sendMessage(chatId, "Собираю статистику за месяц...");
+
+    const end = new Date(); end.setHours(23, 59, 59, 999);
+    const start = new Date(); start.setDate(start.getDate() - 27); start.setHours(0, 0, 0, 0);
+
     const weeks = await storage.getMonthlyStats(user.id);
 
     const totalDays = weeks.reduce((s, w) => s + w.days, 0);
@@ -1053,6 +1113,45 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         inline_keyboard: [[{ text: '📄 Скачать PDF-отчёт', callback_data: 'generate_pdf' }]]
       }
     });
+
+    // Collect extra data for AI analysis
+    const [foodLogs, workoutLogs, weightLogs] = await Promise.all([
+      storage.getFoodLogsInRange(user.id, start, end),
+      storage.getWorkoutLogsInRange(user.id, start, end),
+      storage.getWeightLogsInRange(user.id, start, end),
+    ]);
+
+    const foodCountMap = new Map<string, { count: number; scoreSum: number; scoreCount: number }>();
+    for (const f of foodLogs) {
+      const key = f.foodName.toLowerCase();
+      const entry = foodCountMap.get(key) ?? { count: 0, scoreSum: 0, scoreCount: 0 };
+      entry.count++;
+      if (f.foodScore) { entry.scoreSum += f.foodScore; entry.scoreCount++; }
+      foodCountMap.set(key, entry);
+    }
+    const topFoods = [...foodCountMap.entries()]
+      .sort((a, b) => b[1].count - a[1].count)
+      .slice(0, 10)
+      .map(([name, v]) => ({ name, count: v.count, avgScore: v.scoreCount > 0 ? v.scoreSum / v.scoreCount : null }));
+
+    const totalCaloriesBurned = workoutLogs.reduce((s, w) => s + w.caloriesBurned, 0);
+    const workoutTypes = [...new Set(workoutLogs.map(w => w.workoutType))];
+    const weightStart = weightLogs.length > 0 ? weightLogs[0].weight : null;
+    const weightEnd   = weightLogs.length > 0 ? weightLogs[weightLogs.length - 1].weight : null;
+
+    bot.sendMessage(chatId, "⏳ Готовлю AI-анализ...");
+    const analysis = await generatePeriodAnalysis({
+      period: 'month',
+      dailyStats: overall.map(w => ({ dayLabel: w.weekLabel, calories: w.calories, protein: w.protein, fat: w.fat, carbs: w.carbs })),
+      avgCalories: avgCal, avgProtein: avgProt, avgFat, avgCarbs,
+      topFoods,
+      totalCaloriesBurned,
+      workoutTypes,
+      weightStart,
+      weightEnd,
+      user: { goal: user.goal, caloriesGoal: user.caloriesGoal, proteinGoal: user.proteinGoal },
+    });
+    if (analysis) bot.sendMessage(chatId, `💡 Анализ:\n\n${analysis}`);
   });
 
   // ─── /pdf ─────────────────────────────────────────────────────────────────
@@ -1098,8 +1197,14 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
 
   async function sendEveningReport(user: User, manual = false) {
     const today = new Date();
-    const stats = await storage.getDailyStats(user.id, today);
-    const foodLogs = await storage.getFoodLogsInRange(user.id, (() => { const d = new Date(today); d.setHours(0,0,0,0); return d; })(), (() => { const d = new Date(today); d.setHours(23,59,59,999); return d; })());
+    const todayStart = new Date(today); todayStart.setHours(0, 0, 0, 0);
+    const todayEnd   = new Date(today); todayEnd.setHours(23, 59, 59, 999);
+
+    const [stats, foodLogs, workouts] = await Promise.all([
+      storage.getDailyStats(user.id, today),
+      storage.getFoodLogsInRange(user.id, todayStart, todayEnd),
+      storage.getDailyWorkouts(user.id, today),
+    ]);
 
     if (foodLogs.length === 0 && !manual) return;
 
@@ -1108,15 +1213,63 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       return;
     }
 
+    // Build meal breakdown
+    const mealLabels: Record<string, string> = {
+      breakfast: '🌅 Завтрак',
+      lunch:     '🍽 Обед',
+      dinner:    '🌙 Ужин',
+      snack:     '🍎 Перекус',
+    };
+    const mealGroups: Record<string, typeof foodLogs> = {};
+    for (const f of foodLogs) {
+      const mt = f.mealType || 'snack';
+      if (!mealGroups[mt]) mealGroups[mt] = [];
+      mealGroups[mt].push(f);
+    }
+
+    let text = `📊 Вечерний отчёт\n\n`;
+
+    // Meal sections
+    const mealOrder = ['breakfast', 'lunch', 'dinner', 'snack'];
+    for (const mt of mealOrder) {
+      const items = mealGroups[mt];
+      if (!items || items.length === 0) continue;
+      const mCal  = items.reduce((s, f) => s + f.calories, 0);
+      const mProt = items.reduce((s, f) => s + f.protein, 0);
+      const mFat  = items.reduce((s, f) => s + f.fat, 0);
+      const mCarbs= items.reduce((s, f) => s + f.carbs, 0);
+      text += `${mealLabels[mt]}: ${mCal} ккал | Б${mProt} Ж${mFat} У${mCarbs}\n`;
+      for (const f of items) {
+        text += `  · ${f.foodName} (${f.weight}г) — ${f.calories} ккал\n`;
+      }
+    }
+
+    // Totals vs goal
+    text += `\n📊 Итого: ${stats.calories} ккал | Б${stats.protein}г Ж${stats.fat}г У${stats.carbs}г`;
+    if (user.caloriesGoal) {
+      const diff = stats.calories - user.caloriesGoal;
+      text += diff > 0
+        ? `  ⚠️ +${diff} к норме`
+        : `  ✅ ${Math.abs(diff)} до нормы`;
+    }
+
+    // Workouts
+    if (workouts.length > 0) {
+      const totalBurned = workouts.reduce((s, w) => s + w.caloriesBurned, 0);
+      text += `\n🏋️ Тренировки: ${workouts.map(w => w.description).join(', ')} — ${totalBurned} ккал`;
+    }
+
+    text += '\n\n';
+
     const report = await generateEveningReport(
-      foodLogs.map(f => ({ foodName: f.foodName, calories: f.calories, protein: f.protein, fat: f.fat, carbs: f.carbs, weight: f.weight, foodScore: f.foodScore })),
+      foodLogs.map(f => ({ foodName: f.foodName, calories: f.calories, protein: f.protein, fat: f.fat, carbs: f.carbs, weight: f.weight, mealType: f.mealType, foodScore: f.foodScore })),
       { calories: stats.calories, protein: stats.protein, fat: stats.fat, carbs: stats.carbs },
-      { caloriesGoal: user.caloriesGoal, proteinGoal: user.proteinGoal, fatGoal: user.fatGoal, carbsGoal: user.carbsGoal }
+      { caloriesGoal: user.caloriesGoal, proteinGoal: user.proteinGoal, fatGoal: user.fatGoal, carbsGoal: user.carbsGoal },
+      workouts.map(w => ({ description: w.description, caloriesBurned: w.caloriesBurned })),
+      user.goal ?? null
     );
 
     if (report) {
-      let text = `📊 Вечерний отчёт\n\n`;
-      text += `Итого за день: ${stats.calories} ккал | Б${stats.protein}г Ж${stats.fat}г У${stats.carbs}г\n\n`;
       text += report;
       bot.sendMessage(user.telegramId!, text);
     }
@@ -1984,7 +2137,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
           chat_id: chatId,
           message_id: query.message?.message_id
         });
-        bot.sendMessage(targetUser.telegramId!, "Ваша заявка одобрена! Теперь вы можете пользоваться ботом.");
+        bot.sendMessage(targetUser.telegramId!, "✅ Ваша заявка одобрена!\n\nОтправьте /start чтобы настроить профиль и начать.");
       }
     } else if (query.data.startsWith("admin_reject_")) {
       if (!user.isAdmin) return;
@@ -2082,9 +2235,20 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
   bot.on("message", async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
-    
+
     if (!telegramId) return;
     if (msg.text?.startsWith('/')) return; // Ignore commands
+
+    // Check if user exists at all (before isUserAllowed to give better onboarding message)
+    const rawUser = await storage.getUserByTelegramId(telegramId);
+    if (!rawUser) {
+      bot.sendMessage(chatId,
+        "👋 Добро пожаловать!\n\n" +
+        "Я помогаю считать калории, отслеживать питание и анализировать прогресс.\n\n" +
+        "Отправьте команду /start чтобы зарегистрироваться."
+      );
+      return;
+    }
 
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;

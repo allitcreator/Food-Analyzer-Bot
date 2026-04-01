@@ -161,10 +161,22 @@ export interface FoodItem {
   saturatedFat?: number; // g
 }
 
-export async function generateEveningReport(foodItems: { foodName: string; calories: number; protein: number; fat: number; carbs: number; weight: number; foodScore?: number | null }[], totals: { calories: number; protein: number; fat: number; carbs: number }, goals: { caloriesGoal?: number | null; proteinGoal?: number | null; fatGoal?: number | null; carbsGoal?: number | null }) {
+export async function generateEveningReport(
+  foodItems: { foodName: string; calories: number; protein: number; fat: number; carbs: number; weight: number; mealType: string; foodScore?: number | null }[],
+  totals: { calories: number; protein: number; fat: number; carbs: number },
+  goals: { caloriesGoal?: number | null; proteinGoal?: number | null; fatGoal?: number | null; carbsGoal?: number | null },
+  workouts: { description: string; caloriesBurned: number }[],
+  userGoal: string | null
+) {
   try {
+    const goalMap: Record<string, string> = { lose: 'похудение', maintain: 'поддержание веса', gain: 'набор мышечной массы' };
+    const goalText = userGoal ? goalMap[userGoal] ?? userGoal : 'не указана';
+
     const foodList = foodItems.map(f => `${f.foodName} (${f.weight}г): ${f.calories} ккал, Б${f.protein} Ж${f.fat} У${f.carbs}${f.foodScore ? `, оценка ${f.foodScore}/10` : ''}`).join('\n');
-    const goalsText = goals.caloriesGoal ? `Цели: ${goals.caloriesGoal} ккал, Б${goals.proteinGoal}г, Ж${goals.fatGoal}г, У${goals.carbsGoal}г` : 'Цели не установлены';
+    const goalsText = goals.caloriesGoal ? `Норма: ${goals.caloriesGoal} ккал, Б${goals.proteinGoal}г, Ж${goals.fatGoal}г, У${goals.carbsGoal}г` : 'Нормы не установлены';
+    const workoutsText = workouts.length > 0
+      ? `Тренировки: ${workouts.map(w => `${w.description} (${w.caloriesBurned} ккал сожжено)`).join(', ')}`
+      : '';
 
     const response = await openai.chat.completions.create({
       model: "openai/gpt-4o-mini",
@@ -172,17 +184,20 @@ export async function generateEveningReport(foodItems: { foodName: string; calor
       messages: [
         {
           role: "system",
-          content: `Ты нутрициолог. Проанализируй дневной рацион пользователя и дай краткий вечерний отчёт на русском языке.
+          content: `Ты нутрициолог. Проанализируй дневной рацион пользователя и дай детальный вечерний отчёт на русском языке.
+Цель пользователя: ${goalText}.
+
 Структура ответа:
-1. Общая оценка дня (1-2 предложения)
-2. Что было хорошо (1-2 пункта)
-3. Что можно улучшить (1-2 пункта)
-4. Совет на завтра (1 предложение)
-Будь конкретен, дружелюбен и лаконичен. Используй факты из рациона. Не используй эмодзи.`
+1. Оценка калорийности и БЖУ относительно нормы и цели (2-3 предложения с конкретными цифрами)
+2. Качество питания: что конкретно хорошо или плохо в выбранных продуктах — опирайся на foodScore и состав (1-2 пункта)
+3. Тренировки: одно предложение о том, как они вписались в день — только если тренировки были${workouts.length === 0 ? ' (тренировок не было — этот пункт пропусти)' : ''}
+4. Что уже хорошо и не требует изменений (1-2 пункта)
+5. Что скорректировать завтра — конкретно (1-2 пункта)
+Не используй эмодзи. Опирайся только на данные из рациона.`
         },
         {
           role: "user",
-          content: `Рацион за сегодня:\n${foodList || 'Ничего не записано'}\n\nИтого: ${totals.calories} ккал, Б${totals.protein}г, Ж${totals.fat}г, У${totals.carbs}г\n${goalsText}`
+          content: `Рацион за сегодня:\n${foodList || 'Ничего не записано'}\n\nИтого: ${totals.calories} ккал, Б${totals.protein}г, Ж${totals.fat}г, У${totals.carbs}г\n${goalsText}${workoutsText ? '\n' + workoutsText : ''}`
         }
       ]
     });
@@ -190,6 +205,69 @@ export async function generateEveningReport(foodItems: { foodName: string; calor
     return response.choices[0].message.content || null;
   } catch (error) {
     console.error("OpenAI Evening Report Error:", error);
+    return null;
+  }
+}
+
+export async function generatePeriodAnalysis(params: {
+  period: 'week' | 'month';
+  dailyStats: { dayLabel: string; calories: number; protein: number; fat: number; carbs: number }[];
+  avgCalories: number;
+  avgProtein: number;
+  avgFat: number;
+  avgCarbs: number;
+  topFoods: { name: string; count: number; avgScore: number | null }[];
+  totalCaloriesBurned: number;
+  workoutTypes: string[];
+  weightStart: number | null;
+  weightEnd: number | null;
+  user: { goal?: string | null; caloriesGoal?: number | null; proteinGoal?: number | null };
+}): Promise<string | null> {
+  try {
+    const { period, avgCalories, avgProtein, avgFat, avgCarbs, topFoods, totalCaloriesBurned, workoutTypes, weightStart, weightEnd, user } = params;
+    const periodLabel = period === 'week' ? 'неделю' : 'месяц';
+    const goalMap: Record<string, string> = { lose: 'похудение', maintain: 'поддержание веса', gain: 'набор мышечной массы' };
+    const goalText = user.goal ? goalMap[user.goal] ?? user.goal : 'не указана';
+
+    const topFoodsText = topFoods.length > 0
+      ? topFoods.map(f => `${f.name} — ${f.count} раз${f.avgScore ? ` (оценка ${f.avgScore.toFixed(1)}/10)` : ''}`).join('\n')
+      : 'нет данных';
+
+    const weightText = weightStart != null && weightEnd != null
+      ? `Вес в начале периода: ${weightStart} кг, в конце: ${weightEnd} кг (изменение: ${(weightEnd - weightStart).toFixed(1)} кг)`
+      : 'данных о весе нет';
+
+    const workoutsText = totalCaloriesBurned > 0
+      ? `Тренировки за период: ${workoutTypes.join(', ')}, сожжено ${totalCaloriesBurned} ккал`
+      : 'тренировок не было';
+
+    const response = await openai.chat.completions.create({
+      model: "openai/gpt-4o-mini",
+      max_tokens: 1024,
+      messages: [
+        {
+          role: "system",
+          content: `Ты нутрициолог. Проанализируй питание пользователя за ${periodLabel} и дай развёрнутый анализ на русском языке.
+Цель пользователя: ${goalText}.
+
+Структура ответа (6-8 предложений):
+1. Общая оценка калорийности и БЖУ относительно нормы и цели
+2. Анализ частых блюд: найди закономерности среди топ-блюд и прокомментируй каждое из них — полезно оно или нет, почему. Будь конкретен (например: "Гречка 12 раз — отлично, это источник сложных углеводов и клетчатки" или "Пицца 8 раз — слишком часто, высокая калорийность и мало нутриентов")
+3. Физическая активность: оцени тренировки как вспомогательный фактор (1 предложение)
+4. Динамика веса: прокомментируй изменение, соответствует ли оно цели (только если данные есть)
+5. 2-3 конкретных практических рекомендации что изменить в рационе
+Не используй эмодзи. Опирайся строго на предоставленные данные.`
+        },
+        {
+          role: "user",
+          content: `Период: ${periodLabel}\nСреднее в день: ${avgCalories} ккал, Б${avgProtein}г, Ж${avgFat}г, У${avgCarbs}г\n${user.caloriesGoal ? `Норма: ${user.caloriesGoal} ккал` : 'Норма не установлена'}\n\nЧастые блюда:\n${topFoodsText}\n\n${workoutsText}\n${weightText}`
+        }
+      ]
+    });
+
+    return response.choices[0].message.content || null;
+  } catch (error) {
+    console.error("OpenAI Period Analysis Error:", error);
     return null;
   }
 }
