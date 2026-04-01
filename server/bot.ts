@@ -521,9 +521,23 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     bot.sendMessage(chatId, `🏋️ *Тренер:*\n\n${answer}`, { parse_mode: "Markdown" });
   });
 
-  const userStates: Record<string, { step: string; data: Partial<User> & { reminderMeal?: string; field?: string; messageId?: number; promptMessageId?: number; idx?: number } }> = {};
+  const userStates: Record<string, { step: string; data: Partial<User> & { reminderMeal?: string; field?: string; messageId?: number; promptMessageId?: number; idx?: number; settingsMsgId?: number } }> = {};
   const pendingMulti: Record<string, FoodItem[]> = {};
   const pendingWorkouts: Record<string, { description: string; workoutType: string; durationMin: number | null; caloriesBurned: number }> = {};
+  const settingsMessageIds = new Map<string, number>(); // telegramId → settings message_id
+
+  async function refreshSettingsMessage(chatId: number, telegramId: string) {
+    const msgId = settingsMessageIds.get(telegramId);
+    if (!msgId) return;
+    const freshUser = await storage.getUserByTelegramId(telegramId);
+    if (!freshUser) return;
+    bot.editMessageText(buildSettingsText(freshUser), {
+      chat_id: chatId,
+      message_id: msgId,
+      parse_mode: 'Markdown',
+      reply_markup: buildSettingsKeyboard(freshUser)
+    }).catch(() => {});
+  }
 
   const MEAL_EMOJI: Record<string, string> = { breakfast: '🌅', lunch: '☀️', dinner: '🌙', snack: '🍎' };
 
@@ -1830,10 +1844,11 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       const time = query.data.replace("rtime_", "");
       await storage.updateUserReportTime(user.id, time);
       const label = time === 'off' ? 'выключен' : time;
-      bot.editMessageText(`Вечерний отчёт: ${label}`, {
+      bot.editMessageText(`⏰ Вечерний отчёт: ${label}`, {
         chat_id: chatId,
         message_id: query.message?.message_id
       });
+      await refreshSettingsMessage(chatId, telegramId);
     } else if (query.data.startsWith("rmnd_")) {
       const action = query.data.replace("rmnd_", "");
 
@@ -1842,10 +1857,11 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         await storage.updateUserReminder(user.id, 'lunch', 'off');
         await storage.updateUserReminder(user.id, 'dinner', 'off');
         await storage.updateUser(user.id, { noLogReminderTime: 'off' });
-        bot.editMessageText("Все напоминания выключены.", {
+        bot.editMessageText("🍽 Все напоминания выключены.", {
           chat_id: chatId,
           message_id: query.message?.message_id
         });
+        await refreshSettingsMessage(chatId, telegramId);
       } else if (action === 'nolog') {
         bot.editMessageText(`Напоминание если нет записей\n\nВыберите время (если к этому времени нет ни одной записи — бот напомнит):`, {
           chat_id: chatId,
@@ -1879,14 +1895,14 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     } else if (query.data.startsWith("rmcustom_")) {
       const target = query.data.replace("rmcustom_", "");
       if (target === 'nolog') {
-        userStates[telegramId] = { step: 'nolog_reminder_time', data: {} };
+        userStates[telegramId] = { step: 'nolog_reminder_time', data: { settingsMsgId: settingsMessageIds.get(telegramId) } };
         bot.editMessageText(`Введите время в формате ЧЧ:ММ\nНапример: 13:30`, {
           chat_id: chatId,
           message_id: query.message?.message_id
         });
       } else {
         const meal = target as 'breakfast' | 'lunch' | 'dinner';
-        userStates[telegramId] = { step: 'reminder_time', data: { reminderMeal: meal } };
+        userStates[telegramId] = { step: 'reminder_time', data: { reminderMeal: meal, settingsMsgId: settingsMessageIds.get(telegramId) } };
         bot.editMessageText(`Введите время для напоминания "${MEAL_LABELS[meal]}" в формате ЧЧ:ММ\nНапример: 07:30`, {
           chat_id: chatId,
           message_id: query.message?.message_id
@@ -1911,6 +1927,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
           message_id: query.message?.message_id
         });
       }
+      await refreshSettingsMessage(chatId, telegramId);
     } else if (query.data.startsWith("set_gender_")) {
       const gender = query.data.split("_")[2];
       userStates[telegramId] = { step: 'age', data: { gender } };
@@ -2047,7 +2064,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     } else if (query.data.startsWith('wrem_t_')) {
       const val = query.data.replace('wrem_t_', '');
       if (val === 'custom') {
-        userStates[telegramId] = { step: 'weight_reminder_time', data: {} };
+        userStates[telegramId] = { step: 'weight_reminder_time', data: { settingsMsgId: settingsMessageIds.get(telegramId) } };
         bot.editMessageText('Введите время в формате ЧЧ:ММ, например: 07:30', {
           chat_id: chatId, message_id: query.message?.message_id
         });
@@ -2057,6 +2074,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         bot.editMessageText(`⚖️ Напоминание взвеситься: ${label}`, {
           chat_id: chatId, message_id: query.message?.message_id
         });
+        await refreshSettingsMessage(chatId, telegramId);
       }
 
     // ─── Weight reminder days ───────────────────────────────────────────────
@@ -2065,11 +2083,9 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
 
     } else if (query.data === 'wrem_d_all') {
       await storage.updateUser(user.id, { weightReminderDays: '' });
-      const freshUser = await storage.getUser(user.id);
-      if (freshUser) {
-        bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: query.message?.message_id });
-        bot.sendMessage(chatId, '✅ Напоминание будет каждый день');
-      }
+      bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: query.message?.message_id });
+      bot.sendMessage(chatId, '✅ Напоминание будет каждый день');
+      await refreshSettingsMessage(chatId, telegramId);
 
     } else if (query.data.startsWith('wrem_d_')) {
       const dayStr = query.data.replace('wrem_d_', '');
@@ -2341,6 +2357,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
 
     // ─── Settings sub-menus ───────────────────────────────────────────────
     if (query.data === 'settings_report_time') {
+      settingsMessageIds.set(telegramId, query.message!.message_id);
       bot.answerCallbackQuery(query.id);
       bot.sendMessage(chatId,
         `⏰ Вечерний отчёт сейчас: *${(!user.reportTime || user.reportTime === 'off') ? 'выкл' : user.reportTime}*\n\nВыберите новое время:`,
@@ -2350,6 +2367,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
             inline_keyboard: [
               [{ text: '19:00', callback_data: 'rtime_19:00' }, { text: '20:00', callback_data: 'rtime_20:00' }, { text: '21:00', callback_data: 'rtime_21:00' }],
               [{ text: '22:00', callback_data: 'rtime_22:00' }, { text: '23:00', callback_data: 'rtime_23:00' }, { text: '⛔ Выкл', callback_data: 'rtime_off' }],
+              [{ text: '← Назад к настройкам', callback_data: 'settings_back' }],
             ]
           }
         }
@@ -2358,6 +2376,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     }
 
     if (query.data === 'settings_reminders') {
+      settingsMessageIds.set(telegramId, query.message!.message_id);
       bot.answerCallbackQuery(query.id);
       const br = user.breakfastReminder || 'off';
       const lu = user.lunchReminder || 'off';
@@ -2375,6 +2394,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
               [{ text: `🌙 Ужин (${fmt(di)})`,     callback_data: 'rmnd_dinner' }],
               [{ text: `📝 Нет записей к (${fmt(nl)})`, callback_data: 'rmnd_nolog' }],
               [{ text: '⛔ Выключить все', callback_data: 'rmnd_all_off' }],
+              [{ text: '← Назад к настройкам', callback_data: 'settings_back' }],
             ]
           }
         }
@@ -2383,8 +2403,15 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     }
 
     if (query.data === 'settings_weight_reminder') {
+      settingsMessageIds.set(telegramId, query.message!.message_id);
       bot.answerCallbackQuery(query.id);
       sendWeightReminderSetup(chatId, user);
+      return;
+    }
+
+    if (query.data === 'settings_back') {
+      bot.answerCallbackQuery(query.id);
+      await refreshSettingsMessage(chatId, telegramId);
       return;
     }
 
@@ -2516,9 +2543,12 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
           if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
             const time = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
             const meal = state.data.reminderMeal as 'breakfast' | 'lunch' | 'dinner';
+            const smid = state.data.settingsMsgId;
             await storage.updateUserReminder(user.id, meal, time);
             delete userStates[telegramId];
+            if (smid) settingsMessageIds.set(telegramId, smid);
             bot.sendMessage(chatId, `${MEAL_LABELS[meal]}: ${time}`);
+            await refreshSettingsMessage(chatId, telegramId);
             return;
           }
         }
@@ -2533,9 +2563,12 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
           const m = parseInt(timeMatch[2]);
           if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
             const time = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+            const smid2 = state.data.settingsMsgId;
             await storage.updateUser(user.id, { noLogReminderTime: time });
             delete userStates[telegramId];
+            if (smid2) settingsMessageIds.set(telegramId, smid2);
             bot.sendMessage(chatId, `⚠️ Напоминание «нет записей» установлено на ${time}`);
+            await refreshSettingsMessage(chatId, telegramId);
             return;
           }
         }
@@ -2551,8 +2584,11 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
           if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
             const time = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
             await storage.updateUser(user.id, { weightReminderTime: time });
+            // Restore settingsMsgId if was stored in state
+            if (state.data.settingsMsgId) settingsMessageIds.set(telegramId, state.data.settingsMsgId);
             delete userStates[telegramId];
             bot.sendMessage(chatId, `⚖️ Напоминание взвеситься: ${time}`);
+            await refreshSettingsMessage(chatId, telegramId);
             return;
           }
         }
