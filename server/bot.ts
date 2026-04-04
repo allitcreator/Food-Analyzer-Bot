@@ -1539,70 +1539,55 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     startProfileFlow(chatId, telegramId);
   });
 
-  const HISTORY_PAGE_SIZE = 10;
+  const mealLabelsH: Record<string, string> = {
+    breakfast: '🌅 Завтрак', lunch: '🍽 Обед', dinner: '🌙 Ужин', snack: '🍎 Перекус',
+  };
+  const mealOrderH = ['breakfast', 'lunch', 'dinner', 'snack'];
 
-  function buildHistoryMessage(logs: FoodLog[], page: number) {
-    const totalPages = Math.max(1, Math.ceil(logs.length / HISTORY_PAGE_SIZE));
-    const safeP = Math.min(page, totalPages - 1);
-    const pageItems = logs.slice(safeP * HISTORY_PAGE_SIZE, (safeP + 1) * HISTORY_PAGE_SIZE);
+  function buildHistoryItemText(f: FoodLog, idx: number) {
+    const unit = getUnit(f.foodName);
+    return `${idx}. ${f.foodName} (${f.weight}${unit}) — ${f.calories} ккал | Б${f.protein} Ж${f.fat} У${f.carbs}`;
+  }
 
-    const mealLabelsH: Record<string, string> = {
-      breakfast: '🌅 Завтрак', lunch: '🍽 Обед', dinner: '🌙 Ужин', snack: '🍎 Перекус',
+  function buildHistoryItemKeyboard(logId: number) {
+    return {
+      inline_keyboard: [
+        [
+          { text: '✏️ Изменить', callback_data: `hist_edit_${logId}` },
+          { text: '🗑 Удалить', callback_data: `hist_del_${logId}` },
+        ],
+      ],
     };
-    const mealOrder = ['breakfast', 'lunch', 'dinner', 'snack'];
+  }
+
+  async function sendHistoryMessages(chatId: number, logs: FoodLog[]) {
     const groups: Record<string, { log: FoodLog; idx: number }[]> = {};
-    pageItems.forEach((log, i) => {
+    logs.forEach((log, i) => {
       const mt = log.mealType || 'snack';
       if (!groups[mt]) groups[mt] = [];
-      groups[mt].push({ log, idx: safeP * HISTORY_PAGE_SIZE + i + 1 });
+      groups[mt].push({ log, idx: i + 1 });
     });
 
-    let text = totalPages > 1
-      ? `📋 История за сегодня (стр. ${safeP + 1}/${totalPages})\n`
-      : `📋 История за сегодня\n`;
+    // Header
+    await bot.sendMessage(chatId, '📋 История за сегодня');
 
-    const orderedItems: { log: FoodLog; idx: number }[] = [];
-    for (const mt of mealOrder) {
+    for (const mt of mealOrderH) {
       const items = groups[mt];
       if (!items || items.length === 0) continue;
-      text += `\n${mealLabelsH[mt]}:\n`;
+      await bot.sendMessage(chatId, `\n${mealLabelsH[mt]}:`);
       for (const { log: f, idx } of items) {
-        text += `${idx}. ${f.foodName} (${f.weight}г) — ${f.calories} ккал | Б${f.protein} Ж${f.fat} У${f.carbs}\n`;
-        orderedItems.push({ log: f, idx });
+        await bot.sendMessage(chatId, buildHistoryItemText(f, idx), {
+          reply_markup: buildHistoryItemKeyboard(f.id),
+        });
       }
     }
 
     // Totals
-    const totCal = pageItems.reduce((s, f) => s + f.calories, 0);
-    const totProt = pageItems.reduce((s, f) => s + f.protein, 0);
-    const totFat = pageItems.reduce((s, f) => s + f.fat, 0);
-    const totCarbs = pageItems.reduce((s, f) => s + f.carbs, 0);
-    text += `\n📊 Итого: ${totCal} ккал | Б${totProt} Ж${totFat} У${totCarbs}`;
-
-    // Build keyboard
-    const keyboard: { text: string; callback_data: string }[][] = [];
-
-    // Edit buttons — rows of 5
-    for (let i = 0; i < orderedItems.length; i += 5) {
-      keyboard.push(orderedItems.slice(i, i + 5).map(({ log: f, idx }) => ({
-        text: `✏️${idx}`, callback_data: `hist_edit_${f.id}`,
-      })));
-    }
-    // Delete buttons — rows of 5
-    for (let i = 0; i < orderedItems.length; i += 5) {
-      keyboard.push(orderedItems.slice(i, i + 5).map(({ log: f, idx }) => ({
-        text: `🗑${idx}`, callback_data: `hist_del_${f.id}`,
-      })));
-    }
-    // Pagination
-    if (totalPages > 1) {
-      const nav: { text: string; callback_data: string }[] = [];
-      if (safeP > 0) nav.push({ text: '⬅️', callback_data: `hist_page_${safeP - 1}` });
-      if (safeP < totalPages - 1) nav.push({ text: '➡️', callback_data: `hist_page_${safeP + 1}` });
-      keyboard.push(nav);
-    }
-
-    return { text, keyboard: { inline_keyboard: keyboard }, page: safeP };
+    const totCal = logs.reduce((s, f) => s + f.calories, 0);
+    const totProt = logs.reduce((s, f) => s + f.protein, 0);
+    const totFat = logs.reduce((s, f) => s + f.fat, 0);
+    const totCarbs = logs.reduce((s, f) => s + f.carbs, 0);
+    await bot.sendMessage(chatId, `📊 Итого: ${totCal} ккал | Б${totProt} Ж${totFat} У${totCarbs}`);
   }
 
   bot.onText(/\/history/, async (msg) => {
@@ -1613,7 +1598,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
 
-    const today = new Date();
+    const today = getMoscowNow();
     const todayStart = new Date(today); todayStart.setHours(0, 0, 0, 0);
     const todayEnd = new Date(today); todayEnd.setHours(23, 59, 59, 999);
     const logs = await storage.getFoodLogsInRange(user.id, todayStart, todayEnd);
@@ -1623,8 +1608,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       return;
     }
 
-    const { text, keyboard } = buildHistoryMessage(logs, 0);
-    bot.sendMessage(chatId, text, { reply_markup: keyboard });
+    await sendHistoryMessages(chatId, logs);
   });
 
   bot.onText(/\/export$/, async (msg) => {
@@ -2025,42 +2009,12 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       });
 
     // --- History callbacks ---
-    } else if (query.data.startsWith("hist_page_")) {
-      const page = parseInt(query.data.replace("hist_page_", ""));
-      const today = new Date();
-      const todayStart = new Date(today); todayStart.setHours(0, 0, 0, 0);
-      const todayEnd = new Date(today); todayEnd.setHours(23, 59, 59, 999);
-      const logs = await storage.getFoodLogsInRange(user.id, todayStart, todayEnd);
-      const { text, keyboard } = buildHistoryMessage(logs, page);
-      bot.editMessageText(text, {
-        chat_id: chatId,
-        message_id: query.message?.message_id,
-        reply_markup: keyboard,
-      }).catch(() => {});
-      bot.answerCallbackQuery(query.id);
-
     } else if (query.data.startsWith("hist_del_")) {
       const logId = parseInt(query.data.replace("hist_del_", ""));
       await storage.deleteFoodLog(logId);
       bot.answerCallbackQuery(query.id, { text: '🗑 Удалено' });
-      // Refresh history message
-      const today = new Date();
-      const todayStart = new Date(today); todayStart.setHours(0, 0, 0, 0);
-      const todayEnd = new Date(today); todayEnd.setHours(23, 59, 59, 999);
-      const logs = await storage.getFoodLogsInRange(user.id, todayStart, todayEnd);
-      if (logs.length === 0) {
-        bot.editMessageText("За сегодня записей нет.", {
-          chat_id: chatId,
-          message_id: query.message?.message_id,
-        }).catch(() => {});
-      } else {
-        const { text, keyboard } = buildHistoryMessage(logs, 0);
-        bot.editMessageText(text, {
-          chat_id: chatId,
-          message_id: query.message?.message_id,
-          reply_markup: keyboard,
-        }).catch(() => {});
-      }
+      // Delete the message with this food item
+      bot.deleteMessage(chatId, query.message!.message_id).catch(() => {});
 
     } else if (query.data.startsWith("hist_edit_")) {
       const logId = parseInt(query.data.replace("hist_edit_", ""));
@@ -2082,14 +2036,23 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
             { text: `🧈 Ж: ${log.fat}г`, callback_data: `he_fat_${logId}` },
             { text: `🍞 У: ${log.carbs}г`, callback_data: `he_carbs_${logId}` },
           ],
-          [{ text: '← Назад', callback_data: 'he_back' }],
+          [{ text: '← Назад', callback_data: `he_back_${logId}` }],
         ],
       }, {
         chat_id: chatId,
         message_id: query.message?.message_id,
       }).catch(() => {});
 
-    } else if (query.data.startsWith("he_") && query.data !== "he_back") {
+    } else if (query.data.startsWith("he_back_")) {
+      const logId = parseInt(query.data.replace("he_back_", ""));
+      bot.answerCallbackQuery(query.id);
+      // Restore original item keyboard
+      bot.editMessageReplyMarkup(buildHistoryItemKeyboard(logId), {
+        chat_id: chatId,
+        message_id: query.message?.message_id,
+      }).catch(() => {});
+
+    } else if (query.data.startsWith("he_") && !query.data.startsWith("he_back")) {
       // he_weight_123, he_calories_123 etc.
       const parts = query.data.slice(3).split('_');
       const field = parts[0]; // weight | calories | protein | fat | carbs
@@ -2102,22 +2065,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       const promptMsg = await bot.sendMessage(chatId, `Введите ${labels[field]}:`);
       userStates[telegramId] = {
         step: 'history_field_input',
-        data: { field, logId, messageId: query.message?.message_id, promptMessageId: promptMsg.message_id, historyPage: 0 },
+        data: { field, logId, messageId: query.message?.message_id, promptMessageId: promptMsg.message_id },
       };
-
-    } else if (query.data === "he_back") {
-      bot.answerCallbackQuery(query.id);
-      // Rebuild full history keyboard
-      const today = new Date();
-      const todayStart = new Date(today); todayStart.setHours(0, 0, 0, 0);
-      const todayEnd = new Date(today); todayEnd.setHours(23, 59, 59, 999);
-      const logs = await storage.getFoodLogsInRange(user.id, todayStart, todayEnd);
-      const { text, keyboard } = buildHistoryMessage(logs, 0);
-      bot.editMessageText(text, {
-        chat_id: chatId,
-        message_id: query.message?.message_id,
-        reply_markup: keyboard,
-      }).catch(() => {});
 
     } else if (query.data.startsWith("rtime_")) {
       const time = query.data.replace("rtime_", "");
@@ -2810,17 +2759,17 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         bot.deleteMessage(chatId, promptMessageId).catch(() => {});
         bot.deleteMessage(chatId, msg.message_id).catch(() => {});
 
-        // Refresh history message
-        const today = new Date();
-        const todayStart = new Date(today); todayStart.setHours(0, 0, 0, 0);
-        const todayEnd = new Date(today); todayEnd.setHours(23, 59, 59, 999);
-        const logs = await storage.getFoodLogsInRange(user.id, todayStart, todayEnd);
-        const { text: histText, keyboard } = buildHistoryMessage(logs, 0);
-        bot.editMessageText(histText, {
-          chat_id: chatId,
-          message_id: messageId,
-          reply_markup: keyboard,
-        }).catch(() => {});
+        // Refresh this specific history item message
+        const updatedLog = await storage.getFoodLogById(logId);
+        if (updatedLog) {
+          // Use a simple index placeholder — exact numbering not critical after edits
+          const itemText = `${updatedLog.foodName} (${updatedLog.weight}${getUnit(updatedLog.foodName)}) — ${updatedLog.calories} ккал | Б${updatedLog.protein} Ж${updatedLog.fat} У${updatedLog.carbs}`;
+          bot.editMessageText(itemText, {
+            chat_id: chatId,
+            message_id: messageId,
+            reply_markup: buildHistoryItemKeyboard(logId),
+          }).catch(() => {});
+        }
         return;
       }
 
