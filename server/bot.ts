@@ -2725,7 +2725,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
               }
             );
             if (intent === "both") {
-              const items = await analyzeFoodText(msg.text);
+              const items = await analyzeFoodText(msg.text, getMoscowNow());
               if (items && items.length > 0) await processFoodItems(chatId, telegramId, items);
             }
             return;
@@ -2733,7 +2733,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         }
 
         if (intent === "food" || intent === "both" || intent === "other") {
-          const items = await analyzeFoodText(msg.text);
+          const items = await analyzeFoodText(msg.text, getMoscowNow());
           await bot.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
           if (items && items.length > 0) {
             await processFoodItems(chatId, telegramId, items);
@@ -2832,7 +2832,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         if (!audioResponse.ok) throw new Error(`Failed to fetch voice: ${audioResponse.status}`);
 
         const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
-        const transcript = await transcribeVoice(audioBuffer);
+        const transcript = await transcribeVoice(audioBuffer, msg.voice.duration);
 
         if (!transcript) {
           bot.sendMessage(chatId, "Не удалось распознать голосовое сообщение. Попробуйте ещё раз.");
@@ -2842,7 +2842,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         console.log("Voice transcription:", transcript);
         bot.sendMessage(chatId, `🗣 "${transcript}"\n\nАнализирую...`);
 
-        const items = await analyzeFoodText(transcript);
+        const items = await analyzeFoodText(transcript, getMoscowNow());
         if (items && items.length > 0) {
           await processFoodItems(chatId, telegramId, items);
         } else {

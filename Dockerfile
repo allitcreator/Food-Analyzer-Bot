@@ -12,6 +12,8 @@ RUN npm run build
 # Stage 2: production
 FROM node:20-alpine AS runner
 
+RUN apk add --no-cache ffmpeg
+
 WORKDIR /app
 
 # Copy all node_modules from builder (includes drizzle-kit needed for db:push)

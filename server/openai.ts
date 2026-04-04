@@ -1,5 +1,12 @@
 import OpenAI from "openai";
 import { config } from "./config";
+import { execFile } from "child_process";
+import { promisify } from "util";
+import { writeFile, readFile, unlink, mkdtemp } from "fs/promises";
+import { tmpdir } from "os";
+import path from "path";
+
+const execFileAsync = promisify(execFile);
 
 // Chat + Vision via OpenRouter
 const openai = new OpenAI({
@@ -12,15 +19,34 @@ const openai = new OpenAI({
 });
 
 
-export async function analyzeFoodText(text: string): Promise<FoodItem[] | null> {
+export async function analyzeFoodText(text: string, currentTime?: Date): Promise<FoodItem[] | null> {
   try {
+    // Determine default mealType based on Moscow time
+    let timeHint = '';
+    if (currentTime) {
+      const h = currentTime.getHours();
+      const m = currentTime.getMinutes();
+      const totalMin = h * 60 + m;
+      let defaultMeal: string;
+      if (totalMin >= 300 && totalMin <= 750) {        // 5:00–12:30
+        defaultMeal = 'breakfast';
+      } else if (totalMin >= 751 && totalMin <= 990) { // 12:31–16:30
+        defaultMeal = 'lunch';
+      } else {                                          // 16:31–4:59
+        defaultMeal = 'dinner';
+      }
+      timeHint = `\nCurrent time: ${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}. Default mealType (when user does NOT explicitly mention a meal): "${defaultMeal}".
+If the user explicitly says "на завтрак/breakfast", "на обед/lunch", "на ужин/dinner", or "перекус/snack" — use that instead of the default.
+The user may describe multiple meals in one message (e.g. "на завтрак съел X, на обед съел Y") — assign the correct mealType to each item based on context.`;
+    }
+
     const response = await openai.chat.completions.create({
       model: "openai/gpt-4o-mini",
-      max_tokens: 1024,
+      max_tokens: 2048,
       messages: [
         {
           role: "system",
-          content: `You are a nutrition expert. The user may describe one or multiple food items in a single message.
+          content: `You are a nutrition expert. The user may describe one or multiple food items in a single message. They may describe food from different meals (breakfast, lunch, dinner, snack) in one message.
 
 Split the message into individual food items/dishes. For each item:
 1. Identify the exact food name (in Russian if the user wrote in Russian).
@@ -28,7 +54,8 @@ Split the message into individual food items/dishes. For each item:
 3. Rate nutritional quality 1-10 (10 = very healthy, 1 = very unhealthy).
 4. Write a brief nutrition advice in Russian (1-2 sentences).
 5. Estimate micronutrients based on typical composition.
-
+6. Determine mealType: use the user's explicit mention (завтрак/обед/ужин/перекус) if present, otherwise use the default based on current time.
+${timeHint}
 Return ONLY a JSON object with a single key "items" containing an array. Each element:
 - foodName (string)
 - calories (number)
@@ -172,7 +199,8 @@ export async function generateEveningReport(
     const goalMap: Record<string, string> = { lose: 'похудение', maintain: 'поддержание веса', gain: 'набор мышечной массы' };
     const goalText = userGoal ? goalMap[userGoal] ?? userGoal : 'не указана';
 
-    const foodList = foodItems.map(f => `${f.foodName} (${f.weight}г): ${f.calories} ккал, Б${f.protein} Ж${f.fat} У${f.carbs}${f.foodScore ? `, оценка ${f.foodScore}/10` : ''}`).join('\n');
+    const mealLabels: Record<string, string> = { breakfast: 'Завтрак', lunch: 'Обед', dinner: 'Ужин', snack: 'Перекус' };
+    const foodList = foodItems.map(f => `[${mealLabels[f.mealType] || f.mealType}] ${f.foodName} (${f.weight}г): ${f.calories} ккал, Б${f.protein} Ж${f.fat} У${f.carbs}${f.foodScore ? `, оценка ${f.foodScore}/10` : ''}`).join('\n');
     const goalsText = goals.caloriesGoal ? `Норма: ${goals.caloriesGoal} ккал, Б${goals.proteinGoal}г, Ж${goals.fatGoal}г, У${goals.carbsGoal}г` : 'Нормы не установлены';
     const workoutsText = workouts.length > 0
       ? `Тренировки: ${workouts.map(w => `${w.description} (${w.caloriesBurned} ккал сожжено)`).join(', ')}`
@@ -272,30 +300,85 @@ export async function generatePeriodAnalysis(params: {
   }
 }
 
-export async function transcribeVoice(audioBuffer: Buffer): Promise<string | null> {
+async function transcribeChunk(audioBuffer: Buffer): Promise<string | null> {
+  const audioBase64 = audioBuffer.toString("base64");
+  const response = await openai.chat.completions.create({
+    model: "google/gemini-3-flash-preview",
+    max_tokens: 4096,
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "image_url",
+            image_url: { url: `data:audio/ogg;base64,${audioBase64}` },
+          } as any,
+          {
+            type: "text",
+            text: "Транскрибируй аудио на русском языке. Верни только текст без пояснений.",
+          },
+        ],
+      },
+    ],
+  });
+  return response.choices[0].message.content?.trim() || null;
+}
+
+async function splitAudioIntoChunks(audioBuffer: Buffer, chunkSeconds: number = 55): Promise<Buffer[]> {
+  const tmpDir = await mkdtemp(path.join(tmpdir(), "voice-"));
+  const inputPath = path.join(tmpDir, "input.ogg");
+  await writeFile(inputPath, audioBuffer);
+
   try {
-    const audioBase64 = audioBuffer.toString("base64");
-    // Gemini via OpenRouter accepts audio as image_url with audio data URI
-    const response = await openai.chat.completions.create({
-      model: "google/gemini-3-flash-preview",
-      max_tokens: 1024,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "image_url",
-              image_url: { url: `data:audio/ogg;base64,${audioBase64}` },
-            } as any,
-            {
-              type: "text",
-              text: "Транскрибируй аудио на русском языке. Верни только текст без пояснений.",
-            },
-          ],
-        },
-      ],
-    });
-    return response.choices[0].message.content?.trim() || null;
+    // Get duration
+    const { stdout } = await execFileAsync("ffprobe", [
+      "-v", "error", "-show_entries", "format=duration",
+      "-of", "default=noprint_wrappers=1:nokey=1", inputPath,
+    ]);
+    const duration = parseFloat(stdout.trim());
+    if (isNaN(duration) || duration <= chunkSeconds) {
+      return [audioBuffer];
+    }
+
+    const chunks: Buffer[] = [];
+    const numChunks = Math.ceil(duration / chunkSeconds);
+    for (let i = 0; i < numChunks; i++) {
+      const start = i * chunkSeconds;
+      const outPath = path.join(tmpDir, `chunk_${i}.ogg`);
+      await execFileAsync("ffmpeg", [
+        "-y", "-i", inputPath,
+        "-ss", String(start), "-t", String(chunkSeconds),
+        "-c", "copy", outPath,
+      ]);
+      chunks.push(await readFile(outPath));
+      await unlink(outPath).catch(() => {});
+    }
+    return chunks;
+  } finally {
+    await unlink(inputPath).catch(() => {});
+    // tmpDir will be cleaned up by OS
+  }
+}
+
+export async function transcribeVoice(audioBuffer: Buffer, duration?: number): Promise<string | null> {
+  try {
+    // Short audio — transcribe directly
+    if (!duration || duration <= 60) {
+      return await transcribeChunk(audioBuffer);
+    }
+
+    // Long audio — split into chunks and transcribe each
+    console.log(`Long voice message (${duration}s), splitting into chunks...`);
+    const chunks = await splitAudioIntoChunks(audioBuffer);
+    console.log(`Split into ${chunks.length} chunks`);
+
+    const transcripts: string[] = [];
+    for (const chunk of chunks) {
+      const text = await transcribeChunk(chunk);
+      if (text) transcripts.push(text);
+    }
+
+    return transcripts.length > 0 ? transcripts.join(" ") : null;
   } catch (error: any) {
     console.error("Gemini Voice Transcription Error:", JSON.stringify({
       message: error?.message,
