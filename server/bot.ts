@@ -3,9 +3,9 @@ import { randomBytes } from "crypto";
 import { config } from "./config";
 import ExcelJS from "exceljs";
 import { IStorage } from "./storage";
-import { analyzeFoodText, analyzeFoodImage, generateEveningReport, generatePeriodAnalysis, transcribeVoice, askCoach, detectBarcode, generateWeightAnalysis, classifyIntent, analyzeWorkout, FoodItem } from "./openai";
+import { analyzeFoodText, analyzeFoodImage, generateEveningReport, generatePeriodAnalysis, transcribeVoice, askCoach, detectBarcode, generateWeightAnalysis, classifyIntent, analyzeWorkout, groupFoodNames, FoodItem } from "./openai";
 import { generateMonthlyPDF, extractTopFoods } from "./pdf";
-import { User } from "@shared/schema";
+import { User, FoodLog } from "@shared/schema";
 import { parseHealthPayload, calcStepsCalories } from "./health-helpers";
 
 const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
@@ -521,7 +521,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     bot.sendMessage(chatId, `🏋️ *Тренер:*\n\n${answer}`, { parse_mode: "Markdown" });
   });
 
-  const userStates: Record<string, { step: string; data: Partial<User> & { reminderMeal?: string; field?: string; messageId?: number; promptMessageId?: number; idx?: number; settingsMsgId?: number } }> = {};
+  const userStates: Record<string, { step: string; data: Partial<User> & { reminderMeal?: string; field?: string; messageId?: number; promptMessageId?: number; idx?: number; settingsMsgId?: number; logId?: number; historyPage?: number } }> = {};
   const pendingMulti: Record<string, FoodItem[]> = {};
   const pendingWorkouts: Record<string, { description: string; workoutType: string; durationMin: number | null; caloriesBurned: number }> = {};
   const settingsMessageIds = new Map<string, number>(); // telegramId → settings message_id
@@ -765,10 +765,13 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     if (!user) return;
 
     const today = new Date();
-    const [stats, streak, workouts] = await Promise.all([
+    const todayStart = new Date(today); todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date(today); todayEnd.setHours(23, 59, 59, 999);
+    const [stats, streak, workouts, foodLogsToday] = await Promise.all([
       storage.getDailyStats(user.id, today),
       storage.getStreak(user.id),
       storage.getDailyWorkouts(user.id, today),
+      storage.getFoodLogsInRange(user.id, todayStart, todayEnd),
     ]);
 
     let text = `📊 Статистика за сегодня\n`;
@@ -790,6 +793,25 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     text += `💪 Белки:    ${stats.protein}г${user.proteinGoal ? ` / ${user.proteinGoal}г` : ''}\n`;
     text += `🧈 Жиры:     ${stats.fat}г${user.fatGoal ? ` / ${user.fatGoal}г` : ''}\n`;
     text += `🍞 Углеводы: ${stats.carbs}г${user.carbsGoal ? ` / ${user.carbsGoal}г` : ''}`;
+
+    // Meal breakdown
+    if (foodLogsToday.length > 0) {
+      const mealLabelsStats: Record<string, string> = {
+        breakfast: '🌅 Завтрак', lunch: '🍽 Обед', dinner: '🌙 Ужин', snack: '🍎 Перекус',
+      };
+      const mealGroupsStats: Record<string, typeof foodLogsToday> = {};
+      for (const f of foodLogsToday) {
+        const mt = f.mealType || 'snack';
+        if (!mealGroupsStats[mt]) mealGroupsStats[mt] = [];
+        mealGroupsStats[mt].push(f);
+      }
+      text += '\n';
+      for (const mt of ['breakfast', 'lunch', 'dinner', 'snack']) {
+        const items = mealGroupsStats[mt];
+        if (!items || items.length === 0) continue;
+        text += `\n${mealLabelsStats[mt]}: ${items.map(f => `${f.foodName} (${f.weight}г)`).join(', ')}`;
+      }
+    }
 
     if (workouts.length > 0) {
       const burnedTotal = workouts.reduce((s, w) => s + w.caloriesBurned, 0);
@@ -1079,6 +1101,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       `🤖 AI-анализ /week: *${bool(u.aiWeekAnalysis)}*`,
       `🤖 AI-анализ /month: *${bool(u.aiMonthAnalysis)}*`,
       `📋 AI в вечернем отчёте: *${bool(u.aiEveningReport)}*`,
+      `🧠 Группировка в Excel: *${bool(u.smartFoodGrouping)}*`,
       ``,
       `⏰ *Авторепорт:* ${fmt(u.reportTime) === 'выкл' ? 'выкл' : u.reportTime || '21:00'}`,
       `🍽 *Напоминания о еде:* ${remParts}`,
@@ -1098,6 +1121,9 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         [
           { text: `🤖 /month ${bool(u.aiMonthAnalysis) ? '✅' : '❌'}`,         callback_data: 'toggle_ai_month' },
           { text: `📋 Отчёт ${bool(u.aiEveningReport) ? '✅' : '❌'}`,          callback_data: 'toggle_ai_report' },
+        ],
+        [
+          { text: `🧠 Группировка в Excel ${bool(u.smartFoodGrouping) ? '✅' : '❌'}`, callback_data: 'toggle_smart_group' },
         ],
         [{ text: `⏰ Авторепорт: ${reportLabel}`, callback_data: 'settings_report_time' }],
         [{ text: '🍽 Напоминания о еде →',        callback_data: 'settings_reminders' }],
@@ -1329,10 +1355,11 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       for (const f of items) {
         text += `  · ${f.foodName} (${f.weight}г) — ${f.calories} ккал\n`;
       }
+      text += '\n';
     }
 
     // Totals vs goal
-    text += `\n📊 Итого: ${stats.calories} ккал | Б${stats.protein}г Ж${stats.fat}г У${stats.carbs}г`;
+    text += `📊 Итого: ${stats.calories} ккал | Б${stats.protein}г Ж${stats.fat}г У${stats.carbs}г`;
     if (user.caloriesGoal) {
       const diff = stats.calories - user.caloriesGoal;
       text += diff > 0
@@ -1512,6 +1539,72 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     startProfileFlow(chatId, telegramId);
   });
 
+  const HISTORY_PAGE_SIZE = 10;
+
+  function buildHistoryMessage(logs: FoodLog[], page: number) {
+    const totalPages = Math.max(1, Math.ceil(logs.length / HISTORY_PAGE_SIZE));
+    const safeP = Math.min(page, totalPages - 1);
+    const pageItems = logs.slice(safeP * HISTORY_PAGE_SIZE, (safeP + 1) * HISTORY_PAGE_SIZE);
+
+    const mealLabelsH: Record<string, string> = {
+      breakfast: '🌅 Завтрак', lunch: '🍽 Обед', dinner: '🌙 Ужин', snack: '🍎 Перекус',
+    };
+    const mealOrder = ['breakfast', 'lunch', 'dinner', 'snack'];
+    const groups: Record<string, { log: FoodLog; idx: number }[]> = {};
+    pageItems.forEach((log, i) => {
+      const mt = log.mealType || 'snack';
+      if (!groups[mt]) groups[mt] = [];
+      groups[mt].push({ log, idx: safeP * HISTORY_PAGE_SIZE + i + 1 });
+    });
+
+    let text = totalPages > 1
+      ? `📋 История за сегодня (стр. ${safeP + 1}/${totalPages})\n`
+      : `📋 История за сегодня\n`;
+
+    const orderedItems: { log: FoodLog; idx: number }[] = [];
+    for (const mt of mealOrder) {
+      const items = groups[mt];
+      if (!items || items.length === 0) continue;
+      text += `\n${mealLabelsH[mt]}:\n`;
+      for (const { log: f, idx } of items) {
+        text += `${idx}. ${f.foodName} (${f.weight}г) — ${f.calories} ккал | Б${f.protein} Ж${f.fat} У${f.carbs}\n`;
+        orderedItems.push({ log: f, idx });
+      }
+    }
+
+    // Totals
+    const totCal = pageItems.reduce((s, f) => s + f.calories, 0);
+    const totProt = pageItems.reduce((s, f) => s + f.protein, 0);
+    const totFat = pageItems.reduce((s, f) => s + f.fat, 0);
+    const totCarbs = pageItems.reduce((s, f) => s + f.carbs, 0);
+    text += `\n📊 Итого: ${totCal} ккал | Б${totProt} Ж${totFat} У${totCarbs}`;
+
+    // Build keyboard
+    const keyboard: { text: string; callback_data: string }[][] = [];
+
+    // Edit buttons — rows of 5
+    for (let i = 0; i < orderedItems.length; i += 5) {
+      keyboard.push(orderedItems.slice(i, i + 5).map(({ log: f, idx }) => ({
+        text: `✏️${idx}`, callback_data: `hist_edit_${f.id}`,
+      })));
+    }
+    // Delete buttons — rows of 5
+    for (let i = 0; i < orderedItems.length; i += 5) {
+      keyboard.push(orderedItems.slice(i, i + 5).map(({ log: f, idx }) => ({
+        text: `🗑${idx}`, callback_data: `hist_del_${f.id}`,
+      })));
+    }
+    // Pagination
+    if (totalPages > 1) {
+      const nav: { text: string; callback_data: string }[] = [];
+      if (safeP > 0) nav.push({ text: '⬅️', callback_data: `hist_page_${safeP - 1}` });
+      if (safeP < totalPages - 1) nav.push({ text: '➡️', callback_data: `hist_page_${safeP + 1}` });
+      keyboard.push(nav);
+    }
+
+    return { text, keyboard: { inline_keyboard: keyboard }, page: safeP };
+  }
+
   bot.onText(/\/history/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
@@ -1520,23 +1613,39 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
 
-    const logs = await storage.getFoodLogs(user.id);
+    const today = new Date();
+    const todayStart = new Date(today); todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date(today); todayEnd.setHours(23, 59, 59, 999);
+    const logs = await storage.getFoodLogsInRange(user.id, todayStart, todayEnd);
+
     if (logs.length === 0) {
-      bot.sendMessage(chatId, "История пуста.");
+      bot.sendMessage(chatId, "За сегодня записей нет.");
       return;
     }
 
-    bot.sendMessage(chatId, "Последние записи:");
-    
-    for (const l of logs.slice(0, 10)) {
-      bot.sendMessage(chatId, `${l.date?.toLocaleDateString()}: ${l.foodName} (${l.calories} ккал)`, {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "🗑 Удалить", callback_data: `delete_log_${l.id}` }]
-          ]
-        }
-      });
-    }
+    const { text, keyboard } = buildHistoryMessage(logs, 0);
+    bot.sendMessage(chatId, text, { reply_markup: keyboard });
+  });
+
+  bot.onText(/\/export$/, async (msg) => {
+    const today = getMoscowNow();
+    const dd = String(today.getDate()).padStart(2, '0');
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const yyyy = today.getFullYear();
+    const todayStr = `${dd}.${mm}.${yyyy}`;
+    const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 7);
+    const wd = String(weekAgo.getDate()).padStart(2, '0');
+    const wm = String(weekAgo.getMonth() + 1).padStart(2, '0');
+    const wy = weekAgo.getFullYear();
+    const weekStr = `${wd}.${wm}.${wy}`;
+    bot.sendMessage(msg.chat.id,
+      `📤 Формат:\n` +
+      `/export ДД.ММ.ГГГГ — экспорт за день\n` +
+      `/export ДД.ММ.ГГГГ - ДД.ММ.ГГГГ — экспорт за период\n\n` +
+      `Пример:\n` +
+      `/export ${todayStr}\n` +
+      `/export ${weekStr} - ${todayStr}`
+    );
   });
 
   bot.onText(/\/export (\d{2}\.\d{2}\.\d{4})(?: - (\d{2}\.\d{2}\.\d{4}))?/, async (msg, match) => {
@@ -1566,29 +1675,103 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       return;
     }
 
+    bot.sendMessage(chatId, "📊 Формирую Excel-отчёт...");
+
+    const mealTypeLabel = (mt: string) => {
+      const labels: Record<string, string> = { breakfast: 'Завтрак', lunch: 'Обед', dinner: 'Ужин', snack: 'Перекус' };
+      return labels[mt] || mt;
+    };
+    const mealSortOrder: Record<string, number> = { breakfast: 0, lunch: 1, dinner: 2, snack: 3 };
+
+    // Sort logs by date, then by mealType order
+    const sortedLogs = [...logs].sort((a, b) => {
+      const dateA = a.date ? a.date.getTime() : 0;
+      const dateB = b.date ? b.date.getTime() : 0;
+      if (dateA !== dateB) return dateA - dateB;
+      return (mealSortOrder[a.mealType] ?? 4) - (mealSortOrder[b.mealType] ?? 4);
+    });
+
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Nutrition Stats');
-    worksheet.columns = [
+
+    // --- Sheet 1: Питание ---
+    const ws1 = workbook.addWorksheet('Питание');
+    ws1.columns = [
       { header: 'Дата', key: 'date', width: 15 },
+      { header: 'Приём пищи', key: 'meal', width: 14 },
       { header: 'Блюдо', key: 'food', width: 30 },
       { header: 'Ккал', key: 'cal', width: 10 },
-      { header: 'Белки', key: 'prot', width: 10 },
-      { header: 'Жиры', key: 'fat', width: 10 },
-      { header: 'Углеводы', key: 'carb', width: 10 },
-      { header: 'Вес (г)', key: 'weight', width: 10 }
+      { header: 'Белки (г)', key: 'prot', width: 10 },
+      { header: 'Жиры (г)', key: 'fat', width: 10 },
+      { header: 'Углеводы (г)', key: 'carb', width: 12 },
+      { header: 'Вес (г)', key: 'weight', width: 10 },
     ];
+    // Style header
+    ws1.getRow(1).font = { bold: true };
 
-    logs.forEach(log => {
-      worksheet.addRow({
+    sortedLogs.forEach(log => {
+      ws1.addRow({
         date: log.date?.toLocaleDateString(),
+        meal: mealTypeLabel(log.mealType),
         food: log.foodName,
         cal: log.calories,
         prot: log.protein,
         fat: log.fat,
         carb: log.carbs,
-        weight: log.weight
+        weight: log.weight,
       });
     });
+
+    // --- Sheet 2: Топ продуктов ---
+    const ws2 = workbook.addWorksheet('Топ продуктов');
+    ws2.columns = [
+      { header: 'Продукт', key: 'name', width: 30 },
+      { header: 'Кол-во раз', key: 'count', width: 12 },
+      { header: 'Сумм. ккал', key: 'totalCal', width: 12 },
+      { header: 'Ср. ккал', key: 'avgCal', width: 10 },
+      { header: 'Ср. оценка', key: 'avgScore', width: 12 },
+    ];
+    ws2.getRow(1).font = { bold: true };
+
+    // Build food name mapping
+    const uniqueNames = Array.from(new Set(logs.map(l => l.foodName)));
+    let nameToGroup: Record<string, string> = {};
+
+    if (user.smartFoodGrouping !== false && uniqueNames.length > 1) {
+      nameToGroup = await groupFoodNames(uniqueNames);
+    }
+
+    // Fallback: simple grouping
+    const getGroup = (name: string) => {
+      if (nameToGroup[name]) return nameToGroup[name];
+      return name;
+    };
+
+    // Aggregate
+    const groupStats: Record<string, { count: number; totalCal: number; scoreSum: number; scoreCount: number }> = {};
+    for (const log of logs) {
+      const group = getGroup(log.foodName);
+      if (!groupStats[group]) groupStats[group] = { count: 0, totalCal: 0, scoreSum: 0, scoreCount: 0 };
+      groupStats[group].count++;
+      groupStats[group].totalCal += log.calories;
+      if (log.foodScore) {
+        groupStats[group].scoreSum += log.foodScore;
+        groupStats[group].scoreCount++;
+      }
+    }
+
+    // Sort by count desc
+    const topProducts = Object.entries(groupStats)
+      .sort((a, b) => b[1].count - a[1].count);
+
+    for (const [name, s] of topProducts) {
+      ws2.addRow({
+        name,
+        count: s.count,
+        totalCal: s.totalCal,
+        avgCal: Math.round(s.totalCal / s.count),
+        avgScore: s.scoreCount > 0 ? (s.scoreSum / s.scoreCount).toFixed(1) : '—',
+      });
+    }
 
     const buffer = await workbook.xlsx.writeBuffer();
     const filename = startStr === endStr ? `stats_${startStr}.xlsx` : `stats_${startStr}_${endStr}.xlsx`;
@@ -1840,6 +2023,102 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         chat_id: chatId,
         message_id: query.message?.message_id
       });
+
+    // --- History callbacks ---
+    } else if (query.data.startsWith("hist_page_")) {
+      const page = parseInt(query.data.replace("hist_page_", ""));
+      const today = new Date();
+      const todayStart = new Date(today); todayStart.setHours(0, 0, 0, 0);
+      const todayEnd = new Date(today); todayEnd.setHours(23, 59, 59, 999);
+      const logs = await storage.getFoodLogsInRange(user.id, todayStart, todayEnd);
+      const { text, keyboard } = buildHistoryMessage(logs, page);
+      bot.editMessageText(text, {
+        chat_id: chatId,
+        message_id: query.message?.message_id,
+        reply_markup: keyboard,
+      }).catch(() => {});
+      bot.answerCallbackQuery(query.id);
+
+    } else if (query.data.startsWith("hist_del_")) {
+      const logId = parseInt(query.data.replace("hist_del_", ""));
+      await storage.deleteFoodLog(logId);
+      bot.answerCallbackQuery(query.id, { text: '🗑 Удалено' });
+      // Refresh history message
+      const today = new Date();
+      const todayStart = new Date(today); todayStart.setHours(0, 0, 0, 0);
+      const todayEnd = new Date(today); todayEnd.setHours(23, 59, 59, 999);
+      const logs = await storage.getFoodLogsInRange(user.id, todayStart, todayEnd);
+      if (logs.length === 0) {
+        bot.editMessageText("За сегодня записей нет.", {
+          chat_id: chatId,
+          message_id: query.message?.message_id,
+        }).catch(() => {});
+      } else {
+        const { text, keyboard } = buildHistoryMessage(logs, 0);
+        bot.editMessageText(text, {
+          chat_id: chatId,
+          message_id: query.message?.message_id,
+          reply_markup: keyboard,
+        }).catch(() => {});
+      }
+
+    } else if (query.data.startsWith("hist_edit_")) {
+      const logId = parseInt(query.data.replace("hist_edit_", ""));
+      const log = await storage.getFoodLogById(logId);
+      if (!log) {
+        bot.answerCallbackQuery(query.id, { text: 'Запись не найдена' });
+        return;
+      }
+      bot.answerCallbackQuery(query.id);
+      const unit = getUnit(log.foodName);
+      bot.editMessageReplyMarkup({
+        inline_keyboard: [
+          [
+            { text: `⚖️ Вес: ${log.weight}${unit}`, callback_data: `he_weight_${logId}` },
+            { text: `🔥 Ккал: ${log.calories}`, callback_data: `he_calories_${logId}` },
+          ],
+          [
+            { text: `💪 Б: ${log.protein}г`, callback_data: `he_protein_${logId}` },
+            { text: `🧈 Ж: ${log.fat}г`, callback_data: `he_fat_${logId}` },
+            { text: `🍞 У: ${log.carbs}г`, callback_data: `he_carbs_${logId}` },
+          ],
+          [{ text: '← Назад', callback_data: 'he_back' }],
+        ],
+      }, {
+        chat_id: chatId,
+        message_id: query.message?.message_id,
+      }).catch(() => {});
+
+    } else if (query.data.startsWith("he_") && query.data !== "he_back") {
+      // he_weight_123, he_calories_123 etc.
+      const parts = query.data.slice(3).split('_');
+      const field = parts[0]; // weight | calories | protein | fat | carbs
+      const logId = parseInt(parts[1]);
+      const labels: Record<string, string> = {
+        weight: 'вес (г)', calories: 'ккал',
+        protein: 'белки (г)', fat: 'жиры (г)', carbs: 'углеводы (г)',
+      };
+      bot.answerCallbackQuery(query.id);
+      const promptMsg = await bot.sendMessage(chatId, `Введите ${labels[field]}:`);
+      userStates[telegramId] = {
+        step: 'history_field_input',
+        data: { field, logId, messageId: query.message?.message_id, promptMessageId: promptMsg.message_id, historyPage: 0 },
+      };
+
+    } else if (query.data === "he_back") {
+      bot.answerCallbackQuery(query.id);
+      // Rebuild full history keyboard
+      const today = new Date();
+      const todayStart = new Date(today); todayStart.setHours(0, 0, 0, 0);
+      const todayEnd = new Date(today); todayEnd.setHours(23, 59, 59, 999);
+      const logs = await storage.getFoodLogsInRange(user.id, todayStart, todayEnd);
+      const { text, keyboard } = buildHistoryMessage(logs, 0);
+      bot.editMessageText(text, {
+        chat_id: chatId,
+        message_id: query.message?.message_id,
+        reply_markup: keyboard,
+      }).catch(() => {});
+
     } else if (query.data.startsWith("rtime_")) {
       const time = query.data.replace("rtime_", "");
       await storage.updateUserReportTime(user.id, time);
@@ -2339,6 +2618,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       toggle_ai_week:    { field: 'aiWeekAnalysis',     label: 'AI-анализ /week',         def: true  },
       toggle_ai_month:   { field: 'aiMonthAnalysis',    label: 'AI-анализ /month',        def: true  },
       toggle_ai_report:  { field: 'aiEveningReport',    label: 'AI в вечернем отчёте',    def: true  },
+      toggle_smart_group:{ field: 'smartFoodGrouping',  label: 'Группировка в Excel',     def: true  },
     };
     if (settingsToggles[query.data]) {
       const { field, label, def } = settingsToggles[query.data];
@@ -2484,6 +2764,62 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
           message_id: messageId,
           parse_mode: 'Markdown',
           reply_markup: buildEditKeyboard(pending, unit)
+        }).catch(() => {});
+        return;
+      }
+
+      if (state.step === 'history_field_input') {
+        const logId = state.data.logId as number;
+        const field = state.data.field as string;
+        const messageId = state.data.messageId as number;
+        const promptMessageId = state.data.promptMessageId as number;
+
+        const val = parseFloat((msg.text || '').replace(',', '.'));
+        if (isNaN(val) || val < 0) {
+          bot.sendMessage(chatId, "❌ Введите положительное число.");
+          return;
+        }
+
+        const log = await storage.getFoodLogById(logId);
+        if (!log) {
+          delete userStates[telegramId];
+          bot.sendMessage(chatId, "Запись не найдена.");
+          return;
+        }
+
+        const updates: Record<string, number> = {};
+        if (field === 'weight' && log.weight > 0) {
+          const ratio = val / log.weight;
+          updates.calories = Math.round(log.calories * ratio);
+          updates.protein = Math.round(log.protein * ratio);
+          updates.fat = Math.round(log.fat * ratio);
+          updates.carbs = Math.round(log.carbs * ratio);
+          if (log.fiber != null) updates.fiber = Math.round((log.fiber as number) * ratio * 10) / 10;
+          if (log.sugar != null) updates.sugar = Math.round((log.sugar as number) * ratio * 10) / 10;
+          if (log.sodium != null) updates.sodium = Math.round((log.sodium as number) * ratio);
+          if (log.saturatedFat != null) updates.saturatedFat = Math.round((log.saturatedFat as number) * ratio * 10) / 10;
+          updates.weight = Math.round(val);
+        } else {
+          updates[field] = field === 'weight' ? Math.round(val) : Math.round(val * 10) / 10;
+        }
+
+        await storage.updateFoodLog(logId, updates);
+        delete userStates[telegramId];
+
+        // Clean up prompt messages
+        bot.deleteMessage(chatId, promptMessageId).catch(() => {});
+        bot.deleteMessage(chatId, msg.message_id).catch(() => {});
+
+        // Refresh history message
+        const today = new Date();
+        const todayStart = new Date(today); todayStart.setHours(0, 0, 0, 0);
+        const todayEnd = new Date(today); todayEnd.setHours(23, 59, 59, 999);
+        const logs = await storage.getFoodLogsInRange(user.id, todayStart, todayEnd);
+        const { text: histText, keyboard } = buildHistoryMessage(logs, 0);
+        bot.editMessageText(histText, {
+          chat_id: chatId,
+          message_id: messageId,
+          reply_markup: keyboard,
         }).catch(() => {});
         return;
       }

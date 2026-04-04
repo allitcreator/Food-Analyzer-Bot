@@ -16,6 +16,8 @@ export interface IStorage {
   getFoodLogsInRange(userId: number, startDate: Date, endDate: Date): Promise<FoodLog[]>;
   deleteFoodLogsInRange(userId: number, startDate: Date, endDate: Date): Promise<void>;
   deleteFoodLog(id: number): Promise<void>;
+  updateFoodLog(id: number, data: Partial<InsertFoodLog>): Promise<FoodLog>;
+  getFoodLogById(id: number): Promise<FoodLog | undefined>;
 
   getDailyStats(userId: number, date: Date): Promise<{ calories: number; protein: number; fat: number; carbs: number; fiber: number; sugar: number; sodium: number; saturatedFat: number }>;
   getWeeklyStats(userId: number): Promise<{ date: string; calories: number }[]>;
@@ -207,6 +209,16 @@ export class DatabaseStorage implements IStorage {
 
   async deleteFoodLog(id: number): Promise<void> {
     await db.delete(foodLogs).where(eq(foodLogs.id, id));
+  }
+
+  async updateFoodLog(id: number, data: Partial<InsertFoodLog>): Promise<FoodLog> {
+    const [updated] = await db.update(foodLogs).set(data).where(eq(foodLogs.id, id)).returning();
+    return updated;
+  }
+
+  async getFoodLogById(id: number): Promise<FoodLog | undefined> {
+    const [log] = await db.select().from(foodLogs).where(eq(foodLogs.id, id));
+    return log;
   }
 
   async logWater(userId: number, amount: number): Promise<void> {

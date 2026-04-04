@@ -579,3 +579,32 @@ export async function analyzeFoodImage(imageBase64: string) {
     return null;
   }
 }
+
+export async function groupFoodNames(foodNames: string[]): Promise<Record<string, string>> {
+  try {
+    const response = await openai.chat.completions.create({
+      model: "openai/gpt-4o-mini",
+      max_tokens: 2048,
+      messages: [
+        {
+          role: "system",
+          content: `You are a food categorization expert. Group similar food items into base categories.
+Rules:
+- Merge cooking variations into one category (жареная курица, варёная курица, курица гриль → Курица)
+- Keep distinct foods separate (курица and говядина are different categories)
+- Use Russian for category names, capitalize first letter
+- Return a JSON object where keys are the original food names and values are the category names
+
+Example input: ["курица жареная", "курица варёная", "рис белый", "рис бурый", "яблоко зелёное", "яблоко красное"]
+Example output: {"курица жареная": "Курица", "курица варёная": "Курица", "рис белый": "Рис", "рис бурый": "Рис", "яблоко зелёное": "Яблоко", "яблоко красное": "Яблоко"}`
+        },
+        { role: "user", content: JSON.stringify(foodNames) }
+      ],
+      response_format: { type: "json_object" },
+    });
+    return JSON.parse(response.choices[0].message.content || "{}");
+  } catch (error) {
+    console.error("Food Grouping AI Error:", error);
+    return {};
+  }
+}

@@ -31,6 +31,7 @@ export const users = pgTable("users", {
   aiWeekAnalysis: boolean("ai_week_analysis").default(true),     // AI block after /week
   aiMonthAnalysis: boolean("ai_month_analysis").default(true),   // AI block after /month
   aiEveningReport: boolean("ai_evening_report").default(true),   // AI text in evening report
+  smartFoodGrouping: boolean("smart_food_grouping").default(true), // AI grouping in Excel top products
   healthSyncToken: text("health_sync_token").unique(), // token for Apple Health HTTP webhook
   createdAt: timestamp("created_at").defaultNow(),
 });
