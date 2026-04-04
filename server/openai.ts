@@ -63,7 +63,7 @@ Return ONLY a JSON object with a single key "items" containing an array. Each el
 - fat (number, grams)
 - carbs (number, grams)
 - weight (number, grams or ml for liquids)
-- mealType ("breakfast" | "lunch" | "dinner" | "snack")
+- mealType (STRICTLY one of: "breakfast" | "lunch" | "dinner" | "snack" — always in English, never in Russian or other languages)
 - foodScore (number, 1-10)
 - nutritionAdvice (string, Russian)
 - fiber (number, grams — dietary fiber)
@@ -80,6 +80,16 @@ Example output: {"items": [{...}, {...}]}`
 
     const parsed = JSON.parse(response.choices[0].message.content || "{}");
     if (Array.isArray(parsed.items) && parsed.items.length > 0) {
+      // Normalize mealType — AI sometimes returns Russian names
+      const mealTypeMap: Record<string, string> = {
+        'завтрак': 'breakfast', 'breakfast': 'breakfast',
+        'обед': 'lunch', 'lunch': 'lunch',
+        'ужин': 'dinner', 'dinner': 'dinner',
+        'перекус': 'snack', 'snack': 'snack',
+      };
+      for (const item of parsed.items) {
+        item.mealType = mealTypeMap[(item.mealType || '').toLowerCase()] || 'snack';
+      }
       return parsed.items as FoodItem[];
     }
     return null;
