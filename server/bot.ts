@@ -1008,7 +1008,6 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         reply_markup: {
           inline_keyboard: [[
             { text: '📊 Недельный анализ', callback_data: 'weight_analysis' },
-            { text: '⏰ Напоминание', callback_data: 'weight_reminder_setup' }
           ]]
         }
       });
@@ -1887,6 +1886,21 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     bot.sendDocument(chatId, Buffer.from(buffer as Buffer), {}, { filename, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   });
 
+  bot.onText(/\/clear$/, async (msg) => {
+    const today = getMoscowNow();
+    const dd = String(today.getDate()).padStart(2, '0');
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const yyyy = today.getFullYear();
+    const todayStr = `${dd}.${mm}.${yyyy}`;
+    bot.sendMessage(msg.chat.id,
+      `🗑 Формат:\n` +
+      `/clear ДД.ММ.ГГГГ — удалить записи за день\n` +
+      `/clear ДД.ММ.ГГГГ - ДД.ММ.ГГГГ — удалить за период\n\n` +
+      `Пример:\n` +
+      `/clear ${todayStr}`
+    );
+  });
+
   bot.onText(/\/clear (\d{2}\.\d{2}\.\d{4})(?: - (\d{2}\.\d{2}\.\d{4}))?/, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
@@ -1966,7 +1980,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       ).catch(err => {
         bot.sendMessage(chatId, `Новый URL: ${webhookUrl}`);
       });
-    } else if (query.data.startsWith("weight_")) {
+    } else if (query.data.startsWith("weight_") && query.data !== "weight_analysis" && query.data !== "weight_reminder_setup") {
       const pending = (bot as any).pendingLogs?.[telegramId];
       if (!pending) return;
 
