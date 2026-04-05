@@ -192,8 +192,8 @@ function calculateTDEE(user: { weight?: number | null; height?: number | null; a
   const bmr = calculateBMR(user);
   if (!bmr) return null;
   if (activityCalories !== null && activityCalories > 0) {
-    // BMR × 1.2 (базовая жизнедеятельность) + реальная активность из трекера
-    return Math.round(bmr * 1.2 + activityCalories);
+    // Apple Health active calories = всё сверх BMR, множитель не нужен
+    return Math.round(bmr + activityCalories);
   }
   // Нет данных трекера — используем коэффициент активности из профиля
   const multiplier = ACTIVITY_MULTIPLIERS[user.activityLevel ?? 'sedentary'] ?? 1.2;
@@ -216,15 +216,12 @@ function buildEnergyBalanceText(user: User, caloriesEaten: number, burnedFromAct
   }
 
   let text = `\n📊 Энергобаланс:\n`;
-  text += `  🔥 Базовый обмен (BMR): ${bmr} ккал\n`;
+  text += `  🍽 Съедено: ${caloriesEaten} ккал\n`;
   if (hasTracker) {
-    text += `  🏋️ Активность: +${burnedFromActivity} ккал\n`;
-    text += `  📊 Расход за день: ${tdee} ккал\n`;
+    text += `  🔥 Сожжено: ${tdee} ккал (организм ${bmr} + тренировки ${burnedFromActivity})\n`;
   } else {
-    const mult = ACTIVITY_MULTIPLIERS[user.activityLevel ?? 'sedentary'] ?? 1.2;
-    text += `  📊 Расход за день: ${tdee} ккал (×${mult} ${user.activityLevel ?? 'sedentary'})\n`;
+    text += `  🔥 Сожжено: ${tdee} ккал (базовый обмен)\n`;
   }
-  text += `  🍽 Потреблено: ${caloriesEaten} ккал\n`;
   if (isDeficit) {
     text += `  ✅ Дефицит: ${Math.abs(balance)} ккал`;
   } else if (balance === 0) {
