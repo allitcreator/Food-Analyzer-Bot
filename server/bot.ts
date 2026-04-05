@@ -170,6 +170,12 @@ function buildEditKeyboard(pending: any, unit: string) {
   };
 }
 
+// ─── Timezone helper (module-level, used by processHealthData and setupBot) ──
+function getUserNowModule(tz: string = 'Europe/Moscow'): Date {
+  const now = new Date();
+  return new Date(now.toLocaleString('en-US', { timeZone: tz }));
+}
+
 // ─── Apple Health processing (shared by /health command and HTTP webhook) ───
 
 export async function processHealthData(
@@ -184,7 +190,7 @@ export async function processHealthData(
   }
 
   const { steps, activeCalories, workouts } = parsed.payload;
-  const today = getUserNow(user.timezone ?? 'Europe/Moscow');
+  const today = getUserNowModule(user.timezone ?? 'Europe/Moscow');
   await storage.deleteWorkoutLogsBySource(user.id, today, "apple_health");
 
   const savedLabels: string[] = [];
@@ -1514,8 +1520,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
   });
 
   function getUserNow(tz: string = 'Europe/Moscow'): Date {
-    const now = new Date();
-    return new Date(now.toLocaleString('en-US', { timeZone: tz }));
+    return getUserNowModule(tz);
   }
 
   function toUserDate(date: Date, tz: string = 'Europe/Moscow'): Date {
