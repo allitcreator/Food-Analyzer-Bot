@@ -1397,10 +1397,11 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     const todayStart = new Date(today); todayStart.setHours(0, 0, 0, 0);
     const todayEnd   = new Date(today); todayEnd.setHours(23, 59, 59, 999);
 
-    const [stats, foodLogs, workouts] = await Promise.all([
+    const [stats, foodLogs, workouts, waterMl] = await Promise.all([
       storage.getDailyStats(user.id, today),
       storage.getFoodLogsInRange(user.id, todayStart, todayEnd),
       storage.getDailyWorkouts(user.id, today),
+      storage.getDailyWater(user.id, today),
     ]);
 
     if (foodLogs.length === 0 && !manual) return;
@@ -1461,10 +1462,11 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
 
     const report = await generateEveningReport(
       foodLogs.map(f => ({ foodName: f.foodName, calories: f.calories, protein: f.protein, fat: f.fat, carbs: f.carbs, weight: f.weight, mealType: f.mealType, foodScore: f.foodScore })),
-      { calories: stats.calories, protein: stats.protein, fat: stats.fat, carbs: stats.carbs },
+      { calories: stats.calories, protein: stats.protein, fat: stats.fat, carbs: stats.carbs, fiber: stats.fiber, sugar: stats.sugar, sodium: stats.sodium },
       { caloriesGoal: user.caloriesGoal, proteinGoal: user.proteinGoal, fatGoal: user.fatGoal, carbsGoal: user.carbsGoal },
       workouts.map(w => ({ description: w.description, caloriesBurned: w.caloriesBurned })),
-      user.goal ?? null
+      user.goal ?? null,
+      waterMl
     );
 
     if (report) {
@@ -2436,7 +2438,9 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
           await bot.sendMessage(chatId, "Нужно хотя бы 2 замера веса для анализа. Записывайте вес командой /weight 75.0");
           return;
         }
-        const analysis = await generateWeightAnalysis(wLogs, weekStats, user);
+        const weekWorkouts = await storage.getWorkoutLogs(user.id, 20);
+        const analysis = await generateWeightAnalysis(wLogs, weekStats, user,
+          weekWorkouts.map(w => ({ description: w.description, caloriesBurned: w.caloriesBurned })));
         if (analysis) {
           await bot.sendMessage(chatId, `📊 Анализ веса за неделю:\n\n${analysis}`);
         } else {
@@ -3340,25 +3344,34 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
 
         // Step 2: Fall back to GPT-4o vision
         if (!analysis) {
-          analysis = await analyzeFoodImage(base64);
-          console.log("Vision analysis result:", analysis);
-        }
+          const userNow = getUserNow(user.timezone ?? 'Europe/Moscow');
+          const visionItems = await analyzeFoodImage(base64, userNow, {
+            breakfastEnd: user.mealBreakfastEnd ?? '12:30',
+            lunchEnd: user.mealLunchEnd ?? '16:30',
+          });
+          console.log("Vision analysis result:", visionItems);
 
-        await bot.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
+          await bot.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
 
-        if (analysis && analysis.foodName) {
+          if (visionItems && visionItems.length > 0) {
+            await processFoodItems(chatId, telegramId, visionItems);
+          } else {
+            bot.sendMessage(chatId, "Не удалось распознать еду на фото. Попробуйте более чёткий снимок.");
+          }
+        } else {
+          // Barcode result — single item
+          await bot.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
+
           (bot as any).pendingLogs = (bot as any).pendingLogs || {};
           (bot as any).pendingLogs[telegramId] = analysis;
 
           const unit = getUnit(analysis.foodName);
-          const prefix = barcodeSource ? `📦 Найдено по штрихкоду\n\n` : "";
+          const prefix = `📦 Найдено по штрихкоду\n\n`;
           const confirmText = prefix + buildConfirmMessage(analysis, user.showMicronutrients ?? false);
           bot.sendMessage(chatId, confirmText, {
             parse_mode: 'Markdown',
             reply_markup: buildConfirmKeyboard(unit)
           });
-        } else {
-          bot.sendMessage(chatId, "Не удалось распознать еду на фото. Попробуйте более чёткий снимок.");
         }
       } catch (err: any) {
         console.error("Error processing photo:", err);
