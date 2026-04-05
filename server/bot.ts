@@ -78,7 +78,6 @@ async function buildDailyProgress(storage: IStorage, userId: number, user: User,
   const stats = await storage.getDailyStats(userId, today);
   const workouts = await storage.getDailyWorkouts(userId, today);
   const burnedTotal = workouts.reduce((s, w) => s + w.caloriesBurned, 0);
-  const netCalories = stats.calories - burnedTotal;
 
   let text = `\n\n📊 Прогресс за сегодня:\n`;
 
@@ -91,8 +90,10 @@ async function buildDailyProgress(storage: IStorage, userId: number, user: User,
   }
 
   if (burnedTotal > 0) {
-    text += `\n🏋️ Сожжено: ${burnedTotal} ккал  →  чистые: ${netCalories} ккал`;
+    text += `\n🏋️ Сожжено: ${burnedTotal} ккал`;
   }
+  const compactEnergy = buildEnergyBalanceText(user, stats.calories, burnedTotal, true);
+  if (compactEnergy) text += compactEnergy;
 
   text += `\n💪 Б: ${stats.protein}г`;
   if (user.proteinGoal) text += ` / ${user.proteinGoal}г`;
@@ -174,6 +175,64 @@ function buildEditKeyboard(pending: any, unit: string) {
 function getUserNowModule(tz: string = 'Europe/Moscow'): Date {
   const now = new Date();
   return new Date(now.toLocaleString('en-US', { timeZone: tz }));
+}
+
+// ─── BMR / TDEE helpers (Mifflin-St Jeor) ──────────────────────────────────
+const ACTIVITY_MULTIPLIERS: Record<string, number> = {
+  sedentary: 1.2, light: 1.375, moderate: 1.55, active: 1.725, very_active: 1.9
+};
+
+function calculateBMR(user: { weight?: number | null; height?: number | null; age?: number | null; gender?: string | null }): number | null {
+  if (!user.weight || !user.height || !user.age || !user.gender) return null;
+  const base = (10 * user.weight) + (6.25 * user.height) - (5 * user.age);
+  return Math.round(base + (user.gender === 'male' ? 5 : -161));
+}
+
+function calculateTDEE(user: { weight?: number | null; height?: number | null; age?: number | null; gender?: string | null; activityLevel?: string | null }, activityCalories: number | null): number | null {
+  const bmr = calculateBMR(user);
+  if (!bmr) return null;
+  if (activityCalories !== null && activityCalories > 0) {
+    // BMR × 1.2 (базовая жизнедеятельность) + реальная активность из трекера
+    return Math.round(bmr * 1.2 + activityCalories);
+  }
+  // Нет данных трекера — используем коэффициент активности из профиля
+  const multiplier = ACTIVITY_MULTIPLIERS[user.activityLevel ?? 'sedentary'] ?? 1.2;
+  return Math.round(bmr * multiplier);
+}
+
+function buildEnergyBalanceText(user: User, caloriesEaten: number, burnedFromActivity: number, compact = false): string {
+  const bmr = calculateBMR(user);
+  if (!bmr) return '';
+
+  const hasTracker = burnedFromActivity > 0;
+  const tdee = calculateTDEE(user, hasTracker ? burnedFromActivity : null)!;
+  const balance = caloriesEaten - tdee;
+  const isDeficit = balance < 0;
+
+  if (compact) {
+    // Для buildDailyProgress — одна строка
+    const label = isDeficit ? `✅ Дефицит: ${Math.abs(balance)}` : `🚨 Профицит: +${balance}`;
+    return `\n📊 ${label} ккал`;
+  }
+
+  let text = `\n📊 Энергобаланс:\n`;
+  text += `  🔥 Базовый обмен (BMR): ${bmr} ккал\n`;
+  if (hasTracker) {
+    text += `  🏋️ Активность: +${burnedFromActivity} ккал\n`;
+    text += `  📊 Расход за день: ${tdee} ккал\n`;
+  } else {
+    const mult = ACTIVITY_MULTIPLIERS[user.activityLevel ?? 'sedentary'] ?? 1.2;
+    text += `  📊 Расход за день: ${tdee} ккал (×${mult} ${user.activityLevel ?? 'sedentary'})\n`;
+  }
+  text += `  🍽 Потреблено: ${caloriesEaten} ккал\n`;
+  if (isDeficit) {
+    text += `  ✅ Дефицит: ${Math.abs(balance)} ккал`;
+  } else if (balance === 0) {
+    text += `  ⚖️ Баланс: 0 ккал`;
+  } else {
+    text += `  🚨 Профицит: +${balance} ккал`;
+  }
+  return text;
 }
 
 // ─── Apple Health processing (shared by /health command and HTTP webhook) ───
@@ -833,14 +892,19 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       }
     }
 
+    const burnedTotal = workouts.reduce((s, w) => s + w.caloriesBurned, 0);
     if (workouts.length > 0) {
-      const burnedTotal = workouts.reduce((s, w) => s + w.caloriesBurned, 0);
-      const netCalories = stats.calories - burnedTotal;
       text += `\n\n🏋️ Тренировки сегодня:\n`;
       workouts.forEach(w => {
         text += `${formatWorkoutLine(w, "  ")}\n`;
       });
-      text += `⚖️ Чистые калории: ${netCalories} ккал (съедено − сожжено)`;
+    }
+
+    // Энергобаланс
+    const energyBlock = buildEnergyBalanceText(user, stats.calories, burnedTotal);
+    if (energyBlock) {
+      text += `\n${energyBlock}`;
+      text += `\n  _(финальные данные — в вечернем отчёте)_`;
     }
 
     if (user.showMicronutrients) {
@@ -1090,8 +1154,10 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     text += `\n🔥 Итого сожжено: *${total} ккал*`;
 
     const stats = await storage.getDailyStats(user.id, getUserNow(user.timezone ?? 'Europe/Moscow'));
-    const net = stats.calories - total;
-    text += `\n⚖️ Чистые калории за день: *${net} ккал* (съедено ${stats.calories} − сожжено ${total})`;
+    const energyBlock = buildEnergyBalanceText(user, stats.calories, total);
+    if (energyBlock) {
+      text += `\n${energyBlock}`;
+    }
 
     bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
   });
@@ -1453,9 +1519,15 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     text += formatTotalsLine(stats.calories, stats.protein, stats.fat, stats.carbs, user);
 
     // Workouts
+    const totalBurned = workouts.reduce((s, w) => s + w.caloriesBurned, 0);
     if (workouts.length > 0) {
-      const totalBurned = workouts.reduce((s, w) => s + w.caloriesBurned, 0);
       text += `\n🏋️ Тренировки: ${workouts.map(w => w.description).join(', ')} — ${totalBurned} ккал`;
+    }
+
+    // Энергобаланс
+    const energyBlock = buildEnergyBalanceText(user, stats.calories, totalBurned);
+    if (energyBlock) {
+      text += `\n${energyBlock}`;
     }
 
     // Send stats block always; AI part is optional
