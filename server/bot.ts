@@ -556,14 +556,14 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       const unit = item.foodName.toLowerCase().match(LIQUID_PATTERN) ? 'мл' : 'г';
       const emoji = MEAL_EMOJI[item.mealType] || '🍴';
       text += `${i + 1}. ${emoji} ${item.foodName} (${item.weight}${unit})\n`;
-      text += `   ${item.calories} ккал | Б${item.protein} Ж${item.fat} У${item.carbs}\n\n`;
+      text += `   ${Math.round(item.calories)} ккал | Б${Math.round(item.protein)} Ж${Math.round(item.fat)} У${Math.round(item.carbs)}\n\n`;
       totalCal += item.calories;
       totalP += item.protein;
       totalF += item.fat;
       totalC += item.carbs;
     });
     text += `──────────────\n`;
-    text += `📊 Итого: ${totalCal} ккал | Б${totalP} Ж${totalF} У${totalC}`;
+    text += `📊 Итого: ${Math.round(totalCal)} ккал | Б${Math.round(totalP)} Ж${Math.round(totalF)} У${Math.round(totalC)}`;
     return text;
   }
 
