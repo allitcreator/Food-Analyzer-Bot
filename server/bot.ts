@@ -74,8 +74,7 @@ async function lookupBarcodeProduct(barcode: string): Promise<(FoodItem & { barc
   }
 }
 
-async function buildDailyProgress(storage: IStorage, userId: number, user: User): Promise<string> {
-  const today = new Date();
+async function buildDailyProgress(storage: IStorage, userId: number, user: User, today: Date): Promise<string> {
   const stats = await storage.getDailyStats(userId, today);
   const workouts = await storage.getDailyWorkouts(userId, today);
   const burnedTotal = workouts.reduce((s, w) => s + w.caloriesBurned, 0);
@@ -185,7 +184,7 @@ export async function processHealthData(
   }
 
   const { steps, activeCalories, workouts } = parsed.payload;
-  const today = new Date();
+  const today = getUserNow(user.timezone ?? 'Europe/Moscow');
   await storage.deleteWorkoutLogsBySource(user.id, today, "apple_health");
 
   const savedLabels: string[] = [];
@@ -503,7 +502,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
 
     const thinking = await bot.sendMessage(chatId, "🤔 Думаю...");
 
-    const today = new Date();
+    const today = getUserNow(user.timezone ?? 'Europe/Moscow');
     const startOfDay = new Date(today); startOfDay.setHours(0, 0, 0, 0);
     const endOfDay = new Date(today); endOfDay.setHours(23, 59, 59, 999);
     const logs = await storage.getFoodLogsInRange(user.id, startOfDay, endOfDay);
@@ -773,12 +772,13 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
 
-    const today = new Date();
+    const tz = user.timezone ?? 'Europe/Moscow';
+    const today = getUserNow(tz);
     const todayStart = new Date(today); todayStart.setHours(0, 0, 0, 0);
     const todayEnd = new Date(today); todayEnd.setHours(23, 59, 59, 999);
     const [stats, streak, workouts, foodLogsToday] = await Promise.all([
       storage.getDailyStats(user.id, today),
-      storage.getStreak(user.id),
+      storage.getStreak(user.id, tz),
       storage.getDailyWorkouts(user.id, today),
       storage.getFoodLogsInRange(user.id, todayStart, todayEnd),
     ]);
@@ -858,10 +858,12 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
 
-    const end = new Date(); end.setHours(23, 59, 59, 999);
-    const start = new Date(); start.setDate(start.getDate() - 6); start.setHours(0, 0, 0, 0);
+    const tz = user.timezone ?? 'Europe/Moscow';
+    const now = getUserNow(tz);
+    const end = new Date(now); end.setHours(23, 59, 59, 999);
+    const start = new Date(now); start.setDate(start.getDate() - 6); start.setHours(0, 0, 0, 0);
 
-    const days = await storage.getWeeklyFullStats(user.id);
+    const days = await storage.getWeeklyFullStats(user.id, tz);
     const daysWithData = days.filter(d => d.calories > 0);
     const avgCal = daysWithData.length
       ? Math.round(daysWithData.reduce((s, d) => s + d.calories, 0) / daysWithData.length)
@@ -1065,7 +1067,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
 
-    const workouts = await storage.getDailyWorkouts(user.id, new Date());
+    const workouts = await storage.getDailyWorkouts(user.id, getUserNow(user.timezone ?? 'Europe/Moscow'));
     if (workouts.length === 0) {
       bot.sendMessage(chatId,
         `🏋️ Сегодня тренировок нет.\n\nПросто напиши что делал — например:\n• *"пробежал 5 км"*\n• *"30 мин на эллипсе"*\n• *"прошёл 10000 шагов"*\n• *"потратил 500 ккал на тренировке"*`,
@@ -1081,7 +1083,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     });
     text += `\n🔥 Итого сожжено: *${total} ккал*`;
 
-    const stats = await storage.getDailyStats(user.id, new Date());
+    const stats = await storage.getDailyStats(user.id, getUserNow(user.timezone ?? 'Europe/Moscow'));
     const net = stats.calories - total;
     text += `\n⚖️ Чистые калории за день: *${net} ккал* (съедено ${stats.calories} − сожжено ${total})`;
 
@@ -1120,6 +1122,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       `🍽 *Напоминания о еде:* ${remParts}`,
       `⚖️ *Напоминание о весе:* ${weightR}`,
       ``,
+      `🌍 *Часовой пояс:* ${u.timezone ?? 'Europe/Moscow'}`,
       `🕐 *Интервалы приёмов:* Завтрак до ${u.mealBreakfastEnd ?? '12:30'}, Обед до ${u.mealLunchEnd ?? '16:30'}`,
     ].join('\n');
   }
@@ -1143,6 +1146,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         [{ text: `⏰ Авторепорт: ${reportLabel}`, callback_data: 'settings_report_time' }],
         [{ text: '🍽 Напоминания о еде →',        callback_data: 'settings_reminders' }],
         [{ text: '⚖️ Напоминание о весе →',       callback_data: 'settings_weight_reminder' }],
+        [{ text: `🌍 Часовой пояс: ${u.timezone ?? 'Europe/Moscow'}`, callback_data: 'settings_timezone' }],
         [{ text: '🕐 Интервалы приёмов пищи →',  callback_data: 'settings_meal_intervals' }],
       ]
     };
@@ -1198,8 +1202,10 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
 
     bot.sendMessage(chatId, "Собираю статистику за месяц...");
 
-    const end = new Date(); end.setHours(23, 59, 59, 999);
-    const start = new Date(); start.setDate(start.getDate() - 27); start.setHours(0, 0, 0, 0);
+    const tz = user.timezone ?? 'Europe/Moscow';
+    const now = getUserNow(tz);
+    const end = new Date(now); end.setHours(23, 59, 59, 999);
+    const start = new Date(now); start.setDate(start.getDate() - 27); start.setHours(0, 0, 0, 0);
 
     const weeks = await storage.getMonthlyStats(user.id);
 
@@ -1296,13 +1302,13 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
   async function sendPDFReport(chatId: number, user: User) {
     bot.sendMessage(chatId, "Генерирую PDF-отчёт...");
     try {
-      const today = new Date();
+      const tz = user.timezone ?? 'Europe/Moscow';
+      const today = getUserNow(tz);
       const monthStart = new Date(today); monthStart.setDate(today.getDate() - 27); monthStart.setHours(0, 0, 0, 0);
-      monthStart.setHours(0, 0, 0, 0);
 
       const [weeklyStats, dailyStats, allLogs, weightLogs, workoutLogs] = await Promise.all([
-        storage.getMonthlyStats(user.id),
-        storage.getWeeklyFullStats(user.id),
+        storage.getMonthlyStats(user.id, tz),
+        storage.getWeeklyFullStats(user.id, tz),
         storage.getFoodLogsInRange(user.id, monthStart, today),
         storage.getWeightLogs(user.id, 30),
         storage.getWorkoutLogsInRange(user.id, monthStart, today),
@@ -1386,7 +1392,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
   }
 
   async function sendEveningReport(user: User, manual = false) {
-    const today = new Date();
+    const tz = user.timezone ?? 'Europe/Moscow';
+    const today = getUserNow(tz);
     const todayStart = new Date(today); todayStart.setHours(0, 0, 0, 0);
     const todayEnd   = new Date(today); todayEnd.setHours(23, 59, 59, 999);
 
@@ -1504,28 +1511,40 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     });
   });
 
-  function getMoscowNow(): Date {
+  function getUserNow(tz: string = 'Europe/Moscow'): Date {
     const now = new Date();
-    return new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Moscow' }));
+    return new Date(now.toLocaleString('en-US', { timeZone: tz }));
   }
+
+  function toUserDate(date: Date, tz: string = 'Europe/Moscow'): Date {
+    return new Date(date.toLocaleString('en-US', { timeZone: tz }));
+  }
+
+  // backward compat
+  function getMoscowNow(): Date { return getUserNow('Europe/Moscow'); }
 
   const reportSentKeys = new Set<string>();
   const reminderSentKeys = new Set<string>();
 
   async function checkScheduledNotifications() {
-    const msk = getMoscowNow();
-    const currentTime = `${String(msk.getHours()).padStart(2, '0')}:${String(msk.getMinutes()).padStart(2, '0')}`;
-    const todayKey = `${msk.getFullYear()}-${String(msk.getMonth() + 1).padStart(2, '0')}-${String(msk.getDate()).padStart(2, '0')}`;
-
+    // Clean up old keys using UTC date (just for cleanup)
+    const utcKey = new Date().toISOString().slice(0, 10);
     Array.from(reportSentKeys).forEach(key => {
-      if (!key.endsWith(`_${todayKey}`)) reportSentKeys.delete(key);
+      const parts = key.split('_'); const keyDate = parts[parts.length - 1];
+      if (keyDate && keyDate.length === 10 && keyDate !== utcKey) reportSentKeys.delete(key);
     });
     Array.from(reminderSentKeys).forEach(key => {
-      if (!key.endsWith(`_${todayKey}`)) reminderSentKeys.delete(key);
+      const parts = key.split('_'); const keyDate = parts[parts.length - 1];
+      if (keyDate && keyDate.length === 10 && keyDate !== utcKey) reminderSentKeys.delete(key);
     });
 
     const allUsers = await storage.getAllApprovedUsers();
     for (const user of allUsers) {
+      const tz = user.timezone ?? 'Europe/Moscow';
+      const userNow = getUserNow(tz);
+      const currentTime = `${String(userNow.getHours()).padStart(2, '0')}:${String(userNow.getMinutes()).padStart(2, '0')}`;
+      const todayKey = `${userNow.getFullYear()}-${String(userNow.getMonth() + 1).padStart(2, '0')}-${String(userNow.getDate()).padStart(2, '0')}`;
+
       if (user.reportTime && user.reportTime !== 'off' && user.reportTime === currentTime) {
         const userDayKey = `${user.id}_report_${todayKey}`;
         if (!reportSentKeys.has(userDayKey)) {
@@ -1564,7 +1583,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         if (!reminderSentKeys.has(key)) {
           reminderSentKeys.add(key);
           try {
-            const todayStats = await storage.getDailyStats(user.id, msk);
+            const todayStats = await storage.getDailyStats(user.id, userNow);
             if (todayStats.calories === 0) {
               bot.sendMessage(user.telegramId!, `⚠️ Ты ещё ничего не записал сегодня. Не забудь залогировать еду!`);
             }
@@ -1576,7 +1595,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
 
       // Weight reminder: fires on matching time + allowed day of week
       if (user.weightReminderTime && user.weightReminderTime !== 'off' && user.weightReminderTime === currentTime) {
-        const todayDow = msk.getDay(); // 0=Sun,1=Mon,...,6=Sat
+        const todayDow = userNow.getDay(); // 0=Sun,1=Mon,...,6=Sat
         const allowedDays = user.weightReminderDays
           ? user.weightReminderDays.split(',').filter(Boolean).map(Number)
           : [];
@@ -1953,7 +1972,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
           sodium: pending.sodium != null ? Number(pending.sodium) : null,
           saturatedFat: pending.saturatedFat != null ? Number(pending.saturatedFat) : null,
         });
-        const progress = await buildDailyProgress(storage, user.id, user);
+        const progress = await buildDailyProgress(storage, user.id, user, getUserNow(user.timezone ?? 'Europe/Moscow'));
         bot.editMessageText(`✅ Добавлено: ${pending.foodName} (${pending.weight}${unit})${progress}`, {
           chat_id: chatId,
           message_id: query.message?.message_id
@@ -2076,7 +2095,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         }
       }
       const totalCal = items.reduce((s, i) => s + i.calories, 0);
-      const progress = await buildDailyProgress(storage, user.id, user);
+      const progress = await buildDailyProgress(storage, user.id, user, getUserNow(user.timezone ?? 'Europe/Moscow'));
       bot.editMessageText(`✅ Сохранено ${savedCount} из ${items.length} позиций  (+${totalCal} ккал)${progress}`, {
         chat_id: chatId,
         message_id: query.message?.message_id
@@ -2685,7 +2704,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         caloriesBurned: pending.caloriesBurned,
       });
 
-      const progress = await buildDailyProgress(storage, user.id, user);
+      const progress = await buildDailyProgress(storage, user.id, user, getUserNow(user.timezone ?? 'Europe/Moscow'));
       bot.editMessageText(`✅ Тренировка сохранена: *${pending.description}* — ${pending.caloriesBurned} ккал${progress}`, {
         chat_id: chatId,
         message_id: query.message?.message_id,
@@ -2779,6 +2798,39 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       settingsMessageIds.set(telegramId, query.message!.message_id);
       bot.answerCallbackQuery(query.id);
       sendWeightReminderSetup(chatId, user);
+      return;
+    }
+
+    if (query.data === 'settings_timezone') {
+      bot.answerCallbackQuery(query.id);
+      const tzOptions = [
+        ['Europe/Moscow', 'Москва (МСК)'],
+        ['Europe/Kaliningrad', 'Калининград (МСК-1)'],
+        ['Europe/Samara', 'Самара (МСК+1)'],
+        ['Asia/Yekaterinburg', 'Екатеринбург (МСК+2)'],
+        ['Asia/Omsk', 'Омск (МСК+3)'],
+        ['Asia/Krasnoyarsk', 'Красноярск (МСК+4)'],
+        ['Asia/Irkutsk', 'Иркутск (МСК+5)'],
+        ['Asia/Vladivostok', 'Владивосток (МСК+7)'],
+        ['Europe/Kiev', 'Киев (EET)'],
+        ['Europe/Berlin', 'Берлин (CET)'],
+        ['Europe/London', 'Лондон (GMT)'],
+        ['America/New_York', 'Нью-Йорк (ET)'],
+      ];
+      bot.sendMessage(chatId, '🌍 Выберите часовой пояс:', {
+        reply_markup: {
+          inline_keyboard: tzOptions.map(([tz, label]) => [{ text: label, callback_data: `set_tz_${tz}` }]),
+        }
+      });
+      return;
+    }
+
+    if (query.data.startsWith('set_tz_')) {
+      const tz = query.data.replace('set_tz_', '');
+      await storage.updateUser(user.id, { timezone: tz });
+      bot.answerCallbackQuery(query.id);
+      bot.editMessageText(`✅ Часовой пояс: ${tz}`, { chat_id: chatId, message_id: query.message?.message_id });
+      await refreshSettingsMessage(chatId, telegramId);
       return;
     }
 
@@ -3220,7 +3272,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
               }
             );
             if (intent === "both") {
-              const items = await analyzeFoodText(msg.text, getMoscowNow(), { breakfastEnd: user.mealBreakfastEnd ?? '12:30', lunchEnd: user.mealLunchEnd ?? '16:30' });
+              const items = await analyzeFoodText(msg.text, getUserNow(user.timezone ?? 'Europe/Moscow'), { breakfastEnd: user.mealBreakfastEnd ?? '12:30', lunchEnd: user.mealLunchEnd ?? '16:30' });
               if (items && items.length > 0) await processFoodItems(chatId, telegramId, items);
             }
             return;
@@ -3228,7 +3280,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         }
 
         if (intent === "food" || intent === "both" || intent === "other") {
-          const items = await analyzeFoodText(msg.text, getMoscowNow(), { breakfastEnd: user.mealBreakfastEnd ?? '12:30', lunchEnd: user.mealLunchEnd ?? '16:30' });
+          const items = await analyzeFoodText(msg.text, getUserNow(user.timezone ?? 'Europe/Moscow'), { breakfastEnd: user.mealBreakfastEnd ?? '12:30', lunchEnd: user.mealLunchEnd ?? '16:30' });
           await bot.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
           if (items && items.length > 0) {
             await processFoodItems(chatId, telegramId, items);
@@ -3337,7 +3389,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         console.log("Voice transcription:", transcript);
         bot.sendMessage(chatId, `🗣 "${transcript}"\n\nАнализирую...`);
 
-        const items = await analyzeFoodText(transcript, getMoscowNow(), { breakfastEnd: user.mealBreakfastEnd ?? '12:30', lunchEnd: user.mealLunchEnd ?? '16:30' });
+        const items = await analyzeFoodText(transcript, getUserNow(user.timezone ?? 'Europe/Moscow'), { breakfastEnd: user.mealBreakfastEnd ?? '12:30', lunchEnd: user.mealLunchEnd ?? '16:30' });
         if (items && items.length > 0) {
           await processFoodItems(chatId, telegramId, items);
         } else {

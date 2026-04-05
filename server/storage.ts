@@ -20,10 +20,10 @@ export interface IStorage {
   getFoodLogById(id: number): Promise<FoodLog | undefined>;
 
   getDailyStats(userId: number, date: Date): Promise<{ calories: number; protein: number; fat: number; carbs: number; fiber: number; sugar: number; sodium: number; saturatedFat: number }>;
-  getWeeklyStats(userId: number): Promise<{ date: string; calories: number }[]>;
-  getWeeklyFullStats(userId: number): Promise<{ date: string; dayLabel: string; calories: number; protein: number; fat: number; carbs: number }[]>;
-  getMonthlyStats(userId: number): Promise<{ weekLabel: string; calories: number; protein: number; fat: number; carbs: number; days: number }[]>;
-  getStreak(userId: number): Promise<number>;
+  getWeeklyStats(userId: number, tz?: string): Promise<{ date: string; calories: number }[]>;
+  getWeeklyFullStats(userId: number, tz?: string): Promise<{ date: string; dayLabel: string; calories: number; protein: number; fat: number; carbs: number }[]>;
+  getMonthlyStats(userId: number, tz?: string): Promise<{ weekLabel: string; calories: number; protein: number; fat: number; carbs: number; days: number }[]>;
+  getStreak(userId: number, tz?: string): Promise<number>;
 
   calculateAndSetGoals(userId: number): Promise<User>;
   updateUserReportTime(userId: number, time: string): Promise<void>;
@@ -135,21 +135,26 @@ export class DatabaseStorage implements IStorage {
     }), { calories: 0, protein: 0, fat: 0, carbs: 0, fiber: 0, sugar: 0, sodium: 0, saturatedFat: 0 });
   }
 
-  async getWeeklyStats(userId: number) {
+  private getNow(tz?: string): Date {
+    if (!tz) return new Date();
+    return new Date(new Date().toLocaleString('en-US', { timeZone: tz }));
+  }
+
+  async getWeeklyStats(userId: number, tz?: string) {
     const stats = [];
     for (let i = 6; i >= 0; i--) {
-      const date = new Date(); date.setDate(date.getDate() - i);
+      const date = this.getNow(tz); date.setDate(date.getDate() - i);
       const daily = await this.getDailyStats(userId, date);
       stats.push({ date: date.toISOString().split('T')[0], calories: daily.calories });
     }
     return stats;
   }
 
-  async getWeeklyFullStats(userId: number) {
+  async getWeeklyFullStats(userId: number, tz?: string) {
     const DAY_RU = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
     const result = [];
     for (let i = 6; i >= 0; i--) {
-      const d = new Date(); d.setDate(d.getDate() - i);
+      const d = this.getNow(tz); d.setDate(d.getDate() - i);
       const s = await this.getDailyStats(userId, d);
       const dd = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`;
       result.push({ date: d.toISOString().split('T')[0], dayLabel: `${DAY_RU[d.getDay()]} ${dd}`, ...s });
@@ -157,9 +162,9 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async getMonthlyStats(userId: number) {
+  async getMonthlyStats(userId: number, tz?: string) {
     const weeks: { weekLabel: string; calories: number; protein: number; fat: number; carbs: number; days: number }[] = [];
-    const today = new Date();
+    const today = this.getNow(tz);
 
     for (let w = 3; w >= 0; w--) {
       const weekEnd = new Date(today);
@@ -243,8 +248,8 @@ export class DatabaseStorage implements IStorage {
     await db.update(users).set({ [field]: time }).where(eq(users.id, userId));
   }
 
-  async getStreak(userId: number): Promise<number> {
-    const today = new Date();
+  async getStreak(userId: number, tz?: string): Promise<number> {
+    const today = this.getNow(tz);
     const todayStats = await this.getDailyStats(userId, today);
     const startOffset = todayStats.calories > 0 ? 0 : 1;
     let streak = 0;
