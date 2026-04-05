@@ -23,6 +23,14 @@ function progressBar(current: number, goal: number, length = 10): string {
   return `[${('█'.repeat(filled) + '░'.repeat(empty))}] ${Math.round(ratio * 100)}%`;
 }
 
+function formatTotalsLine(cal: number, prot: number, fat: number, carbs: number, user: { caloriesGoal?: number | null }): string {
+  let line = user.caloriesGoal
+    ? `🔥 ${cal}/${user.caloriesGoal} ккал ${progressBar(cal, user.caloriesGoal)}`
+    : `🔥 ${cal} ккал`;
+  line += ` | 💪Б${prot} 🧈Ж${fat} 🍞У${carbs}`;
+  return line;
+}
+
 async function lookupBarcodeProduct(barcode: string): Promise<(FoodItem & { barcode: string; foundInDb: boolean }) | null> {
   try {
     const res = await fetch(`https://world.openfoodfacts.org/api/v0/product/${barcode}.json`);
@@ -340,13 +348,14 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       "/stats — Статистика за сегодня + серия дней 🔥",
       "/week — Разбивка по дням за 7 дней",
       "/month — Статистика за месяц с графиками",
-      "/history — Последние записи питания",
+      "/history \\[ДД.ММ.ГГГГ\\] — Записи питания за сегодня или дату",
       "/pdf — PDF-отчёт с графиками за месяц",
       "/export ДД.ММ.ГГГГ \\[ - ДД.ММ.ГГГГ\\] — Excel-экспорт",
       "/clear ДД.ММ.ГГГГ \\[ - ДД.ММ.ГГГГ\\] — Удалить записи",
       "",
       "⚖️ *Вес*",
-      "/weight \\[кг\\] — Записать вес / посмотреть историю и тренд",
+      "/weight \\[кг\\] — Записать вес / история и тренд",
+      "  └ Кнопка «Недельный анализ» — AI сопоставит питание с динамикой веса",
       "",
       "👤 *Профиль и цели*",
       "/profile — Настроить профиль полностью",
@@ -809,7 +818,12 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       for (const mt of ['breakfast', 'lunch', 'dinner', 'snack']) {
         const items = mealGroupsStats[mt];
         if (!items || items.length === 0) continue;
-        text += `\n${mealLabelsStats[mt]}: ${items.map(f => `${f.foodName} (${f.weight}г)`).join(', ')}`;
+        const mCal = items.reduce((s, f) => s + f.calories, 0);
+        const mProt = items.reduce((s, f) => s + f.protein, 0);
+        const mFat = items.reduce((s, f) => s + f.fat, 0);
+        const mCarbs = items.reduce((s, f) => s + f.carbs, 0);
+        text += `\n${mealLabelsStats[mt]}: ${mCal} ккал | 💪Б${mProt} 🧈Ж${mFat} 🍞У${mCarbs}`;
+        text += `\n  · ${items.map(f => `${f.foodName} (${f.weight}г)`).join(', ')}`;
       }
     }
 
@@ -1106,6 +1120,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       `⏰ *Авторепорт:* ${fmt(u.reportTime) === 'выкл' ? 'выкл' : u.reportTime || '21:00'}`,
       `🍽 *Напоминания о еде:* ${remParts}`,
       `⚖️ *Напоминание о весе:* ${weightR}`,
+      ``,
+      `🕐 *Интервалы приёмов:* Завтрак до ${u.mealBreakfastEnd ?? '12:30'}, Обед до ${u.mealLunchEnd ?? '16:30'}`,
     ].join('\n');
   }
 
@@ -1128,6 +1144,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         [{ text: `⏰ Авторепорт: ${reportLabel}`, callback_data: 'settings_report_time' }],
         [{ text: '🍽 Напоминания о еде →',        callback_data: 'settings_reminders' }],
         [{ text: '⚖️ Напоминание о весе →',       callback_data: 'settings_weight_reminder' }],
+        [{ text: '🕐 Интервалы приёмов пищи →',  callback_data: 'settings_meal_intervals' }],
       ]
     };
   }
@@ -1284,16 +1301,77 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       const monthStart = new Date(today); monthStart.setDate(today.getDate() - 27); monthStart.setHours(0, 0, 0, 0);
       monthStart.setHours(0, 0, 0, 0);
 
-      const [weeklyStats, dailyStats, allLogs, weightLogs] = await Promise.all([
+      const [weeklyStats, dailyStats, allLogs, weightLogs, workoutLogs] = await Promise.all([
         storage.getMonthlyStats(user.id),
         storage.getWeeklyFullStats(user.id),
         storage.getFoodLogsInRange(user.id, monthStart, today),
         storage.getWeightLogs(user.id, 30),
+        storage.getWorkoutLogsInRange(user.id, monthStart, today),
       ]);
 
       const sortedWeightLogs = [...weightLogs].sort((a, b) => new Date(a.date!).getTime() - new Date(b.date!).getTime());
       const topFoods = extractTopFoods(allLogs);
-      const pdfBuffer = await generateMonthlyPDF(user, weeklyStats, dailyStats, sortedWeightLogs, topFoods);
+
+      // Meal distribution (pie chart data)
+      const mealDist: Record<string, number> = {};
+      for (const log of allLogs) {
+        const mt = log.mealType || 'snack';
+        mealDist[mt] = (mealDist[mt] || 0) + log.calories;
+      }
+      const mealDistribution = Object.entries(mealDist).map(([meal, calories]) => ({ meal, calories }));
+
+      // Day-of-week averages
+      const DOW_NAMES = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+      const dowData: Record<number, { cal: number[]; prot: number[]; fat: number[]; carbs: number[] }> = {};
+      for (let i = 0; i < 7; i++) dowData[i] = { cal: [], prot: [], fat: [], carbs: [] };
+      const dayMap = new Map<string, { dow: number; cal: number; prot: number; fat: number; carbs: number }>();
+      for (const log of allLogs) {
+        if (!log.date) continue;
+        const key = log.date.toISOString().slice(0, 10);
+        if (!dayMap.has(key)) dayMap.set(key, { dow: log.date.getDay(), cal: 0, prot: 0, fat: 0, carbs: 0 });
+        const day = dayMap.get(key)!;
+        day.cal += log.calories; day.prot += log.protein; day.fat += log.fat; day.carbs += log.carbs;
+      }
+      for (const v of dayMap.values()) {
+        dowData[v.dow].cal.push(v.cal);
+        dowData[v.dow].prot.push(v.prot);
+        dowData[v.dow].fat.push(v.fat);
+        dowData[v.dow].carbs.push(v.carbs);
+      }
+      const avg = (arr: number[]) => arr.length > 0 ? arr.reduce((s, v) => s + v, 0) / arr.length : 0;
+      const dayOfWeekAverages = [1,2,3,4,5,6,0].map(i => ({
+        day: DOW_NAMES[i],
+        calories: Math.round(avg(dowData[i].cal)),
+        protein: Math.round(avg(dowData[i].prot)),
+        fat: Math.round(avg(dowData[i].fat)),
+        carbs: Math.round(avg(dowData[i].carbs)),
+      }));
+
+      // Stability CV
+      const dailyCals = Array.from(dayMap.values()).map(d => d.cal).filter(c => c > 0);
+      const calMean = dailyCals.length > 0 ? dailyCals.reduce((s, v) => s + v, 0) / dailyCals.length : 0;
+      const calStddev = dailyCals.length > 1 ? Math.sqrt(dailyCals.reduce((s, v) => s + (v - calMean) ** 2, 0) / dailyCals.length) : 0;
+      const stabilityCV = calMean > 0 ? Math.round(calStddev / calMean * 100) : 0;
+
+      // Workout stats
+      const totalBurned = workoutLogs.reduce((s, w) => s + w.caloriesBurned, 0);
+      const typeMap: Record<string, { count: number; burned: number }> = {};
+      for (const w of workoutLogs) {
+        if (!typeMap[w.workoutType]) typeMap[w.workoutType] = { count: 0, burned: 0 };
+        typeMap[w.workoutType].count++;
+        typeMap[w.workoutType].burned += w.caloriesBurned;
+      }
+      const totalActiveDays = weeklyStats.reduce((s, w) => s + w.days, 0);
+      const workoutStats = {
+        totalBurned,
+        types: Object.entries(typeMap).map(([type, s]) => ({ type, ...s })).sort((a, b) => b.burned - a.burned),
+        avgPerDay: totalActiveDays > 0 ? Math.round(totalBurned / totalActiveDays) : 0,
+      };
+
+      const pdfBuffer = await generateMonthlyPDF(
+        user, weeklyStats, dailyStats, sortedWeightLogs, topFoods,
+        mealDistribution, dayOfWeekAverages, stabilityCV, workoutStats
+      );
 
       const monthName = today.toLocaleString('ru-RU', { month: 'long', year: 'numeric' });
       await bot.sendDocument(chatId, pdfBuffer, {
@@ -1359,13 +1437,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     }
 
     // Totals vs goal
-    text += `📊 Итого: ${stats.calories} ккал | Б${stats.protein}г Ж${stats.fat}г У${stats.carbs}г`;
-    if (user.caloriesGoal) {
-      const diff = stats.calories - user.caloriesGoal;
-      text += diff > 0
-        ? `  ⚠️ +${diff} к норме`
-        : `  ✅ ${Math.abs(diff)} до нормы`;
-    }
+    text += formatTotalsLine(stats.calories, stats.protein, stats.fat, stats.carbs, user);
 
     // Workouts
     if (workouts.length > 0) {
@@ -1560,7 +1632,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     };
   }
 
-  async function sendHistoryMessages(chatId: number, logs: FoodLog[]) {
+  async function sendHistoryMessages(chatId: number, logs: FoodLog[], user: User, headerText = '📋 История за сегодня') {
     const groups: Record<string, { log: FoodLog; idx: number }[]> = {};
     logs.forEach((log, i) => {
       const mt = log.mealType || 'snack';
@@ -1569,7 +1641,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     });
 
     // Header
-    await bot.sendMessage(chatId, '📋 История за сегодня');
+    await bot.sendMessage(chatId, headerText);
 
     for (const mt of mealOrderH) {
       const items = groups[mt];
@@ -1587,10 +1659,10 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     const totProt = logs.reduce((s, f) => s + f.protein, 0);
     const totFat = logs.reduce((s, f) => s + f.fat, 0);
     const totCarbs = logs.reduce((s, f) => s + f.carbs, 0);
-    await bot.sendMessage(chatId, `📊 Итого: ${totCal} ккал | Б${totProt} Ж${totFat} У${totCarbs}`);
+    await bot.sendMessage(chatId, formatTotalsLine(totCal, totProt, totFat, totCarbs, user));
   }
 
-  bot.onText(/\/history/, async (msg) => {
+  bot.onText(/\/history(?:\s+(\d{2}\.\d{2}\.\d{4}))?/, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1598,17 +1670,29 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
 
-    const today = getMoscowNow();
-    const todayStart = new Date(today); todayStart.setHours(0, 0, 0, 0);
-    const todayEnd = new Date(today); todayEnd.setHours(23, 59, 59, 999);
-    const logs = await storage.getFoodLogsInRange(user.id, todayStart, todayEnd);
+    const dateArg = match?.[1];
+    let targetDate: Date;
+    let headerText: string;
+
+    if (dateArg) {
+      const [d, m, y] = dateArg.split('.').map(Number);
+      targetDate = new Date(y, m - 1, d);
+      headerText = `📋 История за ${dateArg}`;
+    } else {
+      targetDate = getMoscowNow();
+      headerText = '📋 История за сегодня';
+    }
+
+    const dayStart = new Date(targetDate); dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(targetDate); dayEnd.setHours(23, 59, 59, 999);
+    const logs = await storage.getFoodLogsInRange(user.id, dayStart, dayEnd);
 
     if (logs.length === 0) {
-      bot.sendMessage(chatId, "За сегодня записей нет.");
+      bot.sendMessage(chatId, dateArg ? `За ${dateArg} записей нет.` : "За сегодня записей нет.");
       return;
     }
 
-    await sendHistoryMessages(chatId, logs);
+    await sendHistoryMessages(chatId, logs, user, headerText);
   });
 
   bot.onText(/\/export$/, async (msg) => {
@@ -1692,18 +1776,59 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     // Style header
     ws1.getRow(1).font = { bold: true };
 
-    sortedLogs.forEach(log => {
-      ws1.addRow({
-        date: log.date?.toLocaleDateString(),
-        meal: mealTypeLabel(log.mealType),
-        food: log.foodName,
-        cal: log.calories,
-        prot: log.protein,
-        fat: log.fat,
-        carb: log.carbs,
-        weight: log.weight,
-      });
-    });
+    const formatDateDDMMYYYY = (d: Date) =>
+      `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+
+    // Group logs by date, then by mealType
+    const dayGroups = new Map<string, typeof sortedLogs>();
+    for (const log of sortedLogs) {
+      const key = log.date ? formatDateDDMMYYYY(log.date) : '—';
+      if (!dayGroups.has(key)) dayGroups.set(key, []);
+      dayGroups.get(key)!.push(log);
+    }
+
+    let isFirstDay = true;
+    for (const [dateStr, dayLogs] of dayGroups) {
+      if (!isFirstDay) ws1.addRow({});
+      isFirstDay = false;
+
+      // Group by mealType within the day
+      const mealGroups = new Map<string, typeof dayLogs>();
+      for (const log of dayLogs) {
+        const mt = log.mealType || 'snack';
+        if (!mealGroups.has(mt)) mealGroups.set(mt, []);
+        mealGroups.get(mt)!.push(log);
+      }
+
+      let isFirstMeal = true;
+      for (const mt of ['breakfast', 'lunch', 'dinner', 'snack']) {
+        const meals = mealGroups.get(mt);
+        if (!meals) continue;
+        if (!isFirstMeal) ws1.addRow({});
+        isFirstMeal = false;
+        for (const log of meals) {
+          ws1.addRow({
+            date: dateStr,
+            meal: mealTypeLabel(log.mealType),
+            food: log.foodName,
+            cal: log.calories,
+            prot: log.protein,
+            fat: log.fat,
+            carb: log.carbs,
+            weight: log.weight,
+          });
+        }
+      }
+
+      // Daily totals row
+      const totCal = dayLogs.reduce((s, l) => s + l.calories, 0);
+      const totProt = dayLogs.reduce((s, l) => s + l.protein, 0);
+      const totFat = dayLogs.reduce((s, l) => s + l.fat, 0);
+      const totCarbs = dayLogs.reduce((s, l) => s + l.carbs, 0);
+      const totRow = ws1.addRow({ date: '', meal: 'ИТОГО', food: '', cal: totCal, prot: totProt, fat: totFat, carb: totCarbs, weight: '' });
+      totRow.font = { bold: true };
+      totRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F5E9' } };
+    }
 
     // --- Sheet 2: Топ продуктов ---
     const ws2 = workbook.addWorksheet('Топ продуктов');
@@ -2270,18 +2395,23 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
 
     // ─── Weight analysis ────────────────────────────────────────────────────
     } else if (query.data === 'weight_analysis') {
-      bot.answerCallbackQuery(query.id, { text: 'Анализирую...' });
-      const wLogs = await storage.getWeightLogs(user.id, 7);
-      const weekStats = await storage.getWeeklyFullStats(user.id);
-      if (wLogs.length < 2) {
-        bot.sendMessage(chatId, "Нужно хотя бы 2 замера веса для анализа. Записывайте вес командой /weight 75.0");
-        return;
-      }
-      const analysis = await generateWeightAnalysis(wLogs, weekStats, user);
-      if (analysis) {
-        bot.sendMessage(chatId, `📊 Анализ веса за неделю:\n\n${analysis}`);
-      } else {
-        bot.sendMessage(chatId, "Не удалось сформировать анализ. Попробуйте позже.");
+      try {
+        await bot.answerCallbackQuery(query.id, { text: 'Анализирую...' });
+        const wLogs = await storage.getWeightLogs(user.id, 7);
+        const weekStats = await storage.getWeeklyFullStats(user.id);
+        if (wLogs.length < 2) {
+          await bot.sendMessage(chatId, "Нужно хотя бы 2 замера веса для анализа. Записывайте вес командой /weight 75.0");
+          return;
+        }
+        const analysis = await generateWeightAnalysis(wLogs, weekStats, user);
+        if (analysis) {
+          await bot.sendMessage(chatId, `📊 Анализ веса за неделю:\n\n${analysis}`);
+        } else {
+          await bot.sendMessage(chatId, "Не удалось сформировать анализ. Попробуйте позже.");
+        }
+      } catch (err) {
+        console.error('weight_analysis error:', err);
+        bot.sendMessage(chatId, "Произошла ошибка при анализе веса. Попробуйте позже.");
       }
 
     } else if (query.data === 'weight_reminder_setup') {
@@ -2635,6 +2765,72 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       settingsMessageIds.set(telegramId, query.message!.message_id);
       bot.answerCallbackQuery(query.id);
       sendWeightReminderSetup(chatId, user);
+      return;
+    }
+
+    if (query.data === 'settings_meal_intervals') {
+      settingsMessageIds.set(telegramId, query.message!.message_id);
+      bot.answerCallbackQuery(query.id);
+      const freshUser = await storage.getUser(user.id);
+      const bfEnd = freshUser?.mealBreakfastEnd ?? '12:30';
+      const lnEnd = freshUser?.mealLunchEnd ?? '16:30';
+      bot.sendMessage(chatId,
+        `🕐 Интервалы приёмов пищи\n\nЗавтрак: 5:00 – ${bfEnd}\nОбед: после ${bfEnd} – ${lnEnd}\nУжин: после ${lnEnd}\n\nВыберите что изменить:`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: `🌅 Завтрак до: ${bfEnd}`, callback_data: 'meal_int_bf' }],
+            [{ text: `🍽 Обед до: ${lnEnd}`, callback_data: 'meal_int_ln' }],
+          ]
+        }
+      });
+      return;
+    }
+
+    if (query.data === 'meal_int_bf') {
+      bot.answerCallbackQuery(query.id);
+      const times = ['10:00','10:30','11:00','11:30','12:00','12:30','13:00','13:30','14:00'];
+      bot.editMessageText('🌅 Завтрак до:', {
+        chat_id: chatId, message_id: query.message?.message_id,
+        reply_markup: {
+          inline_keyboard: [
+            times.slice(0, 5).map(t => ({ text: t, callback_data: `meal_bf_end_${t}` })),
+            times.slice(5).map(t => ({ text: t, callback_data: `meal_bf_end_${t}` })),
+          ]
+        }
+      });
+      return;
+    }
+
+    if (query.data === 'meal_int_ln') {
+      bot.answerCallbackQuery(query.id);
+      const times = ['14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00'];
+      bot.editMessageText('🍽 Обед до:', {
+        chat_id: chatId, message_id: query.message?.message_id,
+        reply_markup: {
+          inline_keyboard: [
+            times.slice(0, 5).map(t => ({ text: t, callback_data: `meal_ln_end_${t}` })),
+            times.slice(5).map(t => ({ text: t, callback_data: `meal_ln_end_${t}` })),
+          ]
+        }
+      });
+      return;
+    }
+
+    if (query.data.startsWith('meal_bf_end_')) {
+      const val = query.data.replace('meal_bf_end_', '');
+      await storage.updateUser(user.id, { mealBreakfastEnd: val });
+      bot.answerCallbackQuery(query.id);
+      bot.editMessageText(`✅ Завтрак: до ${val}`, { chat_id: chatId, message_id: query.message?.message_id });
+      await refreshSettingsMessage(chatId, telegramId);
+      return;
+    }
+
+    if (query.data.startsWith('meal_ln_end_')) {
+      const val = query.data.replace('meal_ln_end_', '');
+      await storage.updateUser(user.id, { mealLunchEnd: val });
+      bot.answerCallbackQuery(query.id);
+      bot.editMessageText(`✅ Обед: до ${val}`, { chat_id: chatId, message_id: query.message?.message_id });
+      await refreshSettingsMessage(chatId, telegramId);
       return;
     }
 
@@ -3010,7 +3206,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
               }
             );
             if (intent === "both") {
-              const items = await analyzeFoodText(msg.text, getMoscowNow());
+              const items = await analyzeFoodText(msg.text, getMoscowNow(), { breakfastEnd: user.mealBreakfastEnd ?? '12:30', lunchEnd: user.mealLunchEnd ?? '16:30' });
               if (items && items.length > 0) await processFoodItems(chatId, telegramId, items);
             }
             return;
@@ -3018,7 +3214,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         }
 
         if (intent === "food" || intent === "both" || intent === "other") {
-          const items = await analyzeFoodText(msg.text, getMoscowNow());
+          const items = await analyzeFoodText(msg.text, getMoscowNow(), { breakfastEnd: user.mealBreakfastEnd ?? '12:30', lunchEnd: user.mealLunchEnd ?? '16:30' });
           await bot.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
           if (items && items.length > 0) {
             await processFoodItems(chatId, telegramId, items);
@@ -3127,7 +3323,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         console.log("Voice transcription:", transcript);
         bot.sendMessage(chatId, `🗣 "${transcript}"\n\nАнализирую...`);
 
-        const items = await analyzeFoodText(transcript, getMoscowNow());
+        const items = await analyzeFoodText(transcript, getMoscowNow(), { breakfastEnd: user.mealBreakfastEnd ?? '12:30', lunchEnd: user.mealLunchEnd ?? '16:30' });
         if (items && items.length > 0) {
           await processFoodItems(chatId, telegramId, items);
         } else {

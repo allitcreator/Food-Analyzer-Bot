@@ -19,7 +19,11 @@ const openai = new OpenAI({
 });
 
 
-export async function analyzeFoodText(text: string, currentTime?: Date): Promise<FoodItem[] | null> {
+export async function analyzeFoodText(
+  text: string,
+  currentTime?: Date,
+  mealBoundaries?: { breakfastEnd: string; lunchEnd: string }
+): Promise<FoodItem[] | null> {
   try {
     // Determine default mealType based on Moscow time
     let timeHint = '';
@@ -27,12 +31,20 @@ export async function analyzeFoodText(text: string, currentTime?: Date): Promise
       const h = currentTime.getHours();
       const m = currentTime.getMinutes();
       const totalMin = h * 60 + m;
+
+      const bfEnd = mealBoundaries?.breakfastEnd ?? '12:30';
+      const lnEnd = mealBoundaries?.lunchEnd ?? '16:30';
+      const [bfH, bfM] = bfEnd.split(':').map(Number);
+      const [lnH, lnM] = lnEnd.split(':').map(Number);
+      const bfEndMin = bfH * 60 + bfM;
+      const lnEndMin = lnH * 60 + lnM;
+
       let defaultMeal: string;
-      if (totalMin >= 300 && totalMin <= 750) {        // 5:00–12:30
+      if (totalMin >= 300 && totalMin <= bfEndMin) {
         defaultMeal = 'breakfast';
-      } else if (totalMin >= 751 && totalMin <= 990) { // 12:31–16:30
+      } else if (totalMin > bfEndMin && totalMin <= lnEndMin) {
         defaultMeal = 'lunch';
-      } else {                                          // 16:31–4:59
+      } else {
         defaultMeal = 'dinner';
       }
       timeHint = `\nCurrent time: ${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}. Default mealType (when user does NOT explicitly mention a meal): "${defaultMeal}".

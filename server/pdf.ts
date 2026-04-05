@@ -22,12 +22,20 @@ interface DayStat {
   carbs: number;
 }
 
+interface MealDist { meal: string; calories: number }
+interface DowAvg { day: string; calories: number; protein: number; fat: number; carbs: number }
+interface WorkoutStats { totalBurned: number; types: { type: string; count: number; burned: number }[]; avgPerDay: number }
+
 export function generateMonthlyPDF(
   user: User,
   weeklyStats: WeekStat[],
   dailyStats: DayStat[],
   weightLogs: WeightLog[],
-  topFoods: { name: string; count: number }[]
+  topFoods: { name: string; count: number }[],
+  mealDistribution?: MealDist[],
+  dayOfWeekAverages?: DowAvg[],
+  stabilityCV?: number,
+  workoutStats?: WorkoutStats
 ): Promise<Buffer> {
   return new Promise<Buffer>((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -401,6 +409,152 @@ export function generateMonthlyPDF(
         });
         y += insights.length * 16 + 20;
       } else {
+        y += 10;
+      }
+    }
+
+    // ── Meal distribution pie chart ──────────────────────────────
+    if (mealDistribution && mealDistribution.length > 0) {
+      const totalMealCal = mealDistribution.reduce((s, m) => s + m.calories, 0);
+      if (totalMealCal > 0) {
+        sectionTitle("Распределение калорий по приёмам пищи");
+        const mealColors: Record<string, string> = {
+          breakfast: '#FFA726', lunch: '#66BB6A', dinner: '#42A5F5', snack: '#AB47BC',
+        };
+        const mealNames: Record<string, string> = {
+          breakfast: 'Завтрак', lunch: 'Обед', dinner: 'Ужин', snack: 'Перекус',
+        };
+
+        const cx = 50 + W / 3;
+        const cy = y + 75;
+        const radius = 60;
+        const segments = 60;
+        ensureSpace(170);
+
+        let startAngle = -Math.PI / 2;
+        for (const item of mealDistribution) {
+          const sliceAngle = (item.calories / totalMealCal) * Math.PI * 2;
+          if (sliceAngle < 0.01) { startAngle += sliceAngle; continue; }
+          const endAngle = startAngle + sliceAngle;
+
+          // Draw pie segment as polygon
+          doc.save();
+          const path = doc.moveTo(cx, cy);
+          const steps = Math.max(Math.ceil(segments * (sliceAngle / (Math.PI * 2))), 2);
+          for (let s = 0; s <= steps; s++) {
+            const angle = startAngle + (sliceAngle * s / steps);
+            path.lineTo(cx + radius * Math.cos(angle), cy + radius * Math.sin(angle));
+          }
+          path.lineTo(cx, cy);
+          doc.fill(mealColors[item.meal] || GRAY);
+          doc.restore();
+          startAngle = endAngle;
+        }
+
+        // Legend on the right
+        const legendX = cx + radius + 40;
+        let legendY = cy - (mealDistribution.length * 18) / 2;
+        for (const item of mealDistribution) {
+          const pct = Math.round(item.calories / totalMealCal * 100);
+          doc.rect(legendX, legendY + 2, 10, 10).fill(mealColors[item.meal] || GRAY);
+          doc.fillColor(DARK).font("Regular").fontSize(9)
+            .text(`${mealNames[item.meal] || item.meal}: ${item.calories} ккал (${pct}%)`, legendX + 15, legendY, { width: 180 });
+          legendY += 18;
+        }
+
+        y = cy + radius + 20;
+      }
+    }
+
+    // ── Day-of-week КБЖУ averages ─────────────────────────────────
+    if (dayOfWeekAverages && dayOfWeekAverages.some(d => d.calories > 0)) {
+      sectionTitle("Средние КБЖУ по дням недели");
+      const dowCols = [
+        { label: "День", w: 80 }, { label: "Ккал", w: 80 },
+        { label: "Белки г", w: 80 }, { label: "Жиры г", w: 80 }, { label: "Углев г", w: 80 },
+      ];
+      const dowW = dowCols.reduce((s, c) => s + c.w, 0);
+      ensureSpace(20 + dayOfWeekAverages.length * 18 + 10);
+      let dtx = 50;
+      doc.rect(50, y, dowW, 20).fill(PRIMARY);
+      dowCols.forEach(c => {
+        doc.fillColor("white").font("Bold").fontSize(8).text(c.label, dtx + 4, y + 6, { width: c.w - 4 });
+        dtx += c.w;
+      });
+      y += 20;
+
+      dayOfWeekAverages.forEach((d, idx) => {
+        ensureSpace(18);
+        doc.rect(50, y, dowW, 18).fill(idx % 2 === 0 ? BG : "white");
+        const row = [d.day, String(d.calories), String(d.protein), String(d.fat), String(d.carbs)];
+        let rx = 50;
+        row.forEach((cell, ci) => {
+          doc.fillColor(DARK).font("Regular").fontSize(8).text(cell, rx + 4, y + 5, { width: dowCols[ci].w - 4 });
+          rx += dowCols[ci].w;
+        });
+        y += 18;
+      });
+      y += 10;
+    }
+
+    // ── Calorie stability ─────────────────────────────────────────
+    if (stabilityCV != null && stabilityCV >= 0) {
+      sectionTitle("Стабильность питания");
+      ensureSpace(60);
+
+      let statusColor: string;
+      let statusText: string;
+      if (stabilityCV < 15) {
+        statusColor = "#22C55E"; statusText = "Отличная стабильность";
+      } else if (stabilityCV <= 25) {
+        statusColor = "#F59E0B"; statusText = "Нормальная стабильность";
+      } else {
+        statusColor = "#EF4444"; statusText = "Значительные колебания";
+      }
+
+      doc.rect(50, y, W, 50).fillAndStroke(LIGHT, ACCENT);
+      doc.fillColor(statusColor).font("Bold").fontSize(22)
+        .text(`${stabilityCV}%`, 50, y + 8, { width: 100, align: "center" });
+      doc.fillColor(statusColor).font("Bold").fontSize(11)
+        .text(statusText, 150, y + 10, { width: W - 110 });
+      doc.fillColor(GRAY).font("Regular").fontSize(8)
+        .text("Коэффициент вариации дневных калорий (CV). Чем ниже — тем стабильнее питание.", 150, y + 28, { width: W - 110 });
+      y += 60;
+    }
+
+    // ── Workouts ──────────────────────────────────────────────────
+    if (workoutStats && workoutStats.totalBurned > 0) {
+      sectionTitle("Тренировки за месяц");
+      ensureSpace(30);
+      doc.fillColor(DARK).font("Regular").fontSize(10)
+        .text(`Сожжено: ${workoutStats.totalBurned} ккал  •  Среднее в день: ${workoutStats.avgPerDay} ккал`, 50, y, { width: W });
+      y += 20;
+
+      if (workoutStats.types.length > 0) {
+        const wtCols = [
+          { label: "Тип", w: 180 }, { label: "Кол-во", w: 80 }, { label: "Ккал", w: 80 },
+        ];
+        const wtW = wtCols.reduce((s, c) => s + c.w, 0);
+        ensureSpace(20 + workoutStats.types.length * 18 + 10);
+        let wtx = 50;
+        doc.rect(50, y, wtW, 20).fill(PRIMARY);
+        wtCols.forEach(c => {
+          doc.fillColor("white").font("Bold").fontSize(8).text(c.label, wtx + 4, y + 6, { width: c.w - 4 });
+          wtx += c.w;
+        });
+        y += 20;
+
+        workoutStats.types.forEach((t, idx) => {
+          ensureSpace(18);
+          doc.rect(50, y, wtW, 18).fill(idx % 2 === 0 ? BG : "white");
+          const row = [t.type, String(t.count), String(t.burned)];
+          let rx = 50;
+          row.forEach((cell, ci) => {
+            doc.fillColor(DARK).font("Regular").fontSize(8).text(cell, rx + 4, y + 5, { width: wtCols[ci].w - 4 });
+            rx += wtCols[ci].w;
+          });
+          y += 18;
+        });
         y += 10;
       }
     }
