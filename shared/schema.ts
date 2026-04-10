@@ -32,6 +32,8 @@ export const users = pgTable("users", {
   aiMonthAnalysis: boolean("ai_month_analysis").default(true),   // AI block after /month
   aiEveningReport: boolean("ai_evening_report").default(true),   // AI text in evening report
   smartFoodGrouping: boolean("smart_food_grouping").default(true), // AI grouping in Excel top products
+  barcodeScanEnabled: boolean("barcode_scan_enabled").default(true), // detect barcodes on photos
+
   timezone: text("timezone").default("Europe/Moscow"),          // IANA timezone
   mealBreakfastEnd: text("meal_breakfast_end").default("12:30"), // завтрак до HH:MM
   mealLunchEnd: text("meal_lunch_end").default("16:30"),       // обед до HH:MM

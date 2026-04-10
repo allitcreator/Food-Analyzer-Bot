@@ -1186,6 +1186,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       `🤖 AI-анализ /month: *${bool(u.aiMonthAnalysis)}*`,
       `📋 AI в вечернем отчёте: *${bool(u.aiEveningReport)}*`,
       `🧠 Группировка в Excel: *${bool(u.smartFoodGrouping)}*`,
+      `📦 Распознавание штрихкодов: *${bool(u.barcodeScanEnabled)}*`,
       ``,
       `⏰ *Авторепорт:* ${fmt(u.reportTime) === 'выкл' ? 'выкл' : u.reportTime || '21:00'}`,
       `🍽 *Напоминания о еде:* ${remParts}`,
@@ -1211,6 +1212,9 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         ],
         [
           { text: `🧠 Группировка в Excel ${bool(u.smartFoodGrouping) ? '✅' : '❌'}`, callback_data: 'toggle_smart_group' },
+        ],
+        [
+          { text: `📦 Штрихкоды ${bool(u.barcodeScanEnabled) ? '✅' : '❌'}`, callback_data: 'toggle_barcode' },
         ],
         [{ text: `⏰ Авторепорт: ${reportLabel}`, callback_data: 'settings_report_time' }],
         [{ text: '🍽 Напоминания о еде →',        callback_data: 'settings_reminders' }],
@@ -2809,6 +2813,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       toggle_ai_month:   { field: 'aiMonthAnalysis',    label: 'AI-анализ /month',        def: true  },
       toggle_ai_report:  { field: 'aiEveningReport',    label: 'AI в вечернем отчёте',    def: true  },
       toggle_smart_group:{ field: 'smartFoodGrouping',  label: 'Группировка в Excel',     def: true  },
+      toggle_barcode:    { field: 'barcodeScanEnabled', label: 'Распознавание штрихкодов', def: true  },
     };
     if (settingsToggles[query.data]) {
       const { field, label, def } = settingsToggles[query.data];
@@ -3391,8 +3396,9 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         const arrayBuffer = await imgResponse.arrayBuffer();
         const base64 = Buffer.from(arrayBuffer).toString("base64");
 
-        // Step 1: Try barcode detection
-        const barcode = await detectBarcode(base64);
+        // Step 1: Try barcode detection (if enabled in settings)
+        const barcodeEnabled = user.barcodeScanEnabled ?? true;
+        const barcode = barcodeEnabled ? await detectBarcode(base64) : null;
         let analysis: any = null;
         let barcodeSource = false;
 
