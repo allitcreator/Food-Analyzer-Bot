@@ -1,6 +1,6 @@
-import { users, foodLogs, waterLogs, weightLogs, workoutLogs, type User, type InsertUser, type FoodLog, type InsertFoodLog, type WeightLog, type WorkoutLog, type InsertWorkoutLog } from "@shared/schema";
+import { users, foodLogs, waterLogs, weightLogs, workoutLogs, type User, type InsertUser, type FoodLog, type InsertFoodLog, type WaterLog, type WeightLog, type WorkoutLog, type InsertWorkoutLog } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, sql, desc, gte, lt } from "drizzle-orm";
+import { eq, and, sql, desc, gte, lte, lt } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: number): Promise<User | undefined>;
@@ -12,7 +12,7 @@ export interface IStorage {
   getAllApprovedUsers(): Promise<User[]>;
 
   createFoodLog(log: InsertFoodLog): Promise<FoodLog>;
-  getFoodLogs(userId: number): Promise<FoodLog[]>;
+  getFoodLogs(userId: number, opts?: { limit?: number; offset?: number }): Promise<FoodLog[]>;
   getFoodLogsInRange(userId: number, startDate: Date, endDate: Date): Promise<FoodLog[]>;
   deleteFoodLogsInRange(userId: number, startDate: Date, endDate: Date): Promise<void>;
   deleteFoodLog(id: number, userId: number): Promise<void>;
@@ -31,14 +31,23 @@ export interface IStorage {
 
   logWater(userId: number, amount: number): Promise<void>;
   getDailyWater(userId: number, date: Date): Promise<number>;
+  getWaterLogsInRange(userId: number, startDate: Date, endDate: Date): Promise<WaterLog[]>;
+  getDailyWaterLogs(userId: number, date: Date): Promise<WaterLog[]>;
+  updateWaterLog(id: number, userId: number, amount: number): Promise<WaterLog>;
+  deleteWaterLog(id: number, userId: number): Promise<void>;
 
   logWeight(userId: number, weight: number): Promise<WeightLog>;
   getWeightLogs(userId: number, limit?: number): Promise<WeightLog[]>;
   getWeightLogsInRange(userId: number, startDate: Date, endDate: Date): Promise<WeightLog[]>;
+  updateWeightLog(id: number, userId: number, weight: number): Promise<WeightLog>;
+  deleteWeightLog(id: number, userId: number): Promise<void>;
 
   createWorkoutLog(log: InsertWorkoutLog): Promise<WorkoutLog>;
   getDailyWorkouts(userId: number, date: Date): Promise<WorkoutLog[]>;
   getWorkoutLogs(userId: number, limit?: number): Promise<WorkoutLog[]>;
+  getWorkoutLogsInRange(userId: number, startDate: Date, endDate: Date): Promise<WorkoutLog[]>;
+  getWorkoutLogById(id: number, userId: number): Promise<WorkoutLog | undefined>;
+  updateWorkoutLog(id: number, userId: number, data: Partial<InsertWorkoutLog>): Promise<WorkoutLog>;
   deleteWorkoutLog(id: number): Promise<void>;
   deleteWorkoutLogsBySource(userId: number, date: Date, source: string): Promise<void>;
 
@@ -114,60 +123,132 @@ export class DatabaseStorage implements IStorage {
     return newLog;
   }
 
-  async getFoodLogs(userId: number): Promise<FoodLog[]> {
-    return db.select().from(foodLogs).where(eq(foodLogs.userId, userId)).orderBy(desc(foodLogs.date));
+  async getFoodLogs(userId: number, opts?: { limit?: number; offset?: number }): Promise<FoodLog[]> {
+    let q = db.select().from(foodLogs).where(eq(foodLogs.userId, userId)).orderBy(desc(foodLogs.date)).$dynamic();
+    if (opts?.limit !== undefined) q = q.limit(opts.limit);
+    if (opts?.offset !== undefined) q = q.offset(opts.offset);
+    return q;
   }
 
   async getDailyStats(userId: number, date: Date) {
     const start = new Date(date); start.setHours(0, 0, 0, 0);
     const end = new Date(date); end.setHours(23, 59, 59, 999);
 
-    const logs = await db.select().from(foodLogs).where(
-      sql`${foodLogs.userId} = ${userId} AND ${foodLogs.date} >= ${start} AND ${foodLogs.date} <= ${end}`
+    const [row] = await db.select({
+      calories: sql<number>`COALESCE(SUM(${foodLogs.calories}), 0)`,
+      protein: sql<number>`COALESCE(SUM(${foodLogs.protein}), 0)`,
+      fat: sql<number>`COALESCE(SUM(${foodLogs.fat}), 0)`,
+      carbs: sql<number>`COALESCE(SUM(${foodLogs.carbs}), 0)`,
+      fiber: sql<number>`COALESCE(SUM(${foodLogs.fiber}), 0)`,
+      sugar: sql<number>`COALESCE(SUM(${foodLogs.sugar}), 0)`,
+      sodium: sql<number>`COALESCE(SUM(${foodLogs.sodium}), 0)`,
+      saturatedFat: sql<number>`COALESCE(SUM(${foodLogs.saturatedFat}), 0)`,
+    }).from(foodLogs).where(
+      and(eq(foodLogs.userId, userId), gte(foodLogs.date, start), lte(foodLogs.date, end))
     );
 
-    return logs.reduce((acc, log) => ({
-      calories: acc.calories + log.calories,
-      protein: acc.protein + log.protein,
-      fat: acc.fat + log.fat,
-      carbs: acc.carbs + log.carbs,
-      fiber: acc.fiber + (log.fiber ?? 0),
-      sugar: acc.sugar + (log.sugar ?? 0),
-      sodium: acc.sodium + (log.sodium ?? 0),
-      saturatedFat: acc.saturatedFat + (log.saturatedFat ?? 0),
-    }), { calories: 0, protein: 0, fat: 0, carbs: 0, fiber: 0, sugar: 0, sodium: 0, saturatedFat: 0 });
+    return {
+      calories: Number(row?.calories ?? 0),
+      protein: Number(row?.protein ?? 0),
+      fat: Number(row?.fat ?? 0),
+      carbs: Number(row?.carbs ?? 0),
+      fiber: Number(row?.fiber ?? 0),
+      sugar: Number(row?.sugar ?? 0),
+      sodium: Number(row?.sodium ?? 0),
+      saturatedFat: Number(row?.saturatedFat ?? 0),
+    };
   }
 
   private getNow(tz?: string): Date {
     if (!tz) return new Date();
-    return new Date(new Date().toLocaleString('en-US', { timeZone: tz }));
+    // Convert "now" into the given IANA timezone reliably via formatToParts,
+    // then rebuild a local Date whose wall-clock fields match that timezone.
+    // (Same result as the old `toLocaleString` hack, but locale-independent.)
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      year: 'numeric', month: 'numeric', day: 'numeric',
+      hour: 'numeric', minute: 'numeric', second: 'numeric',
+      hour12: false,
+    }).formatToParts(new Date());
+    const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+    let hour = get('hour');
+    if (hour === 24) hour = 0; // some engines emit 24 for midnight with hour12:false
+    return new Date(get('year'), get('month') - 1, get('day'), hour, get('minute'), get('second'));
+  }
+
+  // One query for a set of day-buckets: fetch food macros over the whole span,
+  // then bucket in JS by the exact same per-day [00:00.000, 23:59:59.999] bounds.
+  // Avoids N+1 while preserving the day-boundary semantics of getDailyStats.
+  private async getFoodMacrosByDay(
+    userId: number,
+    days: Date[],
+  ): Promise<{ calories: number; protein: number; fat: number; carbs: number }[]> {
+    const buckets = days.map((d) => {
+      const start = new Date(d); start.setHours(0, 0, 0, 0);
+      const end = new Date(d); end.setHours(23, 59, 59, 999);
+      return { start, end };
+    });
+    const min = new Date(Math.min(...buckets.map((b) => b.start.getTime())));
+    const max = new Date(Math.max(...buckets.map((b) => b.end.getTime())));
+
+    const rows = await db.select({
+      date: foodLogs.date,
+      calories: foodLogs.calories,
+      protein: foodLogs.protein,
+      fat: foodLogs.fat,
+      carbs: foodLogs.carbs,
+    }).from(foodLogs).where(
+      and(eq(foodLogs.userId, userId), gte(foodLogs.date, min), lte(foodLogs.date, max))
+    );
+
+    return buckets.map((b) => {
+      let calories = 0, protein = 0, fat = 0, carbs = 0;
+      for (const r of rows) {
+        if (r.date && r.date >= b.start && r.date <= b.end) {
+          calories += r.calories; protein += r.protein; fat += r.fat; carbs += r.carbs;
+        }
+      }
+      return { calories, protein, fat, carbs };
+    });
   }
 
   async getWeeklyStats(userId: number, tz?: string) {
-    const stats = [];
+    const days: Date[] = [];
     for (let i = 6; i >= 0; i--) {
       const date = this.getNow(tz); date.setDate(date.getDate() - i);
-      const daily = await this.getDailyStats(userId, date);
-      stats.push({ date: date.toISOString().split('T')[0], calories: daily.calories });
+      days.push(date);
     }
-    return stats;
+    const macros = await this.getFoodMacrosByDay(userId, days);
+    return days.map((date, idx) => ({
+      date: date.toISOString().split('T')[0],
+      calories: macros[idx].calories,
+    }));
   }
 
   async getWeeklyFullStats(userId: number, tz?: string) {
     const DAY_RU = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
-    const result = [];
+    const days: Date[] = [];
     for (let i = 6; i >= 0; i--) {
       const d = this.getNow(tz); d.setDate(d.getDate() - i);
-      const s = await this.getDailyStats(userId, d);
-      const dd = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`;
-      result.push({ date: d.toISOString().split('T')[0], dayLabel: `${DAY_RU[d.getDay()]} ${dd}`, ...s });
+      days.push(d);
     }
-    return result;
+    const macros = await this.getFoodMacrosByDay(userId, days);
+    return days.map((d, idx) => {
+      const s = macros[idx];
+      const dd = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`;
+      return {
+        date: d.toISOString().split('T')[0],
+        dayLabel: `${DAY_RU[d.getDay()]} ${dd}`,
+        calories: s.calories, protein: s.protein, fat: s.fat, carbs: s.carbs,
+      };
+    });
   }
 
   async getMonthlyStats(userId: number, tz?: string) {
-    const weeks: { weekLabel: string; calories: number; protein: number; fat: number; carbs: number; days: number }[] = [];
     const today = this.getNow(tz);
+
+    const weekDefs: { weekLabel: string; days: Date[] }[] = [];
+    const allDays: Date[] = [];
 
     for (let w = 3; w >= 0; w--) {
       const weekEnd = new Date(today);
@@ -175,24 +256,36 @@ export class DatabaseStorage implements IStorage {
       const weekStart = new Date(weekEnd);
       weekStart.setDate(weekEnd.getDate() - 6);
 
-      let totalCal = 0, totalProt = 0, totalFat = 0, totalCarbs = 0, activeDays = 0;
-
+      const days: Date[] = [];
       for (let d = 0; d < 7; d++) {
         const day = new Date(weekStart);
         day.setDate(weekStart.getDate() + d);
         if (day > today) break;
-        const s = await this.getDailyStats(userId, day);
+        days.push(day);
+      }
+
+      const startLabel = `${String(weekStart.getDate()).padStart(2, '0')}.${String(weekStart.getMonth() + 1).padStart(2, '0')}`;
+      const endLabel = `${String(weekEnd.getDate()).padStart(2, '0')}.${String(weekEnd.getMonth() + 1).padStart(2, '0')}`;
+      weekDefs.push({ weekLabel: `${startLabel}–${endLabel}`, days });
+      allDays.push(...days);
+    }
+
+    const macros = allDays.length ? await this.getFoodMacrosByDay(userId, allDays) : [];
+
+    const weeks: { weekLabel: string; calories: number; protein: number; fat: number; carbs: number; days: number }[] = [];
+    let idx = 0;
+    for (const wd of weekDefs) {
+      let totalCal = 0, totalProt = 0, totalFat = 0, totalCarbs = 0, activeDays = 0;
+      for (let k = 0; k < wd.days.length; k++) {
+        const s = macros[idx++];
         if (s.calories > 0) {
           totalCal += s.calories; totalProt += s.protein;
           totalFat += s.fat; totalCarbs += s.carbs;
           activeDays++;
         }
       }
-
-      const startLabel = `${String(weekStart.getDate()).padStart(2, '0')}.${String(weekStart.getMonth() + 1).padStart(2, '0')}`;
-      const endLabel = `${String(weekEnd.getDate()).padStart(2, '0')}.${String(weekEnd.getMonth() + 1).padStart(2, '0')}`;
       weeks.push({
-        weekLabel: `${startLabel}–${endLabel}`,
+        weekLabel: wd.weekLabel,
         calories: activeDays > 0 ? Math.round(totalCal / activeDays) : 0,
         protein: activeDays > 0 ? Math.round(totalProt / activeDays) : 0,
         fat: activeDays > 0 ? Math.round(totalFat / activeDays) : 0,
@@ -242,6 +335,30 @@ export class DatabaseStorage implements IStorage {
     return logs.reduce((sum, l) => sum + l.amount, 0);
   }
 
+  async getWaterLogsInRange(userId: number, startDate: Date, endDate: Date): Promise<WaterLog[]> {
+    return db.select().from(waterLogs).where(
+      sql`${waterLogs.userId} = ${userId} AND ${waterLogs.date} >= ${startDate} AND ${waterLogs.date} <= ${endDate}`
+    ).orderBy(waterLogs.date);
+  }
+
+  async getDailyWaterLogs(userId: number, date: Date): Promise<WaterLog[]> {
+    const start = new Date(date); start.setHours(0, 0, 0, 0);
+    const end = new Date(date); end.setHours(23, 59, 59, 999);
+    return db.select().from(waterLogs).where(
+      sql`${waterLogs.userId} = ${userId} AND ${waterLogs.date} >= ${start} AND ${waterLogs.date} <= ${end}`
+    ).orderBy(desc(waterLogs.date));
+  }
+
+  async updateWaterLog(id: number, userId: number, amount: number): Promise<WaterLog> {
+    const [updated] = await db.update(waterLogs).set({ amount })
+      .where(and(eq(waterLogs.id, id), eq(waterLogs.userId, userId))).returning();
+    return updated;
+  }
+
+  async deleteWaterLog(id: number, userId: number): Promise<void> {
+    await db.delete(waterLogs).where(and(eq(waterLogs.id, id), eq(waterLogs.userId, userId)));
+  }
+
   async updateUserReportTime(userId: number, time: string): Promise<void> {
     await db.update(users).set({ reportTime: time }).where(eq(users.id, userId));
   }
@@ -253,13 +370,19 @@ export class DatabaseStorage implements IStorage {
 
   async getStreak(userId: number, tz?: string): Promise<number> {
     const today = this.getNow(tz);
-    const todayStats = await this.getDailyStats(userId, today);
-    const startOffset = todayStats.calories > 0 ? 0 : 1;
+    // Daily calorie sums for the last 366 days in a single query; index = day offset.
+    const days: Date[] = [];
+    for (let i = 0; i < 366; i++) {
+      const d = new Date(today); d.setDate(d.getDate() - i);
+      days.push(d);
+    }
+    const macros = await this.getFoodMacrosByDay(userId, days);
+    const calories = macros.map((m) => m.calories);
+
+    const startOffset = calories[0] > 0 ? 0 : 1;
     let streak = 0;
     for (let i = startOffset; i < 365; i++) {
-      const d = new Date(today); d.setDate(d.getDate() - i);
-      const s = await this.getDailyStats(userId, d);
-      if (s.calories > 0) streak++;
+      if ((calories[i] ?? 0) > 0) streak++;
       else break;
     }
     return streak;
@@ -283,6 +406,16 @@ export class DatabaseStorage implements IStorage {
     ).orderBy(weightLogs.date);
   }
 
+  async updateWeightLog(id: number, userId: number, weight: number): Promise<WeightLog> {
+    const [updated] = await db.update(weightLogs).set({ weight })
+      .where(and(eq(weightLogs.id, id), eq(weightLogs.userId, userId))).returning();
+    return updated;
+  }
+
+  async deleteWeightLog(id: number, userId: number): Promise<void> {
+    await db.delete(weightLogs).where(and(eq(weightLogs.id, id), eq(weightLogs.userId, userId)));
+  }
+
   async createWorkoutLog(log: InsertWorkoutLog): Promise<WorkoutLog> {
     const [entry] = await db.insert(workoutLogs).values(log).returning();
     return entry;
@@ -300,6 +433,18 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(workoutLogs).where(
       sql`${workoutLogs.userId} = ${userId} AND ${workoutLogs.date} >= ${startDate} AND ${workoutLogs.date} <= ${endDate}`
     ).orderBy(workoutLogs.date);
+  }
+
+  async getWorkoutLogById(id: number, userId: number): Promise<WorkoutLog | undefined> {
+    const [log] = await db.select().from(workoutLogs)
+      .where(and(eq(workoutLogs.id, id), eq(workoutLogs.userId, userId)));
+    return log;
+  }
+
+  async updateWorkoutLog(id: number, userId: number, data: Partial<InsertWorkoutLog>): Promise<WorkoutLog> {
+    const [updated] = await db.update(workoutLogs).set(data)
+      .where(and(eq(workoutLogs.id, id), eq(workoutLogs.userId, userId))).returning();
+    return updated;
   }
 
   async getWorkoutLogs(userId: number, limit = 10): Promise<WorkoutLog[]> {

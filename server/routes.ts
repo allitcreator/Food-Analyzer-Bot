@@ -2,42 +2,14 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupBot, processHealthData } from "./bot";
-import { pool } from "./db";
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
 
-  // Drop health_token column if it still exists (migration from old webhook approach)
-  try {
-    await pool.query(`ALTER TABLE users DROP COLUMN IF EXISTS health_token`);
-  } catch (err) {
-    console.error("Migration warning: failed to drop health_token column:", err);
-  }
-
-  // Add health_sync_token column if not exists (migration)
-  try {
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS health_sync_token TEXT UNIQUE`);
-  } catch (err) {
-    console.error("Migration warning: failed to add health_sync_token column:", err);
-  }
-
-  // Add AI toggles columns (migration)
-  try {
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_week_analysis BOOLEAN DEFAULT TRUE`);
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_month_analysis BOOLEAN DEFAULT TRUE`);
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_evening_report BOOLEAN DEFAULT TRUE`);
-  } catch (err) {
-    console.error("Migration warning: failed to add AI toggle columns:", err);
-  }
-
-  // Add is_blocked column if not exists (migration)
-  try {
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN DEFAULT false`);
-  } catch (err) {
-    console.error("Migration warning: failed to add is_blocked column:", err);
-  }
+  // Schema changes are handled by versioned migrations (migrations/*.sql) applied
+  // at container startup via `drizzle-kit migrate` in docker-entrypoint.sh.
 
   // Start the bot
   const bot = setupBot(storage, app);

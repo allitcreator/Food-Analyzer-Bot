@@ -2,7 +2,7 @@
 set -e
 
 echo "Running database migrations..."
-npx drizzle-kit push
+npx drizzle-kit migrate
 
 echo "Starting application..."
 exec "$@"

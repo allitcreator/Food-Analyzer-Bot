@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, timestamp, real } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, real, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
@@ -43,7 +43,7 @@ export const users = pgTable("users", {
 
 export const foodLogs = pgTable("food_logs", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").references(() => users.id),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   foodName: text("food_name").notNull(),
   calories: integer("calories").notNull(),
   protein: integer("protein").notNull(),
@@ -59,32 +59,40 @@ export const foodLogs = pgTable("food_logs", {
   sodium: real("sodium"),       // mg
   saturatedFat: real("saturated_fat"), // g
   date: timestamp("date").defaultNow(),
-});
+}, (table) => ({
+  userDateIdx: index("food_logs_user_id_date_idx").on(table.userId, table.date),
+}));
 
 export const waterLogs = pgTable("water_logs", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").references(() => users.id),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   amount: integer("amount").notNull(), // in ml
   date: timestamp("date").defaultNow(),
-});
+}, (table) => ({
+  userDateIdx: index("water_logs_user_id_date_idx").on(table.userId, table.date),
+}));
 
 export const weightLogs = pgTable("weight_logs", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").references(() => users.id),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   weight: real("weight").notNull(), // in kg, e.g. 85.3
   date: timestamp("date").defaultNow(),
-});
+}, (table) => ({
+  userDateIdx: index("weight_logs_user_id_date_idx").on(table.userId, table.date),
+}));
 
 export const workoutLogs = pgTable("workout_logs", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").references(() => users.id),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   description: text("description").notNull(),   // "бег 30 мин", "эллипс 45 мин"
   workoutType: text("workout_type").notNull(),   // "бег", "эллипс", "силовая", "шаги" etc.
   durationMin: integer("duration_min"),          // null if only steps/kcal given
   caloriesBurned: integer("calories_burned").notNull(),
   source: text("source").default("manual"),     // "manual" | "apple_health"
   date: timestamp("date").defaultNow(),
-});
+}, (table) => ({
+  userDateIdx: index("workout_logs_user_id_date_idx").on(table.userId, table.date),
+}));
 
 export const usersRelations = relations(users, ({ many }) => ({
   logs: many(foodLogs),

@@ -25,9 +25,10 @@ COPY --from=builder /app/dist ./dist
 # Copy fonts needed by pdfkit at runtime
 COPY --from=builder /app/server/fonts ./server/fonts
 
-# Copy drizzle config and shared schema for db:push
+# Copy drizzle config, shared schema and versioned migrations for `drizzle-kit migrate`
 COPY --from=builder /app/drizzle.config.ts ./drizzle.config.ts
 COPY --from=builder /app/shared ./shared
+COPY --from=builder /app/migrations ./migrations
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 COPY --from=builder /app/package.json ./package.json
 
