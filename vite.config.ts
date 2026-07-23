@@ -32,6 +32,13 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    // Vite 7 defaults to "baseline-widely-available" (Chrome 107+/Safari 16+),
+    // which can throw a SyntaxError while *parsing* the bundle on older
+    // Telegram WebViews → blank screen. es2018 makes esbuild transpile newer
+    // syntax (optional chaining, class fields, ...) down to broadly-supported JS.
+    target: "es2018",
+    // Lower modern CSS (e.g. `hsl(h s l / a)` color syntax) for old WebViews.
+    cssTarget: ["chrome61", "safari12"],
   },
   server: {
     fs: {

@@ -7,6 +7,48 @@
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
     <title>Дневник калорий</title>
+    <!--
+      Fatal-error overlay. Deliberately an inline ES5 classic script placed
+      BEFORE the app bundle: it also catches a SyntaxError thrown while
+      *parsing* the bundle on an old WebView — something a handler inside the
+      bundle itself could never do. Pure DOM, no React.
+    -->
+    <script>
+      (function () {
+        function show(title, detail) {
+          try {
+            var el = document.getElementById("__fatal_overlay");
+            if (!el) {
+              el = document.createElement("div");
+              el.id = "__fatal_overlay";
+              el.style.cssText =
+                "position:fixed;top:0;left:0;right:0;bottom:0;z-index:2147483647;" +
+                "overflow:auto;background:#111;color:#ff7b72;padding:16px;" +
+                "font:12px/1.5 Menlo,Consolas,monospace;white-space:pre-wrap;" +
+                "word-break:break-word;-webkit-user-select:text;user-select:text;";
+              (document.body || document.documentElement).appendChild(el);
+            }
+            el.textContent += "[" + title + "]\n" + detail + "\n\n";
+          } catch (e) {
+            /* never throw from the reporter */
+          }
+        }
+        window.__showFatalOverlay = show;
+        window.addEventListener("error", function (e) {
+          var d = (e && e.message) || "unknown error";
+          if (e && e.filename) d += "\n" + e.filename + ":" + e.lineno + ":" + e.colno;
+          if (e && e.error && e.error.stack) {
+            d += "\n" + String(e.error.stack).split("\n").slice(0, 10).join("\n");
+          }
+          show("window.onerror", d);
+        });
+        window.addEventListener("unhandledrejection", function (e) {
+          var r = e && e.reason;
+          var d = r && r.stack ? String(r.stack).split("\n").slice(0, 10).join("\n") : String(r);
+          show("unhandledrejection", d);
+        });
+      })();
+    </script>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>

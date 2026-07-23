@@ -133,12 +133,22 @@ export function useBackButton(active: boolean, onBack: () => void) {
   useEffect(() => {
     const wa = tg();
     if (!wa || !active) return;
+    // BackButton exists only since Bot API 6.1 — guard against old clients.
     const btn = wa.BackButton;
-    btn.onClick(onBack);
-    btn.show();
+    if (!btn) return;
+    try {
+      btn.onClick(onBack);
+      btn.show();
+    } catch {
+      return;
+    }
     return () => {
-      btn.offClick(onBack);
-      btn.hide();
+      try {
+        btn.offClick(onBack);
+        btn.hide();
+      } catch {
+        /* old client */
+      }
     };
   }, [active, onBack]);
 }
