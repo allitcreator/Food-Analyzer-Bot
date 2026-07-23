@@ -7,6 +7,7 @@ import { analyzeFoodText, analyzeFoodImage, generateEveningReport, generatePerio
 import { generateMonthlyPDF, extractTopFoods } from "./pdf";
 import { User, FoodLog } from "@shared/schema";
 import { parseHealthPayload, calcStepsCalories } from "./health-helpers";
+import { progressBar } from "./lib/goals";
 
 const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
 
@@ -14,13 +15,6 @@ let botInstance: TelegramBot | null = null;
 
 function getUnit(foodName: string): string {
   return foodName.toLowerCase().match(LIQUID_PATTERN) ? 'мл' : 'г';
-}
-
-function progressBar(current: number, goal: number, length = 10): string {
-  const ratio = Math.min(current / goal, 1);
-  const filled = Math.round(ratio * length);
-  const empty = length - filled;
-  return `[${('█'.repeat(filled) + '░'.repeat(empty))}] ${Math.round(ratio * 100)}%`;
 }
 
 function formatTotalsLine(cal: number, prot: number, fat: number, carbs: number, user: { caloriesGoal?: number | null }): string {

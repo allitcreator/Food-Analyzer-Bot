@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ssh vps-bot:*)",
+      "Bash(node -e \"const ExcelJS = require\\('exceljs'\\); const wb = new ExcelJS.Workbook\\(\\); const ws = wb.addWorksheet\\('test'\\); console.log\\(typeof ws.addChart\\); console.log\\(Object.keys\\(ws\\).filter\\(k => k.toLowerCase\\(\\).includes\\('chart'\\) || k.toLowerCase\\(\\).includes\\('image'\\) || k.toLowerCase\\(\\).includes\\('draw'\\)\\)\\)\")",
+      "Bash(node -e \"const ExcelJS = require\\('exceljs'\\); const wb = new ExcelJS.Workbook\\(\\); const ws = wb.addWorksheet\\('test'\\); console.log\\(typeof ws.addImage\\); console.log\\(typeof wb.addImage\\)\")",
+      "Bash(npx tsc:*)",
+      "Bash(npm run:*)"
+    ]
+  }
+}

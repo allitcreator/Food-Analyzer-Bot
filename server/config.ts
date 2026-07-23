@@ -14,7 +14,6 @@ export const config = {
   telegramBotToken:  requireEnv("TELEGRAM_BOT_TOKEN"),
   openrouterApiKey:  requireEnv("OPENROUTER_API_KEY"),
   databaseUrl:       requireEnv("DATABASE_URL"),
-  sessionSecret:     requireEnv("SESSION_SECRET"),
 
   adminTelegramId:   optionalEnv("ADMIN_TELEGRAM_ID"),
   webhookUrl:        optionalEnv("WEBHOOK_URL"),

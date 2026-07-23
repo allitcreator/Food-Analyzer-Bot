@@ -1,6 +1,7 @@
 import { users, foodLogs, waterLogs, weightLogs, workoutLogs, type User, type InsertUser, type FoodLog, type InsertFoodLog, type WaterLog, type WeightLog, type WorkoutLog, type InsertWorkoutLog } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, sql, desc, gte, lte, lt } from "drizzle-orm";
+import { calcGoalsFromProfile } from "./lib/goals";
 
 export interface IStorage {
   getUser(id: number): Promise<User | undefined>;
@@ -82,20 +83,14 @@ export class DatabaseStorage implements IStorage {
       return user!;
     }
 
-    let bmr = (10 * user.weight) + (6.25 * user.height) - (5 * user.age);
-    bmr += user.gender === 'male' ? 5 : -161;
-
-    const activityMultipliers: Record<string, number> = {
-      sedentary: 1.2, light: 1.375, moderate: 1.55, active: 1.725, very_active: 1.9
-    };
-
-    let calories = Math.round(bmr * (activityMultipliers[user.activityLevel] || 1.2));
-    if (user.goal === 'lose') calories -= 500;
-    else if (user.goal === 'gain') calories += 500;
-
-    const protein = Math.round((calories * 0.3) / 4);
-    const fat = Math.round((calories * 0.3) / 9);
-    const carbs = Math.round((calories * 0.4) / 4);
+    const { calories, protein, fat, carbs } = calcGoalsFromProfile({
+      weight: user.weight,
+      height: user.height,
+      age: user.age,
+      gender: user.gender,
+      activityLevel: user.activityLevel,
+      goal: user.goal,
+    });
 
     return this.updateUser(userId, { caloriesGoal: calories, proteinGoal: protein, fatGoal: fat, carbsGoal: carbs });
   }

@@ -4,15 +4,9 @@
  */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-
-// ─── progressBar ────────────────────────────────────────────────────────────
-// Copied from server/bot.ts to test in isolation
-function progressBar(current: number, goal: number, length = 10): string {
-  const ratio = Math.min(current / goal, 1);
-  const filled = Math.round(ratio * length);
-  const empty = length - filled;
-  return `[${("█".repeat(filled) + "░".repeat(empty))}] ${Math.round(ratio * 100)}%`;
-}
+// Real implementations under test — the same functions used by
+// server/bot.ts (progressBar) and server/storage.ts (calcGoalsFromProfile).
+import { progressBar, calcGoalsFromProfile } from "../server/lib/goals";
 
 describe("progressBar", () => {
   test("empty bar at 0%", () => {
@@ -47,21 +41,12 @@ describe("progressBar", () => {
 });
 
 // ─── Mifflin-St Jeor calorie calculation ────────────────────────────────────
-// Matches logic in server/storage.ts calculateAndSetGoals()
-function calcCalories(opts: {
+// Uses calcGoalsFromProfile() from server/lib/goals.ts — the same function
+// server/storage.ts calculateAndSetGoals() calls.
+const calcCalories = (opts: {
   weight: number; height: number; age: number;
   gender: "male" | "female"; activityLevel: string; goal: string;
-}): number {
-  let bmr = 10 * opts.weight + 6.25 * opts.height - 5 * opts.age;
-  bmr += opts.gender === "male" ? 5 : -161;
-  const mults: Record<string, number> = {
-    sedentary: 1.2, light: 1.375, moderate: 1.55, active: 1.725, very_active: 1.9,
-  };
-  let cal = Math.round(bmr * (mults[opts.activityLevel] ?? 1.2));
-  if (opts.goal === "lose") cal -= 500;
-  else if (opts.goal === "gain") cal += 500;
-  return cal;
-}
+}): number => calcGoalsFromProfile(opts).calories;
 
 describe("Mifflin-St Jeor calorie calculation", () => {
   test("male, 30y, 80kg, 180cm, moderate, maintain", () => {
