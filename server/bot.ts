@@ -33,7 +33,9 @@ function formatTotalsLine(cal: number, prot: number, fat: number, carbs: number,
 
 async function lookupBarcodeProduct(barcode: string): Promise<(FoodItem & { barcode: string; foundInDb: boolean }) | null> {
   try {
-    const res = await fetch(`https://world.openfoodfacts.org/api/v0/product/${barcode}.json`);
+    const res = await fetch(`https://world.openfoodfacts.org/api/v0/product/${barcode}.json`, {
+      signal: AbortSignal.timeout(10_000),
+    });
     if (!res.ok) return null;
     const data = await res.json() as any;
     if (data.status !== 1 || !data.product) return null;

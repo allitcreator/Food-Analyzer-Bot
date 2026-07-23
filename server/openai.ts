@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import pRetry, { AbortError } from "p-retry";
 import { config } from "./config";
 import { execFile } from "child_process";
 import { promisify } from "util";
@@ -17,6 +18,62 @@ const openai = new OpenAI({
     "X-Title": "Food Analyzer Bot",
   },
 });
+
+// ---------------------------------------------------------------------------
+// Shared AI call wrapper: per-request timeout + retry with exponential backoff.
+// Retries only transient failures (network, timeout, 408, 429, 5xx). Client
+// errors (400/401/403/404/409/422 …) are aborted immediately via AbortError so
+// p-retry does not waste attempts on them.
+// ---------------------------------------------------------------------------
+function isRetriableStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+async function callAI(
+  fnName: string,
+  params: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
+  opts: { timeout?: number } = {},
+): Promise<OpenAI.Chat.Completions.ChatCompletion> {
+  const timeout = opts.timeout ?? 60_000;
+  return pRetry(
+    async () => {
+      try {
+        return await openai.chat.completions.create(params, { timeout });
+      } catch (err: any) {
+        const status: number | undefined = err?.status;
+        // Non-transient client errors — do not retry, abort immediately.
+        if (typeof status === "number" && !isRetriableStatus(status)) {
+          throw new AbortError(err instanceof Error ? err : new Error(String(err)));
+        }
+        // Transient (network/timeout/408/429/5xx) — let p-retry retry.
+        throw err;
+      }
+    },
+    {
+      retries: 2, // up to 3 attempts total
+      factor: 2,
+      minTimeout: 1000,
+      maxTimeout: 4000,
+      onFailedAttempt: ({ error, attemptNumber, retriesLeft }) => {
+        const e = error as any;
+        console.error(
+          `[AI:${fnName}] attempt ${attemptNumber} failed (retriesLeft=${retriesLeft}): status=${e?.status ?? "n/a"} code=${e?.code ?? "n/a"} — ${e?.message ?? String(error)}`,
+        );
+      },
+    },
+  );
+}
+
+// Normalize mealType — AI sometimes returns Russian names (from text or vision).
+const MEAL_TYPE_MAP: Record<string, string> = {
+  'завтрак': 'breakfast', 'breakfast': 'breakfast',
+  'обед': 'lunch', 'lunch': 'lunch',
+  'ужин': 'dinner', 'dinner': 'dinner',
+  'перекус': 'snack', 'snack': 'snack',
+};
+function normalizeMealType(value: unknown): string {
+  return MEAL_TYPE_MAP[String(value ?? '').toLowerCase()] || 'snack';
+}
 
 
 export async function analyzeFoodText(
@@ -52,7 +109,7 @@ If the user explicitly says "на завтрак/breakfast", "на обед/lunc
 The user may describe multiple meals in one message (e.g. "на завтрак съел X, на обед съел Y") — assign the correct mealType to each item based on context.`;
     }
 
-    const response = await openai.chat.completions.create({
+    const response = await callAI("analyzeFoodText", {
       model: "openai/gpt-4o-mini",
       max_tokens: 2048,
       messages: [
@@ -94,15 +151,8 @@ Example output: {"items": [{...}, {...}]}`
 
     const parsed = JSON.parse(response.choices[0].message.content || "{}");
     if (Array.isArray(parsed.items) && parsed.items.length > 0) {
-      // Normalize mealType — AI sometimes returns Russian names
-      const mealTypeMap: Record<string, string> = {
-        'завтрак': 'breakfast', 'breakfast': 'breakfast',
-        'обед': 'lunch', 'lunch': 'lunch',
-        'ужин': 'dinner', 'dinner': 'dinner',
-        'перекус': 'snack', 'snack': 'snack',
-      };
       for (const item of parsed.items) {
-        item.mealType = mealTypeMap[(item.mealType || '').toLowerCase()] || 'snack';
+        item.mealType = normalizeMealType(item.mealType);
       }
       return parsed.items as FoodItem[];
     }
@@ -117,7 +167,7 @@ export type MessageIntent = "food" | "workout" | "both" | "other";
 
 export async function classifyIntent(text: string): Promise<MessageIntent> {
   try {
-    const response = await openai.chat.completions.create({
+    const response = await callAI("classifyIntent", {
       model: "openai/gpt-4o-mini",
       max_tokens: 50,
       messages: [
@@ -140,10 +190,12 @@ Return ONLY a JSON object: {"intent": "food"|"workout"|"both"|"other"}`
         { role: "user", content: text }
       ],
       response_format: { type: "json_object" }
-    });
+    }, { timeout: 20_000 });
     const result = JSON.parse(response.choices[0].message.content || '{"intent":"other"}');
     return (result.intent as MessageIntent) || "other";
-  } catch {
+  } catch (error) {
+    const e = error as any;
+    console.error(`[classifyIntent] failed, defaulting to "food": status=${e?.status ?? "n/a"} code=${e?.code ?? "n/a"} — ${e?.message ?? String(error)}`);
     return "food"; // default to food on error
   }
 }
@@ -157,7 +209,7 @@ export interface WorkoutResult {
 
 export async function analyzeWorkout(text: string, userWeightKg: number): Promise<WorkoutResult | null> {
   try {
-    const response = await openai.chat.completions.create({
+    const response = await callAI("analyzeWorkout", {
       model: "openai/gpt-4o-mini",
       max_tokens: 256,
       messages: [
@@ -238,7 +290,7 @@ export async function generateEveningReport(
       ? `Тренировки: ${workouts.map(w => `${w.description} (${w.caloriesBurned} ккал сожжено)`).join(', ')}`
       : '';
 
-    const response = await openai.chat.completions.create({
+    const response = await callAI("generateEveningReport", {
       model: "openai/gpt-4o-mini",
       temperature: 0.3,
       max_tokens: 1024,
@@ -303,7 +355,7 @@ export async function generatePeriodAnalysis(params: {
       ? `Тренировки за период: ${workoutTypes.join(', ')}, сожжено ${totalCaloriesBurned} ккал`
       : 'тренировок не было';
 
-    const response = await openai.chat.completions.create({
+    const response = await callAI("generatePeriodAnalysis", {
       model: "openai/gpt-4o-mini",
       temperature: 0.3,
       max_tokens: 1024,
@@ -338,7 +390,7 @@ export async function generatePeriodAnalysis(params: {
 
 async function transcribeChunk(audioBuffer: Buffer): Promise<string | null> {
   const audioBase64 = audioBuffer.toString("base64");
-  const response = await openai.chat.completions.create({
+  const response = await callAI("transcribeChunk", {
     model: "google/gemini-3-flash-preview",
     max_tokens: 4096,
     messages: [
@@ -428,7 +480,7 @@ export async function transcribeVoice(audioBuffer: Buffer, duration?: number): P
 
 export async function detectBarcode(imageBase64: string): Promise<string | null> {
   try {
-    const response = await openai.chat.completions.create({
+    const response = await callAI("detectBarcode", {
       model: "openai/gpt-4o-mini",
       max_tokens: 30,
       messages: [{
@@ -441,7 +493,7 @@ export async function detectBarcode(imageBase64: string): Promise<string | null>
           { type: "image_url", image_url: { url: `data:image/jpeg;base64,${imageBase64}` } }
         ]
       }]
-    });
+    }, { timeout: 20_000 });
     const result = response.choices[0].message.content?.trim() ?? "";
     if (!result || result.toLowerCase() === "none") return null;
     const digits = result.replace(/\D/g, "");
@@ -489,7 +541,7 @@ export async function askCoach(
       ? `Осталось на сегодня: ${Math.max(0, profile.caloriesGoal - todayStats.calories)} ккал, Б${Math.max(0, (profile.proteinGoal ?? 0) - todayStats.protein)}г, Ж${Math.max(0, (profile.fatGoal ?? 0) - todayStats.fat)}г, У${Math.max(0, (profile.carbsGoal ?? 0) - todayStats.carbs)}г`
       : '';
 
-    const response = await openai.chat.completions.create({
+    const response = await callAI("askCoach", {
       model: "openai/gpt-4o-mini",
       max_tokens: 1024,
       messages: [
@@ -532,7 +584,7 @@ export async function generateWeightAnalysis(
 
     const goalMap: Record<string, string> = { lose: 'похудение', maintain: 'поддержание веса', gain: 'набор массы' };
 
-    const response = await openai.chat.completions.create({
+    const response = await callAI("generateWeightAnalysis", {
       model: "openai/gpt-4o-mini",
       temperature: 0.3,
       max_tokens: 1024,
@@ -591,7 +643,7 @@ export async function analyzeFoodImage(
       timeHint = `\nCurrent time: ${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}. Default mealType: "${defaultMeal}".`;
     }
 
-    const response = await openai.chat.completions.create({
+    const response = await callAI("analyzeFoodImage", {
       model: "openai/gpt-4o",
       temperature: 0,
       max_tokens: 1024,
@@ -644,10 +696,14 @@ Example: {"items": [{...}, {...}]}`
     const parsed = JSON.parse(response.choices[0].message.content || "{}");
     // Support both {items: [...]} and single-object legacy format
     if (Array.isArray(parsed.items) && parsed.items.length > 0) {
+      for (const item of parsed.items) {
+        item.mealType = normalizeMealType(item.mealType);
+      }
       return parsed.items as FoodItem[];
     }
     // Legacy single object
     if (parsed.foodName) {
+      parsed.mealType = normalizeMealType(parsed.mealType);
       return [parsed as FoodItem];
     }
     return null;
@@ -659,7 +715,7 @@ Example: {"items": [{...}, {...}]}`
 
 export async function groupFoodNames(foodNames: string[]): Promise<Record<string, string>> {
   try {
-    const response = await openai.chat.completions.create({
+    const response = await callAI("groupFoodNames", {
       model: "openai/gpt-4o-mini",
       max_tokens: 2048,
       messages: [
