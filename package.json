@@ -8,7 +8,7 @@
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
-    "test": "tsx --test tests/unit.test.ts tests/apple-health.test.ts",
+    "test": "tsx --test tests/unit.test.ts tests/apple-health.test.ts tests/telegram-auth.test.ts",
     "test:db": "tsx --test tests/apple-health.db.test.ts",
     "db:push": "drizzle-kit push"
   },

@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupBot, processHealthData } from "./bot";
+import { createAppApiRouter } from "./app-api";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -53,6 +54,9 @@ export async function registerRoutes(
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", timestamp: Date.now() });
   });
+
+  // Telegram Mini App REST API (auth + rate-limit are applied inside the router).
+  app.use("/api/app", createAppApiRouter());
 
   return httpServer;
 }
