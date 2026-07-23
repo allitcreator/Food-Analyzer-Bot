@@ -1,6 +1,6 @@
 import { users, foodLogs, waterLogs, weightLogs, workoutLogs, type User, type InsertUser, type FoodLog, type InsertFoodLog, type WeightLog, type WorkoutLog, type InsertWorkoutLog } from "@shared/schema";
 import { db } from "./db";
-import { eq, sql, desc, gte, lt } from "drizzle-orm";
+import { eq, and, sql, desc, gte, lt } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: number): Promise<User | undefined>;
@@ -15,9 +15,9 @@ export interface IStorage {
   getFoodLogs(userId: number): Promise<FoodLog[]>;
   getFoodLogsInRange(userId: number, startDate: Date, endDate: Date): Promise<FoodLog[]>;
   deleteFoodLogsInRange(userId: number, startDate: Date, endDate: Date): Promise<void>;
-  deleteFoodLog(id: number): Promise<void>;
-  updateFoodLog(id: number, data: Partial<InsertFoodLog>): Promise<FoodLog>;
-  getFoodLogById(id: number): Promise<FoodLog | undefined>;
+  deleteFoodLog(id: number, userId: number): Promise<void>;
+  updateFoodLog(id: number, userId: number, data: Partial<InsertFoodLog>): Promise<FoodLog>;
+  getFoodLogById(id: number, userId: number): Promise<FoodLog | undefined>;
 
   getDailyStats(userId: number, date: Date): Promise<{ calories: number; protein: number; fat: number; carbs: number; fiber: number; sugar: number; sodium: number; saturatedFat: number }>;
   getWeeklyStats(userId: number, tz?: string): Promise<{ date: string; calories: number }[]>;
@@ -92,10 +92,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteUser(id: number): Promise<void> {
-    await db.delete(foodLogs).where(eq(foodLogs.userId, id));
-    await db.delete(weightLogs).where(eq(weightLogs.userId, id));
-    await db.delete(workoutLogs).where(eq(workoutLogs.userId, id));
-    await db.delete(users).where(eq(users.id, id));
+    await db.transaction(async (tx) => {
+      await tx.delete(foodLogs).where(eq(foodLogs.userId, id));
+      await tx.delete(waterLogs).where(eq(waterLogs.userId, id));
+      await tx.delete(weightLogs).where(eq(weightLogs.userId, id));
+      await tx.delete(workoutLogs).where(eq(workoutLogs.userId, id));
+      await tx.delete(users).where(eq(users.id, id));
+    });
   }
 
   async getAllUsers(): Promise<User[]> {
@@ -212,17 +215,17 @@ export class DatabaseStorage implements IStorage {
     );
   }
 
-  async deleteFoodLog(id: number): Promise<void> {
-    await db.delete(foodLogs).where(eq(foodLogs.id, id));
+  async deleteFoodLog(id: number, userId: number): Promise<void> {
+    await db.delete(foodLogs).where(and(eq(foodLogs.id, id), eq(foodLogs.userId, userId)));
   }
 
-  async updateFoodLog(id: number, data: Partial<InsertFoodLog>): Promise<FoodLog> {
-    const [updated] = await db.update(foodLogs).set(data).where(eq(foodLogs.id, id)).returning();
+  async updateFoodLog(id: number, userId: number, data: Partial<InsertFoodLog>): Promise<FoodLog> {
+    const [updated] = await db.update(foodLogs).set(data).where(and(eq(foodLogs.id, id), eq(foodLogs.userId, userId))).returning();
     return updated;
   }
 
-  async getFoodLogById(id: number): Promise<FoodLog | undefined> {
-    const [log] = await db.select().from(foodLogs).where(eq(foodLogs.id, id));
+  async getFoodLogById(id: number, userId: number): Promise<FoodLog | undefined> {
+    const [log] = await db.select().from(foodLogs).where(and(eq(foodLogs.id, id), eq(foodLogs.userId, userId)));
     return log;
   }
 

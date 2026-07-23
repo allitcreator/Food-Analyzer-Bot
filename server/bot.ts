@@ -401,7 +401,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     return user;
   };
 
-  bot.onText(/\/help/, async (msg) => {
+  bot.onText(/^\/help(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const helpText = [
       "📋 *Команды бота*\n",
@@ -542,7 +542,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     });
   });
 
-  bot.onText(/\/ask(?:\s+(.+))?/, async (msg, match) => {
+  bot.onText(/^\/ask(@\w+)?(?:\s+([\s\S]+))?$/, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -550,7 +550,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
 
-    const question = match?.[1]?.trim();
+    const question = match?.[2]?.trim();
     if (!question) {
       bot.sendMessage(chatId,
         "🏋️ Задайте вопрос тренеру:\n\n" +
@@ -706,7 +706,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     });
   }
 
-  bot.onText(/\/start/, async (msg) => {
+  bot.onText(/^\/start(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     const username = msg.from?.username;
@@ -771,7 +771,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
   });
 
   // Admin Commands
-  bot.onText(/\/users/, async (msg) => {
+  bot.onText(/^\/users(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -826,7 +826,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     }
   });
 
-  bot.onText(/\/stats/, async (msg) => {
+  bot.onText(/^\/stats(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -918,7 +918,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     bot.sendMessage(chatId, text);
   });
 
-  bot.onText(/\/week/, async (msg) => {
+  bot.onText(/^\/week(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1006,7 +1006,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     if (analysis) bot.sendMessage(chatId, `💡 Анализ:\n\n${analysis}`);
   });
 
-  bot.onText(/\/goal/, async (msg) => {
+  bot.onText(/^\/goal(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1030,14 +1030,14 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
   });
 
   // ─── /weight ──────────────────────────────────────────────────────────────
-  bot.onText(/\/weight(?:\s+(.+))?/, async (msg, match) => {
+  bot.onText(/^\/weight(@\w+)?(?:\s+(.+))?$/, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
 
-    const arg = match?.[1]?.trim();
+    const arg = match?.[2]?.trim();
 
     if (arg) {
       const val = parseFloat(arg.replace(',', '.'));
@@ -1084,7 +1084,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
   });
 
   // ─── /weightreminder ──────────────────────────────────────────────────────
-  bot.onText(/\/weightreminder/, async (msg) => {
+  bot.onText(/^\/weightreminder(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1127,7 +1127,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
   }
 
   // ─── /workout ─────────────────────────────────────────────────────────────
-  bot.onText(/\/workout/, async (msg) => {
+  bot.onText(/^\/workout(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1226,7 +1226,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
   }
 
   // ─── /settings ────────────────────────────────────────────────────────────
-  bot.onText(/\/settings/, async (msg) => {
+  bot.onText(/^\/settings(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1240,7 +1240,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
   });
 
   // ─── /editprofile ─────────────────────────────────────────────────────────
-  bot.onText(/\/editprofile/, async (msg) => {
+  bot.onText(/^\/editprofile(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1266,7 +1266,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
   });
 
   // ─── /month ───────────────────────────────────────────────────────────────
-  bot.onText(/\/month/, async (msg) => {
+  bot.onText(/^\/month(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1363,7 +1363,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
   });
 
   // ─── /pdf ─────────────────────────────────────────────────────────────────
-  bot.onText(/\/pdf/, async (msg) => {
+  bot.onText(/^\/pdf(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1554,7 +1554,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     bot.sendMessage(user.telegramId!, text.trimEnd());
   }
 
-  bot.onText(/\/report$/, async (msg) => {
+  bot.onText(/^\/report(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1566,7 +1566,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     await sendEveningReport(user, true);
   });
 
-  bot.onText(/\/report_time/, async (msg) => {
+  bot.onText(/^\/report_time(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1580,7 +1580,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
 
   const MEAL_LABELS: Record<string, string> = { breakfast: 'Завтрак', lunch: 'Обед', dinner: 'Ужин' };
 
-  bot.onText(/\/reminders/, async (msg) => {
+  bot.onText(/^\/reminders(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1698,7 +1698,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
   setTimeout(() => checkScheduledNotifications(), 5000);
   setInterval(checkScheduledNotifications, 60000);
 
-  bot.onText(/\/profile/, async (msg) => {
+  bot.onText(/^\/profile(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1760,7 +1760,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     await bot.sendMessage(chatId, formatTotalsLine(totCal, totProt, totFat, totCarbs, user));
   }
 
-  bot.onText(/\/history(?:\s+(\d{2}\.\d{2}\.\d{4}))?/, async (msg, match) => {
+  bot.onText(/^\/history(@\w+)?(?:\s+(\d{2}\.\d{2}\.\d{4}))?$/, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1768,7 +1768,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
 
-    const dateArg = match?.[1];
+    const dateArg = match?.[2];
     let targetDate: Date;
     let headerText: string;
 
@@ -1793,7 +1793,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     await sendHistoryMessages(chatId, logs, user, headerText);
   });
 
-  bot.onText(/\/export$/, async (msg) => {
+  bot.onText(/^\/export(@\w+)?$/, async (msg) => {
     const today = getMoscowNow();
     const dd = String(today.getDate()).padStart(2, '0');
     const mm = String(today.getMonth() + 1).padStart(2, '0');
@@ -1814,7 +1814,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     );
   });
 
-  bot.onText(/\/export (\d{2}\.\d{2}\.\d{4})(?: - (\d{2}\.\d{2}\.\d{4}))?/, async (msg, match) => {
+  bot.onText(/^\/export(@\w+)?\s+(\d{2}\.\d{2}\.\d{4})(?: - (\d{2}\.\d{2}\.\d{4}))?$/, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId || !match) return;
@@ -1822,8 +1822,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
 
-    const startStr = match[1];
-    const endStr = match[2] || startStr;
+    const startStr = match[2];
+    const endStr = match[3] || startStr;
 
     const parseDate = (s: string) => {
       const [d, m, y] = s.split('.').map(Number);
@@ -1985,7 +1985,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     bot.sendDocument(chatId, Buffer.from(buffer as Buffer), {}, { filename, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   });
 
-  bot.onText(/\/clear$/, async (msg) => {
+  bot.onText(/^\/clear(@\w+)?$/, async (msg) => {
     const today = getMoscowNow();
     const dd = String(today.getDate()).padStart(2, '0');
     const mm = String(today.getMonth() + 1).padStart(2, '0');
@@ -2000,7 +2000,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     );
   });
 
-  bot.onText(/\/clear (\d{2}\.\d{2}\.\d{4})(?: - (\d{2}\.\d{2}\.\d{4}))?/, async (msg, match) => {
+  bot.onText(/^\/clear(@\w+)?\s+(\d{2}\.\d{2}\.\d{4})(?: - (\d{2}\.\d{2}\.\d{4}))?$/, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId || !match) return;
@@ -2008,8 +2008,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
 
-    const startStr = match[1];
-    const endStr = match[2] || startStr;
+    const startStr = match[2];
+    const endStr = match[3] || startStr;
 
     const parseDate = (s: string) => {
       const [d, m, y] = s.split('.').map(Number);
@@ -2020,8 +2020,34 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     const endDate = parseDate(endStr);
     endDate.setHours(23, 59, 59, 999);
 
-    await storage.deleteFoodLogsInRange(user.id, startDate, endDate);
-    bot.sendMessage(chatId, `История за период ${startStr}${startStr !== endStr ? ` - ${endStr}` : ''} успешно удалена.`);
+    const periodLabel = `${startStr}${startStr !== endStr ? ` - ${endStr}` : ''}`;
+    const logs = await storage.getFoodLogsInRange(user.id, startDate, endDate);
+
+    if (logs.length === 0) {
+      bot.sendMessage(chatId, `За период ${periodLabel} записей нет.`);
+      return;
+    }
+
+    // ISO-даты в callback_data (компактно, ≤64 байт): clr_yes_<start>_<end>
+    const iso = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+    const n = logs.length;
+    const recWord = n % 10 === 1 && n % 100 !== 11 ? 'запись'
+      : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? 'записи'
+      : 'записей';
+
+    bot.sendMessage(chatId,
+      `🗑 Будет удалено ${n} ${recWord} за ${periodLabel}. Удалить?`,
+      {
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '🗑 Да, удалить', callback_data: `clr_yes_${iso(startDate)}_${iso(endDate)}` },
+            { text: 'Отмена', callback_data: 'clr_no' },
+          ]]
+        }
+      }
+    );
   });
 
   bot.on("callback_query", async (query) => {
@@ -2031,6 +2057,17 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
 
     const user = await storage.getUserByTelegramId(telegramId);
     if (!user) return;
+
+    // Проверка доступа (как в isUserAllowed): глобальный и обычные админы всегда approved
+    const isGlobalAdmin = ADMIN_TELEGRAM_ID && String(telegramId).trim() === String(ADMIN_TELEGRAM_ID).trim();
+    if (user.isBlocked && !isGlobalAdmin) {
+      bot.answerCallbackQuery(query.id, { text: "🚫 Ваш доступ к боту ограничен администратором." }).catch(() => {});
+      return;
+    }
+    if (!user.isApproved && !user.isAdmin && !isGlobalAdmin) {
+      bot.answerCallbackQuery(query.id, { text: "Ваша заявка на рассмотрении у администратора." }).catch(() => {});
+      return;
+    }
 
     if (query.data === "confirm_yes") {
       const pending = (bot as any).pendingLogs?.[telegramId];
@@ -2238,9 +2275,30 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         message_id: query.message?.message_id,
         reply_markup: buildMultiSummaryKeyboard(items)
       });
+    } else if (query.data.startsWith("clr_yes_")) {
+      // clr_yes_<startISO>_<endISO> — подтверждение удаления периода, только владелец
+      const parts = query.data.split("_"); // ['clr','yes','<start>','<end>']
+      const startISO = parts[2];
+      const endISO = parts[3];
+      const startDate = new Date(`${startISO}T00:00:00`);
+      const endDate = new Date(`${endISO}T23:59:59.999`);
+      await storage.deleteFoodLogsInRange(user.id, startDate, endDate);
+      bot.editMessageText("🗑 Записи за период удалены.", {
+        chat_id: chatId,
+        message_id: query.message?.message_id
+      });
+      bot.answerCallbackQuery(query.id).catch(() => {});
+
+    } else if (query.data === "clr_no") {
+      bot.editMessageText("Отменено.", {
+        chat_id: chatId,
+        message_id: query.message?.message_id
+      });
+      bot.answerCallbackQuery(query.id).catch(() => {});
+
     } else if (query.data.startsWith("delete_log_")) {
       const logId = parseInt(query.data.split("_")[2]);
-      await storage.deleteFoodLog(logId);
+      await storage.deleteFoodLog(logId, user.id);
       bot.editMessageText("🗑 Запись удалена", {
         chat_id: chatId,
         message_id: query.message?.message_id
@@ -2249,14 +2307,14 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     // --- History callbacks ---
     } else if (query.data.startsWith("hist_del_")) {
       const logId = parseInt(query.data.replace("hist_del_", ""));
-      await storage.deleteFoodLog(logId);
+      await storage.deleteFoodLog(logId, user.id);
       bot.answerCallbackQuery(query.id, { text: '🗑 Удалено' });
       // Delete the message with this food item
       bot.deleteMessage(chatId, query.message!.message_id).catch(() => {});
 
     } else if (query.data.startsWith("hist_edit_")) {
       const logId = parseInt(query.data.replace("hist_edit_", ""));
-      const log = await storage.getFoodLogById(logId);
+      const log = await storage.getFoodLogById(logId, user.id);
       if (!log) {
         bot.answerCallbackQuery(query.id, { text: 'Запись не найдена' });
         return;
@@ -2667,6 +2725,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         bot.sendMessage(targetUser.telegramId!, "Ваша заявка отклонена.");
       }
     } else if (query.data.startsWith("admin_delete_")) {
+      if (!user.isAdmin) return;
       const targetUserId = parseInt(query.data.split("_")[2]);
       const targetUser = await storage.getUser(targetUserId);
       if (targetUser) {
@@ -3074,7 +3133,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
           return;
         }
 
-        const log = await storage.getFoodLogById(logId);
+        const log = await storage.getFoodLogById(logId, user.id);
         if (!log) {
           delete userStates[telegramId];
           bot.sendMessage(chatId, "Запись не найдена.");
@@ -3097,7 +3156,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
           updates[field] = field === 'weight' ? Math.round(val) : Math.round(val * 10) / 10;
         }
 
-        await storage.updateFoodLog(logId, updates);
+        await storage.updateFoodLog(logId, user.id, updates);
         delete userStates[telegramId];
 
         // Clean up prompt messages
@@ -3105,7 +3164,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         bot.deleteMessage(chatId, msg.message_id).catch(() => {});
 
         // Refresh this specific history item message
-        const updatedLog = await storage.getFoodLogById(logId);
+        const updatedLog = await storage.getFoodLogById(logId, user.id);
         if (updatedLog) {
           // Use a simple index placeholder — exact numbering not critical after edits
           const itemText = `${updatedLog.foodName} (${updatedLog.weight}${getUnit(updatedLog.foodName)}) — ${updatedLog.calories} ккал | Б${updatedLog.protein} Ж${updatedLog.fat} У${updatedLog.carbs}`;
