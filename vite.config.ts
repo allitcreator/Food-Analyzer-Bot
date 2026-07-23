@@ -4,6 +4,8 @@ import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
 export default defineConfig({
+  // Mini App is served under https://<host>/app/ in production.
+  base: "/app/",
   plugins: [
     react(),
     runtimeErrorOverlay(),

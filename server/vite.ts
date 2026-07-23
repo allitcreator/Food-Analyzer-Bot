@@ -31,6 +31,9 @@ export async function setupVite(server: Server, app: Express) {
 
   app.use(vite.middlewares);
 
+  // Root → Mini App (matches Vite `base: "/app/"`).
+  app.get("/", (_req, res) => res.redirect("/app/"));
+
   app.use("/{*path}", async (req, res, next) => {
     const url = req.originalUrl;
 
