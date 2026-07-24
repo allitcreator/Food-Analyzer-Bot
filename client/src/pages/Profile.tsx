@@ -255,33 +255,37 @@ function SettingsSection({
         <CardContent className="divide-y divide-card-border pt-1">
           <Toggle
             label="Микронутриенты"
-            hint="Клетчатка, сахар, натрий и т.д."
+            hint="Показывать клетчатку, сахар, натрий и т.п. в разборе блюда, а не только КБЖУ."
             checked={!!user.showMicronutrients}
             onChange={(v) => patch({ showMicronutrients: v })}
           />
           <Toggle
             label="AI-анализ недели"
+            hint="ИИ пишет вывод по неделе: тренды и что подтянуть."
             checked={!!user.aiWeekAnalysis}
             onChange={(v) => patch({ aiWeekAnalysis: v })}
           />
           <Toggle
             label="AI-анализ месяца"
+            hint="ИИ разбирает месяц и даёт рекомендации."
             checked={!!user.aiMonthAnalysis}
             onChange={(v) => patch({ aiMonthAnalysis: v })}
           />
           <Toggle
             label="AI в вечернем отчёте"
+            hint="Добавляет к вечернему отчёту короткий совет от ИИ по итогам дня."
             checked={!!user.aiEveningReport}
             onChange={(v) => patch({ aiEveningReport: v })}
           />
           <Toggle
             label="Умная группировка в Excel"
+            hint="При выгрузке в Excel ИИ объединяет одинаковые блюда в строки — файл чище."
             checked={!!user.smartFoodGrouping}
             onChange={(v) => patch({ smartFoodGrouping: v })}
           />
           <Toggle
             label="Распознавание штрихкодов"
-            hint="Искать штрихкод на фото"
+            hint="Искать штрихкод на фото и подтягивать продукт из базы."
             checked={!!user.barcodeScanEnabled}
             onChange={(v) => patch({ barcodeScanEnabled: v })}
           />
@@ -291,12 +295,12 @@ function SettingsSection({
       <SectionTitle>Время и напоминания</SectionTitle>
       <Card>
         <CardContent className="divide-y divide-card-border pt-1">
-          <TimeRow label="Вечерний отчёт" value={user.reportTime} onChange={(v) => patch({ reportTime: v })} />
-          <TimeRow label="Напоминание: завтрак" value={user.breakfastReminder} onChange={(v) => patch({ breakfastReminder: v })} />
-          <TimeRow label="Напоминание: обед" value={user.lunchReminder} onChange={(v) => patch({ lunchReminder: v })} />
-          <TimeRow label="Напоминание: ужин" value={user.dinnerReminder} onChange={(v) => patch({ dinnerReminder: v })} />
-          <TimeRow label="«Нет записей»" value={user.noLogReminderTime} onChange={(v) => patch({ noLogReminderTime: v })} />
-          <TimeRow label="Взвешивание" value={user.weightReminderTime} onChange={(v) => patch({ weightReminderTime: v })} />
+          <TimeRow label="Вечерний отчёт" hint="Во сколько бот сам присылает отчёт за день." value={user.reportTime} onChange={(v) => patch({ reportTime: v })} />
+          <TimeRow label="Напоминание: завтрак" hint="Напоминание записать завтрак." value={user.breakfastReminder} onChange={(v) => patch({ breakfastReminder: v })} />
+          <TimeRow label="Напоминание: обед" hint="Напоминание записать обед." value={user.lunchReminder} onChange={(v) => patch({ lunchReminder: v })} />
+          <TimeRow label="Напоминание: ужин" hint="Напоминание записать ужин." value={user.dinnerReminder} onChange={(v) => patch({ dinnerReminder: v })} />
+          <TimeRow label="«Нет записей»" hint="Напоминание, если за день ничего не залогировано." value={user.noLogReminderTime} onChange={(v) => patch({ noLogReminderTime: v })} />
+          <TimeRow label="Взвешивание" hint="Во сколько напоминать взвеситься (дни — ниже)." value={user.weightReminderTime} onChange={(v) => patch({ weightReminderTime: v })} />
           <WeekdayRow
             value={user.weightReminderDays ?? ""}
             onChange={(v) => patch({ weightReminderDays: v })}
@@ -309,18 +313,23 @@ function SettingsSection({
         <CardContent className="divide-y divide-card-border pt-1">
           <TimeRow
             label="Завтрак до"
+            hint="Записи до этого времени бот относит к завтраку."
             value={user.mealBreakfastEnd ?? "12:30"}
             allowOff={false}
             onChange={(v) => patch({ mealBreakfastEnd: v })}
           />
           <TimeRow
             label="Обед до"
+            hint="До этого времени — обед, позже — ужин."
             value={user.mealLunchEnd ?? "16:30"}
             allowOff={false}
             onChange={(v) => patch({ mealLunchEnd: v })}
           />
-          <div className="flex items-center justify-between py-3">
-            <span className="text-[15px]">Часовой пояс</span>
+          <div className="flex items-center justify-between gap-3 py-3">
+            <div className="min-w-0 pr-2">
+              <div className="text-[15px]">Часовой пояс</div>
+              <div className="text-xs text-muted-foreground">По нему считаются «сегодня», время отчётов и напоминаний.</div>
+            </div>
             <Select
               className="h-9 w-44"
               value={user.timezone ?? "Europe/Moscow"}
@@ -408,11 +417,13 @@ function Toggle({
 /** A time setting that can be turned off ("off") or set to an "HH:MM" value. */
 function TimeRow({
   label,
+  hint,
   value,
   onChange,
   allowOff = true,
 }: {
   label: string;
+  hint?: string;
   value: string | null;
   onChange: (v: string) => void;
   allowOff?: boolean;
@@ -423,8 +434,11 @@ function TimeRow({
 
   return (
     <div className="flex items-center justify-between gap-3 py-3">
-      <span className="text-[15px]">{label}</span>
-      <div className="flex items-center gap-2">
+      <div className="min-w-0 pr-2">
+        <div className="text-[15px]">{label}</div>
+        {hint && <div className="text-xs text-muted-foreground">{hint}</div>}
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
         <input
           type="time"
           value={timeValue || "09:00"}
@@ -454,7 +468,8 @@ function WeekdayRow({ value, onChange }: { value: string; onChange: (v: string) 
   };
   return (
     <div className="py-3">
-      <div className="mb-2 text-[15px]">Дни взвешивания</div>
+      <div className="text-[15px]">Дни взвешивания</div>
+      <div className="mb-2 text-xs text-muted-foreground">По каким дням недели напоминать взвеситься.</div>
       <div className="flex gap-1.5">
         {WEEKDAYS.map((w) => {
           const active = selected.includes(w.v);
