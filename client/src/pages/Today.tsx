@@ -122,12 +122,12 @@ function EnergyCard({ eb }: { eb: NonNullable<DayResponse["energyBalance"]> }) {
         </div>
         <div className="grid grid-cols-3 gap-2 text-center">
           <Stat label="BMR" value={round(eb.bmr)} />
-          <Stat label={eb.hasTracker ? "TDEE·трекер" : "TDEE"} value={round(eb.tdee)} />
+          <Stat label="TDEE" value={round(eb.tdee)} />
           <Stat label="Съедено" value={round(eb.eaten)} />
         </div>
         {eb.burnedFromActivity > 0 && (
           <p className="mt-3 text-center text-xs text-muted-foreground">
-            Активные калории из трекера: {round(eb.burnedFromActivity)} ккал
+            Сожжено на тренировках: {round(eb.burnedFromActivity)} ккал
           </p>
         )}
       </CardContent>

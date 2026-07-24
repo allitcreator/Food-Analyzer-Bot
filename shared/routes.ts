@@ -166,7 +166,6 @@ export const energyBalanceSchema = z
     burnedFromActivity: z.number(),
     balance: z.number(),
     isDeficit: z.boolean(),
-    hasTracker: z.boolean(),
   })
   .nullable();
 export type EnergyBalanceResponse = z.infer<typeof energyBalanceSchema>;

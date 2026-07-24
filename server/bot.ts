@@ -1022,6 +1022,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         [{ text: '⚖️ Напоминание о весе →',       callback_data: 'settings_weight_reminder' }],
         [{ text: `🌍 Часовой пояс: ${u.timezone ?? 'Europe/Moscow'}`, callback_data: 'settings_timezone' }],
         [{ text: '🕐 Интервалы приёмов пищи →',  callback_data: 'settings_meal_intervals' }],
+        [{ text: 'ℹ️ Что это значит',            callback_data: 'settings_help' }],
       ]
     };
   }
@@ -1052,9 +1053,26 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       sedentary: 'Сидячий', light: 'Лёгкая', moderate: 'Умеренная', active: 'Активный', very_active: 'Очень активный'
     };
     const GOAL_LABEL: Record<string, string> = { lose: 'Похудение', maintain: 'Поддержание', gain: 'Набор' };
+    const GOAL_HINT: Record<string, string> = {
+      lose:     'дефицит калорий (норма ниже расхода)',
+      maintain: 'поддержание веса (норма ≈ расходу)',
+      gain:     'профицит калорий (норма выше расхода)',
+    };
+
+    const bmr = calculateBMR(user);
+    const tdee = calculateTDEE(user);
+
+    const explain = [
+      ``,
+      `ℹ️ Как считаются нормы:`,
+      bmr  ? `• BMR ≈ ${bmr} ккал — базовый обмен, сколько тело тратит в полном покое.` : `• BMR — базовый обмен, сколько тело тратит в полном покое (заполните профиль).`,
+      tdee ? `• TDEE ≈ ${tdee} ккал — полный расход за день с учётом активности.` : `• TDEE — полный расход за день с учётом активности.`,
+      `• Дневная норма = TDEE, скорректированный под цель.`,
+      user.goal ? `• Цель «${GOAL_LABEL[user.goal]}» — ${GOAL_HINT[user.goal]}.` : null,
+    ].filter(Boolean).join('\n');
 
     bot.sendMessage(chatId,
-      `Редактирование профиля:\n\nВозраст: ${user.age ?? '—'}\nВес: ${user.weight ?? '—'} кг\nРост: ${user.height ?? '—'} см\nАктивность: ${user.activityLevel ? ACT_LABEL[user.activityLevel] : '—'}\nЦель: ${user.goal ? GOAL_LABEL[user.goal] : '—'}\nНорма калорий: ${user.caloriesGoal ?? '—'}\n\nЧто изменить?`, {
+      `Редактирование профиля:\n\nВозраст: ${user.age ?? '—'}\nВес: ${user.weight ?? '—'} кг\nРост: ${user.height ?? '—'} см\nАктивность: ${user.activityLevel ? ACT_LABEL[user.activityLevel] : '—'}\nЦель: ${user.goal ? GOAL_LABEL[user.goal] : '—'}\nНорма калорий: ${user.caloriesGoal ?? '—'}\n${explain}\n\nЧто изменить?`, {
       reply_markup: {
         inline_keyboard: [
           [{ text: `🎂 Возраст (${user.age ?? '—'})`, callback_data: 'ep_age' }, { text: `⚖️ Вес (${user.weight ?? '—'} кг)`, callback_data: 'ep_weight' }],
@@ -2675,6 +2693,32 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         reply_markup: buildSettingsKeyboard(updated)
       }).catch(() => {});
       bot.answerCallbackQuery(query.id, { text: `${label}: ${newVal ? '✅ вкл' : '❌ выкл'}` });
+      return;
+    }
+
+    // ─── Settings help (расшифровка пунктов) ──────────────────────────────
+    if (query.data === 'settings_help') {
+      bot.answerCallbackQuery(query.id);
+      const helpText = [
+        `ℹ️ *Что означают настройки*`,
+        ``,
+        `📊 *Аналитика и ИИ*`,
+        `🔬 *Микронутриенты* — показывать ли клетчатку, сахар, натрий и т.п. в разборе блюда, а не только КБЖУ.`,
+        `🤖 *AI-анализ /week* — при команде /week ИИ пишет вывод по неделе: тренды, что подтянуть.`,
+        `🤖 *AI-анализ /month* — то же для /month: разбор месяца с рекомендациями.`,
+        `📋 *AI в вечернем отчёте* — добавляет к вечернему отчёту короткий совет от ИИ по итогам дня.`,
+        `🧠 *Группировка в Excel* — при выгрузке /export ИИ объединяет одинаковые блюда в строки, файл чище.`,
+        `📦 *Распознавание штрихкодов* — искать штрихкод на фото и подтягивать продукт из базы.`,
+        ``,
+        `⏰ *Время и напоминания*`,
+        `⏰ *Авторепорт* — во сколько бот сам присылает вечерний отчёт за день (или «выкл»).`,
+        `🍽 *Напоминания о еде* — пинги записать завтрак / обед / ужин, плюс «📝 нет записей» — напоминание, если за день ничего не залогировано.`,
+        `⚖️ *Напоминание о весе* — во сколько и по каким дням недели напоминать взвеситься.`,
+        ``,
+        `🌍 *Часовой пояс* — по нему считаются «сегодня», время отчётов и напоминаний.`,
+        `🕐 *Интервалы приёмов пищи* — границы, по которым бот сам относит запись к завтраку/обеду/ужину: до «Завтрак до» — завтрак, до «Обед до» — обед, позже — ужин.`,
+      ].join('\n');
+      bot.sendMessage(chatId, helpText, { parse_mode: 'Markdown' });
       return;
     }
 

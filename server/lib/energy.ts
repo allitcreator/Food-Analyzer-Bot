@@ -31,17 +31,11 @@ export function calculateBMR(user: BmrProfile): number | null {
 }
 
 /**
- * Total daily energy expenditure.
- * With logged activity (active calories > 0): BMR + active calories (no multiplier,
- * since logged active calories already represent everything above BMR).
- * Otherwise: BMR × activity-level multiplier.
+ * Total daily energy expenditure: BMR × activity-level multiplier.
  */
-export function calculateTDEE(user: BmrProfile, activityCalories: number | null): number | null {
+export function calculateTDEE(user: BmrProfile): number | null {
   const bmr = calculateBMR(user);
   if (!bmr) return null;
-  if (activityCalories !== null && activityCalories > 0) {
-    return Math.round(bmr + activityCalories);
-  }
   const multiplier = ACTIVITY_MULTIPLIERS[user.activityLevel ?? "sedentary"] ?? 1.2;
   return Math.round(bmr * multiplier);
 }
@@ -50,15 +44,15 @@ export type EnergyBalance = {
   bmr: number;
   tdee: number;
   eaten: number;
-  burnedFromActivity: number;
+  burnedFromActivity: number; // manual workouts, shown as a separate line (doesn't affect balance)
   balance: number; // eaten - tdee (negative = deficit)
   isDeficit: boolean;
-  hasTracker: boolean;
 };
 
 /**
  * Structured energy balance, or null when BMR can't be computed
- * (incomplete profile).
+ * (incomplete profile). TDEE is always profile-based (activity multiplier);
+ * workouts are reported separately via `burnedFromActivity`.
  */
 export function computeEnergyBalance(
   user: BmrProfile,
@@ -68,8 +62,7 @@ export function computeEnergyBalance(
   const bmr = calculateBMR(user);
   if (!bmr) return null;
 
-  const hasTracker = burnedFromActivity > 0;
-  const tdee = calculateTDEE(user, hasTracker ? burnedFromActivity : null)!;
+  const tdee = calculateTDEE(user)!;
   const balance = caloriesEaten - tdee;
 
   return {
@@ -79,6 +72,5 @@ export function computeEnergyBalance(
     burnedFromActivity,
     balance,
     isDeficit: balance < 0,
-    hasTracker,
   };
 }

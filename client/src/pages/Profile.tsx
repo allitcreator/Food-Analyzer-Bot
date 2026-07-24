@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { ChevronDown } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type {
@@ -67,6 +68,7 @@ export default function Profile() {
             <ProfileSection user={me.data} onSaved={applyUser} />
             <GoalsSection user={me.data} onSaved={applyUser} />
             <SettingsSection user={me.data} onSaved={applyUser} />
+            <GlossarySection />
           </>
         )}
       </div>
@@ -332,6 +334,50 @@ function SettingsSection({
             </Select>
           </div>
         </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ─── Glossary (расшифровка показателей) ─────────────────────────────────────
+
+const GLOSSARY: { term: string; desc: string }[] = [
+  { term: "Норма калорий", desc: "Ваша дневная цель по калориям. На «Сегодня» показывает, сколько съедено из нормы и сколько осталось." },
+  { term: "БЖУ", desc: "Белки, жиры и углеводы за день относительно ваших целей — три кольца на экране «Сегодня»." },
+  { term: "BMR", desc: "Базовый обмен: сколько калорий тело тратит в полном покое, только на поддержание жизни." },
+  { term: "TDEE", desc: "Полный расход за день: BMR, умноженный на коэффициент вашего уровня активности." },
+  { term: "Энергобаланс", desc: "Разница «съедено минус расход». Дефицит — тратите больше, чем едите (для похудения); профицит — наоборот." },
+  { term: "Серия дневника", desc: "Сколько дней подряд вы ведёте записи о еде. На экране «Тренды»." },
+  { term: "Вода", desc: "Выпитая вода за день; ориентир — 8 стаканов по 250 мл." },
+];
+
+function GlossarySection() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <SectionTitle>Справка</SectionTitle>
+      <Card>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex w-full items-center justify-between px-4 py-4 text-left"
+          aria-expanded={open}
+        >
+          <span className="text-[15px] font-medium">Что означают показатели</span>
+          <ChevronDown
+            className={`h-5 w-5 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
+          />
+        </button>
+        {open && (
+          <CardContent className="space-y-3 pt-0">
+            {GLOSSARY.map((g) => (
+              <div key={g.term}>
+                <div className="text-sm font-semibold">{g.term}</div>
+                <div className="text-[13px] leading-snug text-muted-foreground">{g.desc}</div>
+              </div>
+            ))}
+          </CardContent>
+        )}
       </Card>
     </div>
   );
