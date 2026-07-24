@@ -8,7 +8,7 @@
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
-    "test": "tsx --test tests/unit.test.ts tests/apple-health.test.ts tests/telegram-auth.test.ts",
+    "test": "tsx --test tests/unit.test.ts tests/apple-health.test.ts tests/telegram-auth.test.ts tests/barcode.test.ts",
     "test:db": "tsx --test tests/apple-health.db.test.ts",
     "db:push": "drizzle-kit push"
   },
@@ -80,7 +80,8 @@
     "wouter": "^3.3.5",
     "ws": "^8.18.0",
     "zod": "^3.25.76",
-    "zod-validation-error": "^3.5.4"
+    "zod-validation-error": "^3.5.4",
+    "zxing-wasm": "^3.1.2"
   },
   "devDependencies": {
     "@replit/vite-plugin-cartographer": "^0.4.4",

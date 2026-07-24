@@ -4,6 +4,7 @@ import { config } from "./config";
 import ExcelJS from "exceljs";
 import { IStorage } from "./storage";
 import { analyzeFoodText, analyzeFoodImage, generateEveningReport, generatePeriodAnalysis, transcribeVoice, askCoach, detectBarcode, generateWeightAnalysis, classifyIntent, analyzeWorkout, groupFoodNames, FoodItem } from "./openai";
+import { decodeBarcodeFromImage, isValidEanChecksum } from "./barcode";
 import { generateMonthlyPDF, extractTopFoods } from "./pdf";
 import { User, FoodLog } from "@shared/schema";
 import { parseHealthPayload, calcStepsCalories } from "./health-helpers";
@@ -3452,8 +3453,18 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         const base64 = Buffer.from(arrayBuffer).toString("base64");
 
         // Step 1: Try barcode detection (if enabled in settings)
+        // First — deterministic zxing decode from image pixels (accurate).
+        // Fallback — AI vision "reads" the digits, but only trust it if the
+        // EAN checksum passes (rejects hallucinated codes).
         const barcodeEnabled = user.barcodeScanEnabled ?? true;
-        const barcode = barcodeEnabled ? await detectBarcode(base64) : null;
+        let barcode: string | null = null;
+        if (barcodeEnabled) {
+          barcode = await decodeBarcodeFromImage(Buffer.from(arrayBuffer));
+          if (!barcode) {
+            const aiBarcode = await detectBarcode(base64);
+            if (aiBarcode && isValidEanChecksum(aiBarcode)) barcode = aiBarcode;
+          }
+        }
         let analysis: any = null;
         let barcodeSource = false;
 
