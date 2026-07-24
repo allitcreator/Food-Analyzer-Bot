@@ -11,6 +11,7 @@ const allowlist = [
   "express",
   "express-rate-limit",
   "openai",
+  "p-retry",
   "pg",
   "ws",
   "zod",
