@@ -34,6 +34,45 @@ export async function decodeBarcodeFromImage(imageBuffer: Buffer): Promise<strin
 }
 
 /**
+ * Decide whether an Open Food Facts product counts as a "hydrating" drink,
+ * i.e. one that should be logged into water tracking (water_logs) rather than
+ * into the food diary.
+ *
+ * A product is hydrating when either:
+ *   - its category tags mark it as water (still / spring / mineral water), OR
+ *   - it is a beverage (en:beverages) that is essentially calorie- and
+ *     sugar-free (≈ plain water, unsweetened tea/coffee): energy ≤ 5 kcal/100g
+ *     and sugars ≈ 0.
+ *
+ * Sweet/caloric drinks (juice, soda, milk, beer, sweet tea…) are NOT hydrating.
+ * Pure function — no network — so it is unit-testable in isolation.
+ */
+const WATER_CATEGORY_TAGS = ["en:waters", "en:spring-waters", "en:mineral-waters"];
+
+export function classifyHydratingProduct(input: {
+  categoriesTags?: string[] | null;
+  energyKcal100g?: number | null;
+  sugars100g?: number | null;
+}): boolean {
+  const tags = (input.categoriesTags ?? []).map((t) => String(t).toLowerCase());
+
+  // Explicit water categories are always hydrating.
+  if (tags.some((t) => WATER_CATEGORY_TAGS.includes(t))) return true;
+
+  // Generic beverage with ~0 kcal and ~0 sugar → unsweetened tea/coffee/water.
+  if (tags.includes("en:beverages")) {
+    const kcal = input.energyKcal100g;
+    const sugars = input.sugars100g;
+    // Require energy to be a known low value; sugars must be absent or ~0.
+    if (typeof kcal === "number" && kcal <= 5 && (sugars == null || sugars <= 0.5)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * Validate the check digit of an EAN-13 / EAN-8 / UPC-A (12-digit) code.
  * Uses the standard GTIN algorithm: from the rightmost data digit, weights
  * alternate 3, 1, 3, 1, … and the check digit closes the sum to a multiple of 10.

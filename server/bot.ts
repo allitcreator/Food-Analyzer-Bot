@@ -3,7 +3,7 @@ import { config } from "./config";
 import ExcelJS from "exceljs";
 import { IStorage } from "./storage";
 import { analyzeFoodText, analyzeFoodImage, generateEveningReport, generatePeriodAnalysis, transcribeVoice, askCoach, detectBarcode, generateWeightAnalysis, classifyIntent, analyzeWorkout, groupFoodNames, FoodItem } from "./openai";
-import { decodeBarcodeFromImage, isValidEanChecksum } from "./barcode";
+import { decodeBarcodeFromImage, isValidEanChecksum, classifyHydratingProduct } from "./barcode";
 import { generateMonthlyPDF, extractTopFoods } from "./pdf";
 import { User, FoodLog } from "@shared/schema";
 import { progressBar } from "./lib/goals";
@@ -52,6 +52,13 @@ async function lookupBarcodeProduct(barcode: string): Promise<(FoodItem & { barc
     const weight = servingMatch ? parseInt(servingMatch[1]) : 100;
     const ratio = weight / 100;
 
+    // Classify plain water / unsweetened tea-coffee → goes into water tracking.
+    const hydrating = classifyHydratingProduct({
+      categoriesTags: p.categories_tags,
+      energyKcal100g: n["energy-kcal_100g"] != null ? Number(n["energy-kcal_100g"]) : cal100,
+      sugars100g: n["sugars_100g"] != null ? Number(n["sugars_100g"]) : null,
+    });
+
     return {
       foodName: name,
       calories: Math.round(cal100 * ratio),
@@ -60,6 +67,7 @@ async function lookupBarcodeProduct(barcode: string): Promise<(FoodItem & { barc
       carbs: Math.round(carbs100 * ratio),
       weight,
       mealType: "snack",
+      hydrating,
       barcode,
       foundInDb: true,
     };
@@ -105,6 +113,10 @@ async function buildDailyProgress(storage: IStorage, userId: number, user: User,
 }
 
 function buildConfirmMessage(analysis: any, showMicronutrients = false): string {
+  // Hydrating drink — logged into water, not the food diary.
+  if (analysis.hydrating) {
+    return `💧 *${analysis.foodName}*: записать ${analysis.weight} мл в воду?`;
+  }
   const unit = getUnit(analysis.foodName);
   let msg = `🍽 *${analysis.foodName}*\n`;
   msg += `🔥 Ккал: ${analysis.calories}  💪 Б: ${analysis.protein}г  🧈 Ж: ${analysis.fat}г  🍞 У: ${analysis.carbs}г\n`;
@@ -146,6 +158,15 @@ function buildConfirmKeyboard(_unit: string) {
 }
 
 function buildEditKeyboard(pending: any, unit: string) {
+  // Hydrating drink — only the volume matters (no macros to edit).
+  if (pending.hydrating) {
+    return {
+      inline_keyboard: [
+        [{ text: `⚖️ Объём: ${pending.weight} мл`, callback_data: "ef_weight" }],
+        [{ text: "← Назад", callback_data: "ef_back" }]
+      ]
+    };
+  }
   return {
     inline_keyboard: [
       [
@@ -414,8 +435,14 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
 
   function buildMultiSummaryText(items: FoodItem[]): string {
     let text = `🍽 Распознано ${items.length} позиций:\n\n`;
-    let totalCal = 0, totalP = 0, totalF = 0, totalC = 0;
+    let totalCal = 0, totalP = 0, totalF = 0, totalC = 0, totalWater = 0;
     items.forEach((item, i) => {
+      if (item.hydrating) {
+        // Hydrating drink → goes to water, not counted in food totals.
+        text += `${i + 1}. 💧 ${item.foodName} (${item.weight} мл) → в воду\n\n`;
+        totalWater += item.weight;
+        return;
+      }
       const unit = item.foodName.toLowerCase().match(LIQUID_PATTERN) ? 'мл' : 'г';
       const emoji = MEAL_EMOJI[item.mealType] || '🍴';
       text += `${i + 1}. ${emoji} ${item.foodName} (${item.weight}${unit})\n`;
@@ -427,6 +454,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     });
     text += `──────────────\n`;
     text += `📊 Итого: ${Math.round(totalCal)} ккал | Б${Math.round(totalP)} Ж${Math.round(totalF)} У${Math.round(totalC)}`;
+    if (totalWater > 0) text += `\n💧 В воду: ${Math.round(totalWater)} мл`;
     return text;
   }
 
@@ -1890,7 +1918,17 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
 
     if (query.data === "confirm_yes") {
       const pending = (bot as any).pendingLogs?.[telegramId];
-      if (pending) {
+      if (pending && pending.hydrating) {
+        // Hydrating drink → water tracking, not the food diary.
+        const amount = Math.round(Number(pending.weight)) || 0;
+        await storage.logWater(user.id, amount);
+        const totalWater = await storage.getDailyWater(user.id, getUserNow(user.timezone ?? 'Europe/Moscow'));
+        bot.editMessageText(`💧 +${amount} мл, всего за день ${totalWater} мл`, {
+          chat_id: chatId,
+          message_id: query.message?.message_id
+        });
+        delete (bot as any).pendingLogs[telegramId];
+      } else if (pending) {
         const unit = getUnit(pending.foodName);
         await storage.createFoodLog({
           userId: user.id,
@@ -1995,8 +2033,17 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       }
       delete pendingMulti[telegramId];
       let savedCount = 0;
+      let waterMl = 0;
       for (const item of items) {
         try {
+          if (item.hydrating) {
+            // Hydrating drink → water tracking, skip the food diary.
+            const amount = Math.round(Number(item.weight)) || 0;
+            await storage.logWater(user.id, amount);
+            waterMl += amount;
+            savedCount++;
+            continue;
+          }
           await storage.createFoodLog({
             userId: user.id,
             foodName: item.foodName,
@@ -2018,9 +2065,11 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
           console.error("Error saving food item:", e);
         }
       }
-      const totalCal = items.reduce((s, i) => s + i.calories, 0);
+      const totalCal = items.reduce((s, i) => s + (i.hydrating ? 0 : i.calories), 0);
       const progress = await buildDailyProgress(storage, user.id, user, getUserNow(user.timezone ?? 'Europe/Moscow'));
-      bot.editMessageText(`✅ Сохранено ${savedCount} из ${items.length} позиций  (+${totalCal} ккал)${progress}`, {
+      let savedMsg = `✅ Сохранено ${savedCount} из ${items.length} позиций  (+${totalCal} ккал)`;
+      if (waterMl > 0) savedMsg += `\n💧 В воду: ${waterMl} мл`;
+      bot.editMessageText(`${savedMsg}${progress}`, {
         chat_id: chatId,
         message_id: query.message?.message_id
       });

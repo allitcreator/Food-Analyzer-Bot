@@ -5,7 +5,7 @@
  */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { decodeBarcodeFromImage, isValidEanChecksum } from "../server/barcode";
+import { decodeBarcodeFromImage, isValidEanChecksum, classifyHydratingProduct } from "../server/barcode";
 
 describe("isValidEanChecksum", () => {
   test("valid EAN-13", () => {
@@ -37,6 +37,83 @@ describe("isValidEanChecksum", () => {
   test("invalid: wrong length", () => {
     assert.equal(isValidEanChecksum("12345"), false);
     assert.equal(isValidEanChecksum("460068200003"), false); // 12 digits but not a valid UPC-A
+  });
+});
+
+describe("classifyHydratingProduct", () => {
+  test("plain still water by category tag → hydrating", () => {
+    assert.equal(classifyHydratingProduct({ categoriesTags: ["en:beverages", "en:waters"] }), true);
+  });
+
+  test("mineral / sparkling water by category tag → hydrating", () => {
+    assert.equal(classifyHydratingProduct({ categoriesTags: ["en:mineral-waters"] }), true);
+    assert.equal(classifyHydratingProduct({ categoriesTags: ["en:spring-waters"] }), true);
+  });
+
+  test("water tag wins even if some energy is reported", () => {
+    assert.equal(
+      classifyHydratingProduct({ categoriesTags: ["en:waters"], energyKcal100g: 3, sugars100g: 0 }),
+      true,
+    );
+  });
+
+  test("unsweetened beverage (0 kcal, 0 sugar) → hydrating", () => {
+    // e.g. black tea / coffee without sugar
+    assert.equal(
+      classifyHydratingProduct({ categoriesTags: ["en:beverages"], energyKcal100g: 1, sugars100g: 0 }),
+      true,
+    );
+  });
+
+  test("beverage with low energy and missing sugar data → hydrating", () => {
+    assert.equal(
+      classifyHydratingProduct({ categoriesTags: ["en:beverages"], energyKcal100g: 2, sugars100g: null }),
+      true,
+    );
+  });
+
+  test("sweet soda (caloric beverage) → NOT hydrating", () => {
+    assert.equal(
+      classifyHydratingProduct({ categoriesTags: ["en:beverages", "en:sodas"], energyKcal100g: 42, sugars100g: 10.6 }),
+      false,
+    );
+  });
+
+  test("juice → NOT hydrating", () => {
+    assert.equal(
+      classifyHydratingProduct({ categoriesTags: ["en:beverages", "en:fruit-juices"], energyKcal100g: 46, sugars100g: 10 }),
+      false,
+    );
+  });
+
+  test("beverage with low energy but noticeable sugar → NOT hydrating", () => {
+    assert.equal(
+      classifyHydratingProduct({ categoriesTags: ["en:beverages"], energyKcal100g: 4, sugars100g: 3 }),
+      false,
+    );
+  });
+
+  test("beverage with unknown energy → NOT hydrating", () => {
+    assert.equal(
+      classifyHydratingProduct({ categoriesTags: ["en:beverages"], energyKcal100g: null, sugars100g: null }),
+      false,
+    );
+  });
+
+  test("solid food (not a beverage) → NOT hydrating", () => {
+    assert.equal(
+      classifyHydratingProduct({ categoriesTags: ["en:snacks"], energyKcal100g: 0, sugars100g: 0 }),
+      false,
+    );
+  });
+
+  test("no category tags → NOT hydrating", () => {
+    assert.equal(classifyHydratingProduct({}), false);
+    assert.equal(classifyHydratingProduct({ categoriesTags: null }), false);
+  });
+
+  test("case-insensitive category tags", () => {
+    assert.equal(classifyHydratingProduct({ categoriesTags: ["EN:WATERS"] }), true);
   });
 });
 

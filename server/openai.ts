@@ -126,6 +126,7 @@ Split the message into individual food items/dishes. For each item:
 6. Write a brief nutrition advice in Russian (1-2 sentences) ONLY if foodScore <= 5. For healthy foods (foodScore > 5), set nutritionAdvice to empty string "".
 7. Estimate micronutrients based on typical composition.
 8. Determine mealType: use the user's explicit mention (завтрак/обед/ужин/перекус) if present, otherwise use the default based on current time.
+9. Hydration flag: if the item is a DRINK, set hydrating=true ONLY for plain water (still, sparkling, or mineral water WITHOUT sugar) or for unsweetened tea/coffee WITHOUT milk and WITHOUT sugar (≈0 kcal). For any caloric drink — juice, lemonade, milk, latte/cappuccino, sweet tea, cola/soda, beer, wine, smoothie, kefir, cocoa, kompot, etc. — set hydrating=false. For non-drinks, omit the field or set hydrating=false.
 ${timeHint}
 Return ONLY a JSON object with a single key "items" containing an array. Each element:
 - foodName (string)
@@ -141,6 +142,7 @@ Return ONLY a JSON object with a single key "items" containing an array. Each el
 - sugar (number, grams — total sugars)
 - sodium (number, milligrams)
 - saturatedFat (number, grams)
+- hydrating (boolean, optional — true ONLY for plain water or unsweetened tea/coffee without milk & sugar; false/omitted otherwise)
 
 Example output: {"items": [{...}, {...}]}`
         },
@@ -153,6 +155,7 @@ Example output: {"items": [{...}, {...}]}`
     if (Array.isArray(parsed.items) && parsed.items.length > 0) {
       for (const item of parsed.items) {
         item.mealType = normalizeMealType(item.mealType);
+        item.hydrating = item.hydrating === true;
       }
       return parsed.items as FoodItem[];
     }
@@ -264,6 +267,9 @@ export interface FoodItem {
   mealType: string;
   foodScore?: number;
   nutritionAdvice?: string;
+  // Hydrating drink — plain water / unsweetened tea or coffee without milk & sugar.
+  // Such items are logged into water (water_logs), NOT into the food diary.
+  hydrating?: boolean;
   // Micronutrients (optional — AI returns best estimate)
   fiber?: number;        // g
   sugar?: number;        // g
@@ -659,6 +665,7 @@ export async function analyzeFoodImage(
    - nutritionAdvice: in Russian.
 5. Rate nutritional quality 1-10. Write nutritionAdvice ONLY if foodScore <= 5, otherwise set to "".
 6. Estimate micronutrients based on typical composition or label.
+7. Hydration flag: if the item is a DRINK, set hydrating=true ONLY for plain water (still, sparkling, or mineral water WITHOUT sugar) or for unsweetened tea/coffee WITHOUT milk and WITHOUT sugar (≈0 kcal). For any caloric drink — juice, lemonade, milk, latte/cappuccino, sweet tea, cola/soda, beer, wine, smoothie, kefir, etc. — set hydrating=false. For non-drinks, omit the field or set hydrating=false.
 ${timeHint}
 Return ONLY a JSON object with key "items" containing an array. Each element:
 - foodName (string)
@@ -674,6 +681,7 @@ Return ONLY a JSON object with key "items" containing an array. Each element:
 - sugar (number, grams)
 - sodium (number, milligrams)
 - saturatedFat (number, grams)
+- hydrating (boolean, optional — true ONLY for plain water or unsweetened tea/coffee without milk & sugar; false/omitted otherwise)
 
 Example: {"items": [{...}, {...}]}`
         },
@@ -698,12 +706,14 @@ Example: {"items": [{...}, {...}]}`
     if (Array.isArray(parsed.items) && parsed.items.length > 0) {
       for (const item of parsed.items) {
         item.mealType = normalizeMealType(item.mealType);
+        item.hydrating = item.hydrating === true;
       }
       return parsed.items as FoodItem[];
     }
     // Legacy single object
     if (parsed.foodName) {
       parsed.mealType = normalizeMealType(parsed.mealType);
+      parsed.hydrating = parsed.hydrating === true;
       return [parsed as FoodItem];
     }
     return null;
