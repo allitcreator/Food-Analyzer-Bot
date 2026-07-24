@@ -37,7 +37,6 @@ export const users = pgTable("users", {
   timezone: text("timezone").default("Europe/Moscow"),          // IANA timezone
   mealBreakfastEnd: text("meal_breakfast_end").default("12:30"), // завтрак до HH:MM
   mealLunchEnd: text("meal_lunch_end").default("16:30"),       // обед до HH:MM
-  healthSyncToken: text("health_sync_token").unique(), // token for Apple Health HTTP webhook
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -88,7 +87,7 @@ export const workoutLogs = pgTable("workout_logs", {
   workoutType: text("workout_type").notNull(),   // "бег", "эллипс", "силовая", "шаги" etc.
   durationMin: integer("duration_min"),          // null if only steps/kcal given
   caloriesBurned: integer("calories_burned").notNull(),
-  source: text("source").default("manual"),     // "manual" | "apple_health"
+  source: text("source").default("manual"),     // источник записи; исторически встречается "apple_health" (интеграция удалена), новые записи — "manual"
   date: timestamp("date").defaultNow(),
 }, (table) => ({
   userDateIdx: index("workout_logs_user_id_date_idx").on(table.userId, table.date),

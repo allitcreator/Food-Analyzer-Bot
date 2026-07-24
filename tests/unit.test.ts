@@ -74,50 +74,6 @@ describe("Mifflin-St Jeor calorie calculation", () => {
   });
 });
 
-// ─── Apple Health calorie-splitting logic ───────────────────────────────────
-// Matches logic in server/routes.ts POST /api/health/apple
-function computeStepsCalories(
-  steps: number,
-  active_calories: number | undefined,
-  workouts: { calories: number }[],
-): number {
-  const workoutKcal = workouts.reduce((s, w) => s + w.calories, 0);
-  if (active_calories != null) {
-    return Math.max(0, active_calories - workoutKcal);
-  }
-  return Math.round(steps * 0.04);
-}
-
-describe("Apple Health steps calorie splitting", () => {
-  test("no workouts: uses active_calories directly", () => {
-    const cal = computeStepsCalories(8000, 350, []);
-    assert.equal(cal, 350);
-  });
-
-  test("with workouts: subtracts workout calories", () => {
-    const cal = computeStepsCalories(8000, 500, [{ calories: 300 }]);
-    assert.equal(cal, 200);
-  });
-
-  test("clamped at 0 when workouts exceed active_calories", () => {
-    const cal = computeStepsCalories(5000, 100, [{ calories: 100 }]);
-    assert.equal(cal, 0, "should be 0, not negative");
-  });
-
-  test("fallback to steps * 0.04 when no active_calories", () => {
-    const cal = computeStepsCalories(10000, undefined, []);
-    assert.equal(cal, 400); // 10000 * 0.04
-  });
-
-  test("multiple workouts summed before subtraction", () => {
-    const cal = computeStepsCalories(6000, 600, [
-      { calories: 200 },
-      { calories: 150 },
-    ]);
-    assert.equal(cal, 250); // 600 - 350
-  });
-});
-
 // ─── Macros ratio check ──────────────────────────────────────────────────────
 // Goals are: protein=30% of cal, fat=30%, carbs=40%
 function calcMacros(calories: number) {

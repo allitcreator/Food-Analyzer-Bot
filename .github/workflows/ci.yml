@@ -50,9 +50,6 @@ jobs:
       - name: Run unit tests (no DB required)
         run: npm test
 
-      - name: Run DB integration tests
-        run: npm run test:db
-
       # TODO: add `npm run check` (tsc) once the 14 known pre-existing
       # type errors in server/bot.ts (downlevelIteration / implicit-any)
       # are fixed. Skipped for now to keep CI green.

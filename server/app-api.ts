@@ -40,10 +40,9 @@ function currentUser(req: Request): User {
   return req.appUser as User;
 }
 
-/** Strip server-only fields from a user before sending it to the client. */
+/** Shape a user object before sending it to the client. */
 function publicUser(user: User) {
-  const { healthSyncToken, ...rest } = user;
-  return rest;
+  return { ...user };
 }
 
 function userGoals(user: User) {

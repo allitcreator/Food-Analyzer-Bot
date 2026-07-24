@@ -51,9 +51,6 @@ export interface IStorage {
   updateWorkoutLog(id: number, userId: number, data: Partial<InsertWorkoutLog>): Promise<WorkoutLog>;
   deleteWorkoutLog(id: number): Promise<void>;
   deleteWorkoutLogsBySource(userId: number, date: Date, source: string): Promise<void>;
-
-  getUserByHealthSyncToken(token: string): Promise<User | undefined>;
-  setHealthSyncToken(userId: number, token: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -459,15 +456,6 @@ export class DatabaseStorage implements IStorage {
     await db.delete(workoutLogs).where(
       sql`${workoutLogs.userId} = ${userId} AND ${workoutLogs.source} = ${source} AND ${workoutLogs.date} >= ${start} AND ${workoutLogs.date} <= ${end}`
     );
-  }
-
-  async getUserByHealthSyncToken(token: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.healthSyncToken, token));
-    return user;
-  }
-
-  async setHealthSyncToken(userId: number, token: string): Promise<void> {
-    await db.update(users).set({ healthSyncToken: token }).where(eq(users.id, userId));
   }
 
 }

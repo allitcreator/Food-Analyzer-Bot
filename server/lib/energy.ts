@@ -32,8 +32,8 @@ export function calculateBMR(user: BmrProfile): number | null {
 
 /**
  * Total daily energy expenditure.
- * With tracker data (active calories > 0): BMR + active calories (no multiplier,
- * since Apple Health active calories already represent everything above BMR).
+ * With logged activity (active calories > 0): BMR + active calories (no multiplier,
+ * since logged active calories already represent everything above BMR).
  * Otherwise: BMR × activity-level multiplier.
  */
 export function calculateTDEE(user: BmrProfile, activityCalories: number | null): number | null {

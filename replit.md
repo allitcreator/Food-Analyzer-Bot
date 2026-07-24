@@ -21,7 +21,6 @@ Fullstack nutrition tracking application centered around a Telegram bot. Users l
 - Evening AI-powered diet reports, Excel export, admin whitelist system
 - **Micronutrients** (user-controlled toggle via `/settings`): fiber, sugar, sodium, saturated fat — estimated by AI per food item, shown in `/stats` and daily progress; scales with weight adjustments
 - **Workout tracking**: free-text or voice input ("ran 5km", "30 min elliptical", "10000 steps") → AI estimates calories burned using MET values; `workoutLogs` table; `/workout` shows today's summary; `/stats` and daily progress show net calories (consumed − burned)
-- **Apple Health sync**: Telegram-native flow — `/sync` sends inline button `shortcuts://run-shortcut?name=HealthSync` that opens the iOS Shortcuts app; the "HealthSync" shortcut collects steps + active calories + workouts from Apple Health, then opens Telegram with a pre-filled `/health {json}` message; user taps Send and the bot saves everything to `workoutLogs` with `source="apple_health"`; re-sync is idempotent (replaces previous entries for that day); `/healthsetup` sends step-by-step shortcut creation guide
 
 ## User Preferences
 
@@ -41,10 +40,7 @@ Preferred communication style: Simple, everyday language.
   - `analyzeFoodImage()` → `FoodItem[]` (GPT-4o)
   - `transcribeVoice()` → string (Whisper-1, requires OPENAI_API_KEY)
   - `generateEveningReport()` → string (GPT-4o-mini)
-- **Apple Health helpers**: `server/health-helpers.ts` — exported separately for unit testing:
-  - `parseHealthPayload(rawText)` → `HealthParseResult` — strict JSON validation; errors: `invalid_json`, `not_object`, `invalid_steps`, `invalid_active_calories`, `workouts_not_array`, `workout_not_object`, `workout_missing_type`, `workout_invalid_calories`, `workout_invalid_duration`, `no_storable_data`; rejects payloads with no steps and no workouts (including `active_calories`-only payloads)
-  - `calcStepsCalories(steps, activeCalories, workoutKcal)` → number — `max(0, active_calories - workoutKcal)`; fallback `steps * 0.04` if `activeCalories` is null
-- **Storage layer**: `server/storage.ts` — `DatabaseStorage` implementing `IStorage`; includes `calculateAndSetGoals()` (Mifflin-St Jeor), `deleteWorkoutLogsBySource(userId, date, source)` for idempotent Apple Health re-sync
+- **Storage layer**: `server/storage.ts` — `DatabaseStorage` implementing `IStorage`; includes `calculateAndSetGoals()` (Mifflin-St Jeor)
 - **Database**: `server/db.ts` — Drizzle ORM connected to PostgreSQL via `pg` Pool
 - **PDF generation**: `server/pdf.ts` — pdfkit + DejaVu Sans; fonts loaded from `server/fonts/` directory (DejaVuSans.ttf, DejaVuSans-Bold.ttf) resolved via `createRequire(import.meta.url)` + `require.resolve("dejavu-fonts-ttf/package.json")` because `__dirname` is unavailable in ES modules
 
@@ -84,7 +80,7 @@ Preferred communication style: Simple, everyday language.
 
 **workoutLogs** table:
 - `userId` (FK), `description` (e.g. "Бег 30 мин"), `workoutType` ("бег", "эллипс", "шаги" etc.), `durationMin` (nullable), `caloriesBurned`, `date`
-- `source` (text, default "manual") — "manual" for bot-entered workouts, "apple_health" for synced entries; used for idempotent re-sync
+- `source` (text, default "manual") — record origin; historical rows may contain "apple_health" (integration removed), new rows are "manual"
 
 ### Build System
 
@@ -111,9 +107,6 @@ Preferred communication style: Simple, everyday language.
 | `/profile` | Настроить профиль полностью |
 | `/editprofile` | Редактировать поля профиля по одному |
 | `/workout` | История тренировок за сегодня |
-| `/sync` | Синхронизировать Apple Health (запустить шорткат) |
-| `/health {json}` | Принять данные от шортката Apple Health (автоматически) |
-| `/healthsetup` | Инструкция по настройке шортката Apple Health |
 | `/settings` | Настройки (микронутриенты и др.) |
 | `/help` | Список всех команд |
 
@@ -128,36 +121,14 @@ When AI detects multiple dishes in one message:
 
 Single-item flow still uses `(bot as any).pendingLogs[telegramId]` with weight adjustment buttons.
 
-## Apple Health Sync Flow
-
-Telegram-native, no public webhook needed:
-
-1. User sends `/sync`
-2. Bot sends inline button → `shortcuts://run-shortcut?name=HealthSync`
-3. iPhone opens the "HealthSync" shortcut in Shortcuts app
-4. Shortcut collects: steps (sum), active calories (sum), optional workouts array from Apple Health for today
-5. Shortcut opens Telegram with pre-filled message: `tg://resolve?domain=BOTNAME&text=/health+{json}`
-6. User taps **Send** in Telegram
-7. Bot `/health` handler (regex `/^\/health(@\w+)?(?:\s+([\s\S]+))?$/`) parses + validates JSON via `parseHealthPayload()`
-8. Bot deletes all `apple_health` entries for that date (idempotent), then saves:
-   - Steps entry: `workoutType="шаги"`, `caloriesBurned = calcStepsCalories(steps, activeCalories, workoutKcal)`
-   - Each workout entry separately
-
-**JSON format for `/health`:**
-```json
-{"steps": 8000, "active_calories": 320, "workouts": [{"type": "Бег", "duration_min": 30, "calories": 280}]}
-```
-- `steps` — integer ≥ 0 (required unless workouts provided)
-- `active_calories` — integer ≥ 0 (optional; used to split calories between steps and workouts)
-- `workouts` — array (optional); each item: `type` (string, required), `calories` (integer ≥ 0, required), `duration_min` (integer > 0, optional)
-
 ## Test Suite
 
-Three test files in `tests/` using Node.js built-in `node:test`:
+Test files in `tests/` using Node.js built-in `node:test`:
 
-- **`tests/unit.test.ts`** — pure logic: `progressBar()`, Mifflin-St Jeor calculation, macro goal ratios, `calcStepsCalories()`
+- **`tests/unit.test.ts`** — pure logic: `progressBar()`, Mifflin-St Jeor calculation, macro goal ratios
 - **`tests/api.test.ts`** — HTTP: `GET /api/health` returns `{ status: "ok" }`
-- **`tests/apple-health.test.ts`** — `parseHealthPayload()` (valid + invalid payloads), `calcStepsCalories()`, storage integration (idempotency, source isolation)
+- **`tests/telegram-auth.test.ts`** — `validateInitData()` for the Mini App
+- **`tests/barcode.test.ts`** — barcode decoding / EAN checksum helpers
 
 Run: `npx tsx --test tests/<file>.test.ts`
 
