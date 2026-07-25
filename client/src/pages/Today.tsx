@@ -122,7 +122,7 @@ function FavoritesCard() {
     onSuccess: (_res, fav) => {
       hapticNotification("success");
       toast(`Записано: ${fav.title}`);
-      qc.invalidateQueries({ queryKey: ["day", "today"] });
+      qc.invalidateQueries({ queryKey: ["day"] });
     },
     onError: () => {
       hapticNotification("error");

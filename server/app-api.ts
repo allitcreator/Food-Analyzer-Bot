@@ -12,7 +12,7 @@ import { z, ZodError } from "zod";
 import { storage } from "./storage";
 import { telegramAuth } from "./lib/telegram-auth";
 import { computeEnergyBalance } from "./lib/energy";
-import { mealTypeByTime } from "./lib/favorites";
+import { mealTypeByTime, sameTitle } from "./lib/favorites";
 import type { User, FoodLog, FavoriteItem, VisibleFavorite } from "@shared/schema";
 import {
   dayQuerySchema,
@@ -374,6 +374,16 @@ export function createAppApiRouter(): Router {
     asyncHandler(async (req, res) => {
       const user = currentUser(req);
       const { title, items } = createFavoriteSchema.parse(req.body);
+      // De-dup: if the user already has a favorite with this title (case-insensitive),
+      // return it (200) instead of creating a duplicate row.
+      const own = await storage.getFavorites(user.id);
+      const existing = own.find((f) => sameTitle(f.title, title));
+      if (existing) {
+        res.status(200).json(
+          publicFavorite({ ...existing, isOwner: true, ownerName: user.username ?? null }),
+        );
+        return;
+      }
       const fav = await storage.createFavorite({ userId: user.id, title, items });
       res.status(201).json(
         publicFavorite({ ...fav, isOwner: true, ownerName: user.username ?? null }),

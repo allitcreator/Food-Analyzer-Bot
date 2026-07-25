@@ -7,7 +7,7 @@ import { decodeBarcodeFromImage, isValidEanChecksum, classifyHydratingProduct, b
 import { generateMonthlyPDF, extractTopFoods } from "./pdf";
 import { User, FoodLog, VisibleFavorite, FavoriteItem } from "@shared/schema";
 import { progressBar } from "./lib/goals";
-import { mealTypeByTime, buildMealTitle, toFavoriteItems, shouldSuggestFavorite, FAVORITE_SUGGEST_DAYS } from "./lib/favorites";
+import { mealTypeByTime, buildMealTitle, toFavoriteItems, shouldSuggestFavorite, sameTitle, FAVORITE_SUGGEST_DAYS } from "./lib/favorites";
 
 const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
 
@@ -2495,7 +2495,10 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         return;
       }
       delete pendingFavSuggestion[telegramId];
-      await storage.createFavorite({ userId: user.id, title: pend.title, items: pend.items });
+      const existingFavs = await storage.getFavorites(user.id);
+      if (!existingFavs.some((f) => sameTitle(f.title, pend.title))) {
+        await storage.createFavorite({ userId: user.id, title: pend.title, items: pend.items });
+      }
       bot.answerCallbackQuery(query.id, { text: '⭐ Добавлено в избранное' }).catch(() => {});
       bot.editMessageText(`⭐ «${pend.title}» добавлено в избранное. Открыть: /favorites`, {
         chat_id: chatId, message_id: query.message?.message_id,
@@ -2519,13 +2522,19 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         return;
       }
       delete pendingMealFavorite[telegramId];
-      await storage.createFavorite({ userId: user.id, title: pend.title, items: pend.items });
-      bot.answerCallbackQuery(query.id, { text: '⭐ Приём сохранён' }).catch(() => {});
+      const mealFavs = await storage.getFavorites(user.id);
+      const alreadySaved = mealFavs.some((f) => sameTitle(f.title, pend.title));
+      if (!alreadySaved) {
+        await storage.createFavorite({ userId: user.id, title: pend.title, items: pend.items });
+      }
+      bot.answerCallbackQuery(query.id, { text: alreadySaved ? 'Уже в избранном' : '⭐ Приём сохранён' }).catch(() => {});
       // Drop the button so the meal can't be saved twice.
       bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
         chat_id: chatId, message_id: query.message?.message_id,
       }).catch(() => {});
-      bot.sendMessage(chatId, `⭐ Приём «${pend.title}» сохранён в избранное. Открыть: /favorites`);
+      bot.sendMessage(chatId, alreadySaved
+        ? `⭐ Приём «${pend.title}» уже в избранном. Открыть: /favorites`
+        : `⭐ Приём «${pend.title}» сохранён в избранное. Открыть: /favorites`);
 
     } else if (query.data.startsWith("rtime_")) {
       const time = query.data.replace("rtime_", "");

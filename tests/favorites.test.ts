@@ -12,7 +12,12 @@ import {
   shouldSuggestFavorite,
 } from "../server/lib/favorites";
 import { createFavoriteSchema, updateFavoriteSchema } from "../shared/routes";
-import { matchesFavoriteQuery, filterFavorites } from "../shared/favorites-filter";
+import {
+  matchesFavoriteQuery,
+  filterFavorites,
+  sameFavoriteTitle,
+  hasFavoriteTitle,
+} from "../shared/favorites-filter";
 
 // Helper: a Date whose local wall-clock is HH:MM (matches how getUserNow builds it).
 const at = (h: number, m = 0) => new Date(2026, 0, 1, h, m, 0);
@@ -235,5 +240,21 @@ describe("matchesFavoriteQuery / filterFavorites (Mini App search)", () => {
 
   test("trims the query before matching", () => {
     assert.deepEqual(filterFavorites(favs, "  яблоко  ").map((f) => f.title), ["Перекус"]);
+  });
+});
+
+describe("sameFavoriteTitle / hasFavoriteTitle (dedup)", () => {
+  test("case- and whitespace-insensitive equality", () => {
+    assert.ok(sameFavoriteTitle("Кофе", " кофе "));
+    assert.ok(sameFavoriteTitle("Овсянка + Кофе", "овсянка + кофе"));
+    assert.ok(!sameFavoriteTitle("Кофе", "Чай"));
+  });
+
+  test("hasFavoriteTitle finds an existing title regardless of case/spaces", () => {
+    const titles = ["Завтрак", "Обед"];
+    assert.ok(hasFavoriteTitle(titles, "  завтрак "));
+    assert.ok(hasFavoriteTitle(titles, "ОБЕД"));
+    assert.ok(!hasFavoriteTitle(titles, "Ужин"));
+    assert.ok(!hasFavoriteTitle([], "Завтрак"));
   });
 });

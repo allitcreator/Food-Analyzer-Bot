@@ -1,6 +1,7 @@
 import { Pencil, Trash2, Utensils, RotateCw, Star } from "lucide-react";
 import type { FoodLog } from "@/lib/types";
 import { MEAL_LABELS, MEAL_ORDER, round } from "@/lib/format";
+import { hasFavoriteTitle } from "@shared/favorites-filter";
 import { Card } from "@/components/ui/Card";
 
 interface MealGroupsProps {
@@ -11,6 +12,8 @@ interface MealGroupsProps {
   onFavorite?: (log: FoodLog) => void;
   /** Ids currently being repeated (disables their button + shows активность). */
   repeatingId?: number | null;
+  /** Titles of the user's own favorites — a matching dish shows a filled star. */
+  favoriteTitles?: string[];
 }
 
 /** Food entries grouped by meal type with per-meal calorie subtotals. */
@@ -21,6 +24,7 @@ export function MealGroups({
   onRepeat,
   onFavorite,
   repeatingId,
+  favoriteTitles,
 }: MealGroupsProps) {
   if (logs.length === 0) {
     return (
@@ -48,7 +52,9 @@ export function MealGroups({
               <span className="text-xs text-muted-foreground">{round(subtotal)} ккал</span>
             </div>
             <Card className="divide-y divide-card-border">
-              {items.map((log) => (
+              {items.map((log) => {
+                const isFavorited = hasFavoriteTitle(favoriteTitles ?? [], log.foodName);
+                return (
                 <div key={log.id} className="flex items-center gap-3 px-4 py-3">
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[15px] font-medium">{log.foodName}</p>
@@ -72,10 +78,10 @@ export function MealGroups({
                     <button
                       onClick={() => onFavorite(log)}
                       className="rounded-full p-2 text-chart-3 hover:bg-secondary"
-                      aria-label="В избранное"
-                      title="В избранное"
+                      aria-label={isFavorited ? "Уже в избранном" : "В избранное"}
+                      title={isFavorited ? "Уже в избранном" : "В избранное"}
                     >
-                      <Star className="h-4 w-4" />
+                      <Star className={`h-4 w-4 ${isFavorited ? "fill-current" : ""}`} />
                     </button>
                   )}
                   {onEdit && (
@@ -97,7 +103,8 @@ export function MealGroups({
                     </button>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </Card>
           </div>
         );

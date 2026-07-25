@@ -13,6 +13,7 @@ import {
   todayISO,
 } from "@/lib/format";
 import { hapticNotification, hapticSelection } from "@/lib/telegram";
+import { hasFavoriteTitle } from "@shared/favorites-filter";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -33,6 +34,16 @@ export default function History() {
     queryKey: ["day", date],
     queryFn: () => api.day(date),
   });
+
+  // Own favorites — to show a filled star on already-saved dishes and to avoid
+  // creating duplicates when the star is tapped again.
+  const { data: favData } = useQuery({
+    queryKey: ["favorites"],
+    queryFn: api.favorites,
+  });
+  const ownFavTitles = (favData?.favorites ?? [])
+    .filter((f) => f.isOwner)
+    .map((f) => f.title);
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["day"] });
 
@@ -76,7 +87,9 @@ export default function History() {
     onSuccess: (_res, log) => {
       hapticNotification("success");
       toast(`В избранном: ${log.foodName}`);
-      qc.invalidateQueries({ queryKey: ["favorites"] });
+      // The favorites list isn't mounted on some screens, so force a refetch of
+      // inactive queries too — otherwise the list stays stale until re-entry.
+      qc.invalidateQueries({ queryKey: ["favorites"], refetchType: "all" });
     },
     onError: () => {
       hapticNotification("error");
@@ -137,7 +150,14 @@ export default function History() {
               onEdit={setEditing}
               onDelete={setDeleting}
               onRepeat={(log) => repeatMutation.mutate(log)}
-              onFavorite={(log) => favMutation.mutate(log)}
+              onFavorite={(log) => {
+                if (hasFavoriteTitle(ownFavTitles, log.foodName)) {
+                  toast("Уже в избранном");
+                  return;
+                }
+                favMutation.mutate(log);
+              }}
+              favoriteTitles={ownFavTitles}
               repeatingId={repeatMutation.isPending ? repeatMutation.variables?.id : null}
             />
             {data.foodLogs.length > 0 && <DayTotals data={data} />}

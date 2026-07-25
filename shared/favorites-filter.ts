@@ -23,3 +23,17 @@ export function filterFavorites<T extends SearchableFavorite>(favs: T[], query: 
   if (!q) return favs;
   return favs.filter((f) => matchesFavoriteQuery(f, q));
 }
+
+/**
+ * Case- and whitespace-insensitive title equality — the single source of truth
+ * for "is this dish already a favorite?" de-duplication, shared by the Mini App
+ * (star fill / no-dup tap) and the server (POST /favorites idempotency).
+ */
+export function sameFavoriteTitle(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+/** True when `titles` already contains one equal (case-insensitive) to `title`. */
+export function hasFavoriteTitle(titles: string[], title: string): boolean {
+  return titles.some((t) => sameFavoriteTitle(t, title));
+}
