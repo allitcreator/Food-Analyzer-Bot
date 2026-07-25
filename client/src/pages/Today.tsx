@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import type { DayResponse, Favorite } from "@/lib/types";
 import { round } from "@/lib/format";
 import { hapticImpact, hapticNotification } from "@/lib/telegram";
+import { crumb } from "@/lib/debug";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Ring, MacroRing } from "@/components/Ring";
@@ -120,11 +121,18 @@ function FavoritesCard() {
   const logMutation = useMutation({
     mutationFn: (fav: Favorite) => api.logFavorite(fav.id),
     onSuccess: (_res, fav) => {
+      crumb("today-fav-log:success-enter");
       hapticNotification("success");
+      crumb("today-fav-log:after-haptic");
       toast(`Записано: ${fav.title}`);
+      crumb("today-fav-log:after-toast");
       qc.invalidateQueries({ queryKey: ["day"] });
+      crumb("today-fav-log:after-invalidate");
+      setTimeout(() => crumb("today-fav-log:alive+1s"), 1000);
+      setTimeout(() => crumb("today-fav-log:alive+3s"), 3000);
     },
     onError: () => {
+      crumb("today-fav-log:error");
       hapticNotification("error");
       toast("Не удалось записать");
     },

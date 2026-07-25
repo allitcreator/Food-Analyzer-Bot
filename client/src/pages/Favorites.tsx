@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import type { Favorite } from "@/lib/types";
 import { round } from "@/lib/format";
 import { hapticImpact, hapticNotification } from "@/lib/telegram";
+import { crumb } from "@/lib/debug";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
@@ -28,17 +29,26 @@ export default function Favorites() {
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["favorites"] });
-    qc.invalidateQueries({ queryKey: ["day"] });
+    // Today неактивен на этом экране — refetchType:"all", иначе останется stale.
+    qc.invalidateQueries({ queryKey: ["day"], refetchType: "all" });
   };
 
   const logMutation = useMutation({
     mutationFn: (fav: Favorite) => api.logFavorite(fav.id),
     onSuccess: (_res, fav) => {
+      crumb("fav-log:success-enter");
       hapticNotification("success");
+      crumb("fav-log:after-haptic");
       toast(`Записано: ${fav.title}`);
-      qc.invalidateQueries({ queryKey: ["day"] });
+      crumb("fav-log:after-toast");
+      // Today неактивен на этом экране — refetchType:"all", иначе останется stale.
+      qc.invalidateQueries({ queryKey: ["day"], refetchType: "all" });
+      crumb("fav-log:after-invalidate");
+      setTimeout(() => crumb("fav-log:alive+1s"), 1000);
+      setTimeout(() => crumb("fav-log:alive+3s"), 3000);
     },
     onError: () => {
+      crumb("fav-log:error");
       hapticNotification("error");
       toast("Не удалось записать");
     },

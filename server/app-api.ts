@@ -200,6 +200,29 @@ async function applyItemsToToday(
 export function createAppApiRouter(): Router {
   const router = Router();
 
+  // ─── ВРЕМЕННАЯ диагностика iOS-фриза ───────────────────────────────────────
+  // POST /api/app/crumb?e=<step> — beacon-«крошка» от клиента. Стоит ДО
+  // telegramAuth намеренно: navigator.sendBeacon не умеет ставить заголовок
+  // Authorization. Тело не парсим, читаем только query-параметр `e`, логируем и
+  // отвечаем 204. Отдельный rate-limit по IP (120/мин), чтобы неаутентифициро-
+  // ванный эндпоинт нельзя было заспамить. Никаких записей в БД.
+  // Удалить после расследования фриза на iPhone.
+  router.post(
+    "/crumb",
+    rateLimit({
+      windowMs: 60 * 1000,
+      max: 120,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { error: "rate_limited" },
+    }),
+    (req: Request, res: Response) => {
+      const e = String(req.query.e ?? "").slice(0, 300);
+      console.log("[crumb]", new Date().toISOString(), e);
+      res.status(204).end();
+    },
+  );
+
   // Auth first — so the rate-limit key can use the resolved user id.
   router.use(telegramAuth);
 

@@ -13,6 +13,7 @@ import {
   todayISO,
 } from "@/lib/format";
 import { hapticNotification, hapticSelection } from "@/lib/telegram";
+import { crumb } from "@/lib/debug";
 import { hasFavoriteTitle } from "@shared/favorites-filter";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/Card";
@@ -45,7 +46,8 @@ export default function History() {
     .filter((f) => f.isOwner)
     .map((f) => f.title);
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["day"] });
+  // Today неактивен на этом экране — refetchType:"all", иначе останется stale.
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["day"], refetchType: "all" });
 
   const delMutation = useMutation({
     mutationFn: (id: number) => api.deleteLog(id),
@@ -59,11 +61,18 @@ export default function History() {
   const repeatMutation = useMutation({
     mutationFn: (log: FoodLog) => api.repeatLog(log.id),
     onSuccess: (_res, log) => {
+      crumb("repeat:success-enter");
       hapticNotification("success");
+      crumb("repeat:after-haptic");
       toast(`Повторено: ${log.foodName}`);
+      crumb("repeat:after-toast");
       invalidate();
+      crumb("repeat:after-invalidate");
+      setTimeout(() => crumb("repeat:alive+1s"), 1000);
+      setTimeout(() => crumb("repeat:alive+3s"), 3000);
     },
     onError: () => {
+      crumb("repeat:error");
       hapticNotification("error");
       toast("Не удалось повторить");
     },
@@ -85,13 +94,20 @@ export default function History() {
         ],
       }),
     onSuccess: (_res, log) => {
+      crumb("fav-add:success-enter");
       hapticNotification("success");
+      crumb("fav-add:after-haptic");
       toast(`В избранном: ${log.foodName}`);
+      crumb("fav-add:after-toast");
       // The favorites list isn't mounted on some screens, so force a refetch of
       // inactive queries too — otherwise the list stays stale until re-entry.
       qc.invalidateQueries({ queryKey: ["favorites"], refetchType: "all" });
+      crumb("fav-add:after-invalidate");
+      setTimeout(() => crumb("fav-add:alive+1s"), 1000);
+      setTimeout(() => crumb("fav-add:alive+3s"), 3000);
     },
     onError: () => {
+      crumb("fav-add:error");
       hapticNotification("error");
       toast("Не удалось сохранить");
     },
