@@ -5,7 +5,7 @@ import { IStorage } from "./storage";
 import { analyzeFoodText, analyzeFoodImage, generateEveningReport, generatePeriodAnalysis, transcribeVoice, askCoach, detectBarcode, generateWeightAnalysis, classifyIntent, analyzeWorkout, groupFoodNames, FoodItem } from "./openai";
 import { decodeBarcodeFromImage, isValidEanChecksum, classifyHydratingProduct, barcodeCacheToFoodItem, foodItemToBarcodeCache } from "./barcode";
 import { generateMonthlyPDF, extractTopFoods } from "./pdf";
-import { User, FoodLog, Favorite, FavoriteItem } from "@shared/schema";
+import { User, FoodLog, VisibleFavorite, FavoriteItem } from "@shared/schema";
 import { progressBar } from "./lib/goals";
 import { mealTypeByTime, buildMealTitle, toFavoriteItems, shouldSuggestFavorite, FAVORITE_SUGGEST_DAYS } from "./lib/favorites";
 
@@ -1657,24 +1657,39 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
   }
 
   // ─── Favorites helpers ────────────────────────────────────────────────────
-  function buildFavoritesKeyboard(favs: Favorite[], editMode: boolean) {
-    const rows = favs.map((f) => {
-      const label = f.title.length > 40 ? f.title.slice(0, 39) + '…' : f.title;
-      return [{
-        text: editMode ? `🗑 ${label}` : `⭐ ${label}`,
-        callback_data: editMode ? `fav_del_${f.id}` : `fav_use_${f.id}`,
-      }];
-    });
-    rows.push([
-      editMode
-        ? { text: '← Готово', callback_data: 'fav_done' }
-        : { text: '🗑 Редактировать', callback_data: 'fav_edit' },
-    ]);
+  function favLabel(title: string): string {
+    return title.length > 40 ? title.slice(0, 39) + '…' : title;
+  }
+
+  // Keyboard over the VISIBLE list: own favorites first (⭐), then shared ones
+  // from other users (👥 with author). Only own favorites can be edited/deleted.
+  function buildFavoritesKeyboard(favs: VisibleFavorite[], editMode: boolean) {
+    const own = favs.filter((f) => f.isOwner);
+    const shared = favs.filter((f) => !f.isOwner);
+    const rows: { text: string; callback_data: string }[][] = [];
+
+    if (editMode) {
+      for (const f of own) {
+        rows.push([{ text: `🗑 ${favLabel(f.title)}`, callback_data: `fav_del_${f.id}` }]);
+      }
+      rows.push([{ text: '← Готово', callback_data: 'fav_done' }]);
+    } else {
+      for (const f of own) {
+        rows.push([{ text: `⭐ ${favLabel(f.title)}`, callback_data: `fav_use_${f.id}` }]);
+      }
+      for (const f of shared) {
+        const who = f.ownerName ? `@${f.ownerName}` : 'участник';
+        rows.push([{ text: `👥 ${favLabel(f.title)} · ${who}`, callback_data: `fav_use_${f.id}` }]);
+      }
+      if (own.length > 0) {
+        rows.push([{ text: '🗑 Редактировать', callback_data: 'fav_edit' }]);
+      }
+    }
     return { inline_keyboard: rows };
   }
 
   async function sendFavoritesList(chatId: number, userId: number, telegramId: string) {
-    const favs = await storage.getFavorites(userId);
+    const favs = await storage.getVisibleFavorites(userId);
     if (favs.length === 0) {
       bot.sendMessage(chatId,
         "⭐ У вас пока нет избранного.\n\n" +
@@ -1684,7 +1699,11 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       return;
     }
     favoritesEditMode[telegramId] = false;
-    bot.sendMessage(chatId, "⭐ *Избранное*\n\nТапните позицию, чтобы записать её на сегодня:", {
+    const hasShared = favs.some((f) => !f.isOwner);
+    let text = "⭐ *Избранное*\n\nТапните позицию, чтобы записать её на сегодня.";
+    if (hasShared) text += "\n\n👥 *Общие* — блюда, которыми поделились другие участники.";
+    text += "\n\n_Поделиться своим блюдом со всеми можно в приложении._";
+    bot.sendMessage(chatId, text, {
       parse_mode: 'Markdown',
       reply_markup: buildFavoritesKeyboard(favs, false),
     });
@@ -2427,8 +2446,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     // ─── Favorites: use / edit / delete ───────────────────────────────────
     } else if (query.data.startsWith("fav_use_")) {
       const favId = parseInt(query.data.replace("fav_use_", ""));
-      const favs = await storage.getFavorites(user.id);
-      const fav = favs.find((f) => f.id === favId);
+      // Visible = own OR shared by someone else; both can be logged to my diary.
+      const fav = await storage.getVisibleFavoriteById(user.id, favId);
       if (!fav) {
         bot.answerCallbackQuery(query.id, { text: 'Избранное не найдено' });
         return;
@@ -2441,7 +2460,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       const editMode = query.data === "fav_edit";
       favoritesEditMode[telegramId] = editMode;
       bot.answerCallbackQuery(query.id).catch(() => {});
-      const favs = await storage.getFavorites(user.id);
+      const favs = await storage.getVisibleFavorites(user.id);
       if (favs.length === 0) {
         bot.editMessageText("⭐ Избранное пусто.", {
           chat_id: chatId, message_id: query.message?.message_id,
@@ -2454,9 +2473,10 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
 
     } else if (query.data.startsWith("fav_del_")) {
       const favId = parseInt(query.data.replace("fav_del_", ""));
+      // Ownership enforced in storage — only the user's own favorite is removed.
       await storage.deleteFavorite(user.id, favId);
       bot.answerCallbackQuery(query.id, { text: '🗑 Удалено' }).catch(() => {});
-      const favs = await storage.getFavorites(user.id);
+      const favs = await storage.getVisibleFavorites(user.id);
       if (favs.length === 0) {
         bot.editMessageText("⭐ Избранное пусто.", {
           chat_id: chatId, message_id: query.message?.message_id,

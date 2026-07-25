@@ -140,6 +140,7 @@ function FavoritesCard() {
 
   const favorites = data?.favorites ?? [];
   if (favorites.length === 0) return null;
+  const hasOwn = favorites.some((f) => f.isOwner);
 
   return (
     <Card>
@@ -148,16 +149,18 @@ function FavoritesCard() {
           <span className="flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
             <Star className="h-4 w-4 text-chart-3" /> Избранное
           </span>
-          <button
-            onClick={() => {
-              hapticImpact("light");
-              setEditMode((v) => !v);
-            }}
-            className="rounded-full p-1.5 text-muted-foreground hover:bg-secondary"
-            aria-label={editMode ? "Готово" : "Править"}
-          >
-            {editMode ? <Check className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
-          </button>
+          {hasOwn && (
+            <button
+              onClick={() => {
+                hapticImpact("light");
+                setEditMode((v) => !v);
+              }}
+              className="rounded-full p-1.5 text-muted-foreground hover:bg-secondary"
+              aria-label={editMode ? "Готово" : "Править"}
+            >
+              {editMode ? <Check className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+            </button>
+          )}
         </div>
         <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
           {favorites.map((fav) => (
@@ -173,7 +176,7 @@ function FavoritesCard() {
               >
                 {fav.title}
               </button>
-              {editMode && (
+              {editMode && fav.isOwner && (
                 <button
                   onClick={() => delMutation.mutate(fav.id)}
                   className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow"

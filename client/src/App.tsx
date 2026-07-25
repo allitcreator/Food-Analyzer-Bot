@@ -8,6 +8,7 @@ import { FullscreenSpinner } from "@/components/ui/Spinner";
 import { ErrorScreen } from "@/components/StateScreens";
 import Today from "@/pages/Today";
 import History from "@/pages/History";
+import Favorites from "@/pages/Favorites";
 import Trends from "@/pages/Trends";
 import Profile from "@/pages/Profile";
 
@@ -25,6 +26,7 @@ export default function App() {
         <Switch>
           <Route path="/" component={Today} />
           <Route path="/history" component={History} />
+          <Route path="/favorites" component={Favorites} />
           <Route path="/trends" component={Trends} />
           <Route path="/profile" component={Profile} />
           <Route>

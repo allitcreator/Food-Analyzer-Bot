@@ -169,13 +169,18 @@ export interface WeightResponse {
   logs: WeightLog[];
 }
 
-/** A saved favorite meal/dish (`createdAt` is an ISO string over the wire). */
+/**
+ * A favorite in the visible list (GET /favorites): the user's own favorites
+ * plus everyone's shared ones. `isOwner` splits "Мои" from "Общие"; `ownerName`
+ * is the author's @username for shared items (null → "от участника").
+ */
 export interface Favorite {
   id: number;
-  userId: number;
   title: string;
   items: FavoriteItemInput[];
-  createdAt: string | null;
+  isShared: boolean;
+  isOwner: boolean;
+  ownerName: string | null;
 }
 
 /** Result of writing a favorite / repeating a log onto today. */

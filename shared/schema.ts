@@ -129,6 +129,9 @@ export const favorites = pgTable("favorites", {
   userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   items: jsonb("items").notNull().$type<FavoriteItem[]>(),
+  // When true, this favorite is visible to every user (they can log it into
+  // their own diary). Sharing is toggled only from the Mini App by the owner.
+  isShared: boolean("is_shared").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => ({
   userIdx: index("favorites_user_id_idx").on(table.userId),
@@ -184,6 +187,16 @@ export type BarcodeProduct = typeof barcodeProducts.$inferSelect;
 export type InsertBarcodeProduct = z.infer<typeof insertBarcodeProductSchema>;
 export type Favorite = typeof favorites.$inferSelect;
 export type InsertFavorite = z.infer<typeof insertFavoriteSchema>;
+
+/**
+ * A favorite as shown in the "visible" list: the user's own favorites plus
+ * everyone's shared ones. `isOwner` distinguishes the two; `ownerName` is the
+ * author's @username (null → shown as "от участника" in the UI).
+ */
+export type VisibleFavorite = Favorite & {
+  isOwner: boolean;
+  ownerName: string | null;
+};
 
 export type CreateFoodLogRequest = InsertFoodLog;
 export type StatsResponse = {

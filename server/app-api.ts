@@ -13,7 +13,7 @@ import { storage } from "./storage";
 import { telegramAuth } from "./lib/telegram-auth";
 import { computeEnergyBalance } from "./lib/energy";
 import { mealTypeByTime } from "./lib/favorites";
-import type { User, FoodLog, FavoriteItem } from "@shared/schema";
+import type { User, FoodLog, FavoriteItem, VisibleFavorite } from "@shared/schema";
 import {
   dayQuerySchema,
   statsQuerySchema,
@@ -23,6 +23,7 @@ import {
   profilePatchSchema,
   settingsPatchSchema,
   createFavoriteSchema,
+  updateFavoriteSchema,
   idParam,
 } from "@shared/routes";
 
@@ -45,6 +46,18 @@ function currentUser(req: Request): User {
 /** Shape a user object before sending it to the client. */
 function publicUser(user: User) {
   return { ...user };
+}
+
+/** Shape a favorite for the client: only the fields the Mini App needs. */
+function publicFavorite(fav: VisibleFavorite) {
+  return {
+    id: fav.id,
+    title: fav.title,
+    items: fav.items,
+    isShared: fav.isShared,
+    isOwner: fav.isOwner,
+    ownerName: fav.ownerName,
+  };
 }
 
 function userGoals(user: User) {
@@ -345,24 +358,53 @@ export function createAppApiRouter(): Router {
     }),
   );
 
-  // GET /api/app/favorites — the user's saved meals/dishes.
+  // GET /api/app/favorites — visible list: the user's own + everyone's shared.
   router.get(
     "/favorites",
     asyncHandler(async (req, res) => {
       const user = currentUser(req);
-      const favorites = await storage.getFavorites(user.id);
-      res.json({ favorites });
+      const favorites = await storage.getVisibleFavorites(user.id);
+      res.json({ favorites: favorites.map(publicFavorite) });
     }),
   );
 
-  // POST /api/app/favorites { title, items } — save a favorite.
+  // POST /api/app/favorites { title, items } — save a favorite (always own).
   router.post(
     "/favorites",
     asyncHandler(async (req, res) => {
       const user = currentUser(req);
       const { title, items } = createFavoriteSchema.parse(req.body);
       const fav = await storage.createFavorite({ userId: user.id, title, items });
-      res.status(201).json(fav);
+      res.status(201).json(
+        publicFavorite({ ...fav, isOwner: true, ownerName: user.username ?? null }),
+      );
+    }),
+  );
+
+  // PATCH /api/app/favorites/:id { isShared } — owner toggles sharing.
+  // 404 when the favorite isn't visible at all, 403 when it's someone else's.
+  router.patch(
+    "/favorites/:id",
+    asyncHandler(async (req, res) => {
+      const user = currentUser(req);
+      const id = idParam.parse(req.params.id);
+      const { isShared } = updateFavoriteSchema.parse(req.body);
+
+      const fav = await storage.getVisibleFavoriteById(user.id, id);
+      if (!fav) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      if (!fav.isOwner) {
+        res.status(403).json({ error: "forbidden" });
+        return;
+      }
+      const updated = await storage.setFavoriteShared(user.id, id, isShared);
+      if (!updated) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      res.json(publicFavorite({ ...updated, isOwner: true, ownerName: user.username ?? null }));
     }),
   );
 
@@ -377,15 +419,15 @@ export function createAppApiRouter(): Router {
     }),
   );
 
-  // POST /api/app/favorites/:id/log — write a favorite onto today.
+  // POST /api/app/favorites/:id/log — write a favorite onto today. Allowed for
+  // the user's own favorites and for anyone's shared ones (into their diary).
   router.post(
     "/favorites/:id/log",
     asyncHandler(async (req, res) => {
       const user = currentUser(req);
       const id = idParam.parse(req.params.id);
 
-      const favorites = await storage.getFavorites(user.id);
-      const fav = favorites.find((f) => f.id === id);
+      const fav = await storage.getVisibleFavoriteById(user.id, id);
       if (!fav) {
         res.status(404).json({ error: "not_found" });
         return;

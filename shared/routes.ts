@@ -135,6 +135,14 @@ export const createFavoriteSchema = z
   .strict();
 export type CreateFavoriteBody = z.infer<typeof createFavoriteSchema>;
 
+/** PATCH /api/app/favorites/:id — owner toggles sharing to all users. */
+export const updateFavoriteSchema = z
+  .object({
+    isShared: z.boolean(),
+  })
+  .strict();
+export type UpdateFavoriteBody = z.infer<typeof updateFavoriteSchema>;
+
 /** PATCH /api/app/settings — toggles and times mirrored from /settings. */
 export const settingsPatchSchema = z
   .object({

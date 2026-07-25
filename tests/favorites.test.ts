@@ -11,7 +11,8 @@ import {
   sameTitle,
   shouldSuggestFavorite,
 } from "../server/lib/favorites";
-import { createFavoriteSchema } from "../shared/routes";
+import { createFavoriteSchema, updateFavoriteSchema } from "../shared/routes";
+import { matchesFavoriteQuery, filterFavorites } from "../shared/favorites-filter";
 
 // Helper: a Date whose local wall-clock is HH:MM (matches how getUserNow builds it).
 const at = (h: number, m = 0) => new Date(2026, 0, 1, h, m, 0);
@@ -185,5 +186,54 @@ describe("createFavoriteSchema (POST /api/app/favorites)", () => {
     assert.throws(() =>
       createFavoriteSchema.parse({ title: "X", items: [{ ...item, foodScore: 5 }] }),
     );
+  });
+});
+
+describe("updateFavoriteSchema (PATCH /api/app/favorites/:id)", () => {
+  test("accepts a boolean isShared", () => {
+    assert.equal(updateFavoriteSchema.parse({ isShared: true }).isShared, true);
+    assert.equal(updateFavoriteSchema.parse({ isShared: false }).isShared, false);
+  });
+
+  test("rejects a missing or non-boolean isShared", () => {
+    assert.throws(() => updateFavoriteSchema.parse({}));
+    assert.throws(() => updateFavoriteSchema.parse({ isShared: "yes" }));
+  });
+
+  test("rejects unknown fields (strict)", () => {
+    assert.throws(() => updateFavoriteSchema.parse({ isShared: true, title: "X" }));
+  });
+});
+
+describe("matchesFavoriteQuery / filterFavorites (Mini App search)", () => {
+  const favs = [
+    { title: "Завтрак", items: [{ foodName: "Овсянка" }, { foodName: "Кофе" }] },
+    { title: "Обед", items: [{ foodName: "Гречка с курицей" }] },
+    { title: "Перекус", items: [{ foodName: "Яблоко" }] },
+  ];
+
+  test("empty / whitespace query matches everything", () => {
+    assert.ok(matchesFavoriteQuery(favs[0], ""));
+    assert.ok(matchesFavoriteQuery(favs[0], "   "));
+    assert.equal(filterFavorites(favs, "").length, 3);
+  });
+
+  test("matches on title (case-insensitive)", () => {
+    assert.ok(matchesFavoriteQuery(favs[0], "завтрак"));
+    assert.deepEqual(filterFavorites(favs, "обед").map((f) => f.title), ["Обед"]);
+  });
+
+  test("matches on an item name", () => {
+    assert.ok(matchesFavoriteQuery(favs[1], "курица".slice(0, 4))); // "кури"
+    assert.deepEqual(filterFavorites(favs, "кофе").map((f) => f.title), ["Завтрак"]);
+  });
+
+  test("no match → filtered out", () => {
+    assert.ok(!matchesFavoriteQuery(favs[2], "пицца"));
+    assert.equal(filterFavorites(favs, "пицца").length, 0);
+  });
+
+  test("trims the query before matching", () => {
+    assert.deepEqual(filterFavorites(favs, "  яблоко  ").map((f) => f.title), ["Перекус"]);
   });
 });

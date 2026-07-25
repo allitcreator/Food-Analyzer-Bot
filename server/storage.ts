@@ -1,6 +1,6 @@
-import { users, foodLogs, waterLogs, weightLogs, workoutLogs, barcodeProducts, favorites, type User, type InsertUser, type FoodLog, type InsertFoodLog, type WaterLog, type WeightLog, type WorkoutLog, type InsertWorkoutLog, type BarcodeProduct, type InsertBarcodeProduct, type Favorite, type FavoriteItem } from "@shared/schema";
+import { users, foodLogs, waterLogs, weightLogs, workoutLogs, barcodeProducts, favorites, type User, type InsertUser, type FoodLog, type InsertFoodLog, type WaterLog, type WeightLog, type WorkoutLog, type InsertWorkoutLog, type BarcodeProduct, type InsertBarcodeProduct, type Favorite, type VisibleFavorite, type FavoriteItem } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, sql, desc, gte, lte, lt } from "drizzle-orm";
+import { eq, and, or, sql, desc, gte, lte, lt } from "drizzle-orm";
 import { calcGoalsFromProfile } from "./lib/goals";
 
 export interface IStorage {
@@ -56,7 +56,10 @@ export interface IStorage {
   upsertBarcodeProduct(product: InsertBarcodeProduct): Promise<BarcodeProduct>;
 
   getFavorites(userId: number): Promise<Favorite[]>;
+  getVisibleFavorites(userId: number): Promise<VisibleFavorite[]>;
+  getVisibleFavoriteById(userId: number, id: number): Promise<VisibleFavorite | undefined>;
   createFavorite(fav: { userId: number; title: string; items: FavoriteItem[] }): Promise<Favorite>;
+  setFavoriteShared(userId: number, id: number, isShared: boolean): Promise<Favorite | undefined>;
   deleteFavorite(userId: number, id: number): Promise<void>;
   countRecentFoodName(userId: number, foodName: string, days: number): Promise<number>;
 }
@@ -486,8 +489,74 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(favorites.createdAt));
   }
 
+  // Everything a user may see & log: all of their own favorites plus every
+  // favorite shared by anyone. Each row is annotated with ownership and the
+  // author's @username (null when the author has no username).
+  async getVisibleFavorites(userId: number): Promise<VisibleFavorite[]> {
+    const rows = await db
+      .select({
+        id: favorites.id,
+        userId: favorites.userId,
+        title: favorites.title,
+        items: favorites.items,
+        isShared: favorites.isShared,
+        createdAt: favorites.createdAt,
+        ownerName: users.username,
+      })
+      .from(favorites)
+      .innerJoin(users, eq(favorites.userId, users.id))
+      .where(or(eq(favorites.userId, userId), eq(favorites.isShared, true)))
+      .orderBy(desc(favorites.createdAt));
+    return rows.map((r) => ({
+      id: r.id,
+      userId: r.userId,
+      title: r.title,
+      items: r.items,
+      isShared: r.isShared,
+      createdAt: r.createdAt,
+      isOwner: r.userId === userId,
+      ownerName: r.ownerName ?? null,
+    }));
+  }
+
+  // A single visible favorite by id: own (any) or someone else's shared one.
+  async getVisibleFavoriteById(userId: number, id: number): Promise<VisibleFavorite | undefined> {
+    const [r] = await db
+      .select({
+        id: favorites.id,
+        userId: favorites.userId,
+        title: favorites.title,
+        items: favorites.items,
+        isShared: favorites.isShared,
+        createdAt: favorites.createdAt,
+        ownerName: users.username,
+      })
+      .from(favorites)
+      .innerJoin(users, eq(favorites.userId, users.id))
+      .where(and(eq(favorites.id, id), or(eq(favorites.userId, userId), eq(favorites.isShared, true))));
+    if (!r) return undefined;
+    return {
+      id: r.id,
+      userId: r.userId,
+      title: r.title,
+      items: r.items,
+      isShared: r.isShared,
+      createdAt: r.createdAt,
+      isOwner: r.userId === userId,
+      ownerName: r.ownerName ?? null,
+    };
+  }
+
   async createFavorite(fav: { userId: number; title: string; items: FavoriteItem[] }): Promise<Favorite> {
     const [row] = await db.insert(favorites).values(fav).returning();
+    return row;
+  }
+
+  // Toggle sharing — ownership baked into the WHERE, so only the owner can
+  // change it. Returns undefined when the row isn't the caller's (404/403).
+  async setFavoriteShared(userId: number, id: number, isShared: boolean): Promise<Favorite | undefined> {
+    const [row] = await db.update(favorites).set({ isShared })
+      .where(and(eq(favorites.id, id), eq(favorites.userId, userId))).returning();
     return row;
   }
 

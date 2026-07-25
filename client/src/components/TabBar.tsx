@@ -1,11 +1,12 @@
 import { Link, useLocation } from "wouter";
-import { Home, CalendarDays, TrendingUp, User } from "lucide-react";
+import { Home, CalendarDays, Star, TrendingUp, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { hapticSelection } from "@/lib/telegram";
 
 const TABS = [
   { path: "/", label: "Сегодня", icon: Home },
   { path: "/history", label: "История", icon: CalendarDays },
+  { path: "/favorites", label: "Избранное", icon: Star },
   { path: "/trends", label: "Тренды", icon: TrendingUp },
   { path: "/profile", label: "Профиль", icon: User },
 ];

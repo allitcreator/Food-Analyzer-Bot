@@ -86,6 +86,8 @@ export const api = {
     request<{ favorites: Favorite[] }>("GET", "/favorites"),
   createFavorite: (body: CreateFavoriteBody) =>
     request<Favorite>("POST", "/favorites", body),
+  setFavoriteShared: (id: number, isShared: boolean) =>
+    request<Favorite>("PATCH", `/favorites/${id}`, { isShared }),
   deleteFavorite: (id: number) =>
     request<{ ok: boolean }>("DELETE", `/favorites/${id}`),
   logFavorite: (id: number) =>
