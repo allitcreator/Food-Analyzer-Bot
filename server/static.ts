@@ -15,8 +15,12 @@ import {
  *   - fingerprinted /app/assets/* → `immutable`, cached for a year;
  *   - a missing asset returns an honest 404, never index.html.
  */
-export function serveStatic(app: Express) {
-  const distPath = path.resolve(__dirname, "public");
+export function serveStatic(
+  app: Express,
+  // Overridable for tests. In the production bundle (CJS) __dirname is dist/,
+  // so the default resolves to dist/public.
+  distPath: string = path.resolve(__dirname, "public"),
+) {
   if (!fs.existsSync(distPath)) {
     throw new Error(
       `Could not find the build directory: ${distPath}, make sure to build the client first`,
@@ -43,8 +47,20 @@ export function serveStatic(app: Express) {
 
   // SPA fallback: only for real app routes. Missing assets / file-like paths
   // fall through to a 404 rather than being answered with index.html.
+  //
+  // NB: with `app.use("/app/{*path}")` Express 5 puts the WHOLE matched path
+  // into req.baseUrl and leaves req.path as "/", so the decision must be made
+  // on req.originalUrl (query stripped, percent-decoding guarded).
   app.use("/app/{*path}", (req, res, next) => {
-    if (!shouldFallbackToIndex(req.path)) {
+    const rawPath = req.originalUrl.split("?")[0];
+    let pathname: string;
+    try {
+      pathname = decodeURIComponent(rawPath);
+    } catch {
+      // Malformed percent-encoding → not a legitimate SPA route; let it 404.
+      return next();
+    }
+    if (!shouldFallbackToIndex(pathname)) {
       return next();
     }
     res.sendFile(indexHtml, {
