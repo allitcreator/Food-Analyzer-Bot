@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Droplet, Flame, Dumbbell, Star, Pencil, Check, X } from "lucide-react";
+import { Droplet, Flame, Dumbbell, Star, Pencil, Check, X, Plus } from "lucide-react";
 import { api } from "@/lib/api";
 import type { DayResponse, Favorite } from "@/lib/types";
 import { round } from "@/lib/format";
@@ -11,11 +11,13 @@ import { Card, CardContent } from "@/components/ui/Card";
 import { Ring, MacroRing } from "@/components/Ring";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { MealGroups } from "@/components/MealGroups";
+import { AddFoodModal } from "@/components/AddFoodModal";
 import { ErrorScreen } from "@/components/StateScreens";
 import { toast } from "@/components/ui/Toast";
 
 export default function Today() {
   const qc = useQueryClient();
+  const [addOpen, setAddOpen] = useState(false);
   const { data, isLoading, isError, error, refetch } = useQuery<DayResponse>({
     queryKey: ["day", "today"],
     queryFn: () => api.day(),
@@ -33,7 +35,22 @@ export default function Today() {
 
   return (
     <div>
-      <PageHeader title="Сегодня" />
+      <PageHeader
+        title="Сегодня"
+        right={
+          <button
+            onClick={() => {
+              hapticImpact("light");
+              setAddOpen(true);
+            }}
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm active:scale-95"
+            aria-label="Добавить еду"
+          >
+            <Plus className="h-5 w-5" />
+          </button>
+        }
+      />
+      <AddFoodModal open={addOpen} onOpenChange={setAddOpen} />
       <div className="space-y-5 px-4">
         {isLoading || !data ? (
           <TodaySkeleton />

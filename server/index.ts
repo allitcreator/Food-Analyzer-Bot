@@ -38,6 +38,10 @@ app.use("/api/health", healthLimiter);
 
 app.use(
   express.json({
+    // Mini App присылает фото едой как base64 в JSON (~1 МБ после сжатия на
+    // клиенте) — дефолтных 100kb мало. nginx на проде режет тело на 1 МБ, так
+    // что клиент всё равно жмёт картинку ниже этого порога.
+    limit: "2mb",
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },

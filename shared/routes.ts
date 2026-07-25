@@ -143,6 +143,61 @@ export const updateFavoriteSchema = z
   .strict();
 export type UpdateFavoriteBody = z.infer<typeof updateFavoriteSchema>;
 
+/**
+ * POST /api/app/analyze — AI-распознавание еды из Mini App. Ровно одно из полей:
+ * `text` (описание) ИЛИ `imageBase64` (сжатое на клиенте фото, base64 БЕЗ
+ * data:-префикса). Ничего не пишет в БД — только возвращает распознанные позиции.
+ */
+export const analyzeSchema = z
+  .object({
+    text: z.string().trim().min(1).max(2000).optional(),
+    imageBase64: z
+      .string()
+      .min(1)
+      .max(1_400_000)
+      .regex(/^[A-Za-z0-9+/]+={0,2}$/, "expected base64")
+      .optional(),
+  })
+  .strict()
+  .refine(
+    (o) => (o.text ? 1 : 0) + (o.imageBase64 ? 1 : 0) === 1,
+    "provide exactly one of text or imageBase64",
+  );
+export type AnalyzeBody = z.infer<typeof analyzeSchema>;
+
+/**
+ * Одна подтверждённая пользователем позиция для POST /api/app/logs. В отличие от
+ * `favoriteItemSchema` числа НЕ целые (клиент пересчитывает БЖУ пропорционально
+ * весу) и несёт полный набор полей `FoodItem` — сервер сохраняет их как есть.
+ */
+export const analyzedItemSchema = z
+  .object({
+    foodName: z.string().min(1).max(200),
+    calories: z.number().finite().min(0).max(10000),
+    protein: z.number().finite().min(0).max(5000),
+    fat: z.number().finite().min(0).max(5000),
+    carbs: z.number().finite().min(0).max(5000),
+    weight: z.number().finite().min(0).max(5000),
+    mealType: mealTypeEnum,
+    hydrating: z.boolean().optional(),
+    foodScore: z.number().int().min(1).max(10).nullable().optional(),
+    nutritionAdvice: z.string().max(500).nullable().optional(),
+    fiber: z.number().finite().min(0).nullable().optional(),
+    sugar: z.number().finite().min(0).nullable().optional(),
+    sodium: z.number().finite().min(0).nullable().optional(),
+    saturatedFat: z.number().finite().min(0).nullable().optional(),
+  })
+  .strict();
+export type AnalyzedItemInput = z.infer<typeof analyzedItemSchema>;
+
+/** POST /api/app/logs — записать подтверждённые позиции в дневник/воду. */
+export const createLogsSchema = z
+  .object({
+    items: z.array(analyzedItemSchema).min(1).max(20),
+  })
+  .strict();
+export type CreateLogsBody = z.infer<typeof createLogsSchema>;
+
 /** PATCH /api/app/settings — toggles and times mirrored from /settings. */
 export const settingsPatchSchema = z
   .object({

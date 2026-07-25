@@ -16,6 +16,8 @@ import type {
   Favorite,
   CreateFavoriteBody,
   LogApplyResponse,
+  AnalyzedItem,
+  AnalyzeResponse,
 } from "./types";
 
 const BASE = "/api/app";
@@ -94,4 +96,10 @@ export const api = {
     request<LogApplyResponse>("POST", `/favorites/${id}/log`),
   repeatLog: (id: number) =>
     request<LogApplyResponse>("POST", `/logs/${id}/repeat`),
+
+  // Ручной ввод еды: AI-анализ фото/текста → подтверждение → запись.
+  analyzeFood: (payload: { text?: string; imageBase64?: string }) =>
+    request<AnalyzeResponse>("POST", "/analyze", payload),
+  createLogs: (items: AnalyzedItem[]) =>
+    request<LogApplyResponse>("POST", "/logs", { items }),
 };

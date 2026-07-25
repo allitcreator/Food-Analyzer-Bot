@@ -16,6 +16,7 @@ import type {
   SettingsPatchBody,
   FavoriteItemInput,
   CreateFavoriteBody,
+  AnalyzedItemInput,
 } from "@shared/routes";
 
 export type {
@@ -29,6 +30,17 @@ export type {
   FavoriteItemInput,
   CreateFavoriteBody,
 };
+
+/**
+ * Одна распознанная AI позиция (ответ POST /analyze / тело POST /logs). Повторяет
+ * поля `FoodItem` сервера; числа могут быть нецелыми (клиент пересчитывает по весу).
+ */
+export type AnalyzedItem = AnalyzedItemInput;
+
+/** Ответ POST /analyze — список распознанных позиций. */
+export interface AnalyzeResponse {
+  items: AnalyzedItem[];
+}
 
 export type MealType = "breakfast" | "lunch" | "dinner" | "snack";
 export type Gender = "male" | "female";

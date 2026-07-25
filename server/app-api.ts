@@ -13,6 +13,7 @@ import { storage } from "./storage";
 import { telegramAuth } from "./lib/telegram-auth";
 import { computeEnergyBalance } from "./lib/energy";
 import { mealTypeByTime, sameTitle } from "./lib/favorites";
+import { analyzeFoodImage, analyzeFoodText } from "./openai";
 import type { User, FoodLog, FavoriteItem, VisibleFavorite } from "@shared/schema";
 import {
   dayQuerySchema,
@@ -24,6 +25,8 @@ import {
   settingsPatchSchema,
   createFavoriteSchema,
   updateFavoriteSchema,
+  analyzeSchema,
+  createLogsSchema,
   idParam,
 } from "@shared/routes";
 
@@ -237,6 +240,85 @@ export function createAppApiRouter(): Router {
       // We key by user id (already authenticated), not IP.
       validate: { keyGeneratorIpFallback: false },
       message: { error: "rate_limited" },
+    }),
+  );
+
+  // AI-вызовы дорогие — отдельный лимит поверх router-wide: 10 запросов/мин на
+  // пользователя (ключ — user id, уже аутентифицирован, без IP-фолбэка).
+  const analyzeLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req: Request) => String(req.appUser?.id ?? "anon"),
+    validate: { keyGeneratorIpFallback: false },
+    message: { error: "rate_limited" },
+  });
+
+  // POST /api/app/analyze { text? | imageBase64? } — распознать еду, ничего не
+  // пишем. Ровно одно из полей (см. analyzeSchema). 422, если AI не распознал.
+  router.post(
+    "/analyze",
+    analyzeLimiter,
+    asyncHandler(async (req, res) => {
+      const user = currentUser(req);
+      const tz = user.timezone ?? "Europe/Moscow";
+      const body = analyzeSchema.parse(req.body);
+
+      const now = userNow(tz);
+      const bounds = mealBoundaries(user);
+      const items = body.imageBase64
+        ? await analyzeFoodImage(body.imageBase64, now, bounds)
+        : await analyzeFoodText(body.text as string, now, bounds);
+
+      if (!items || items.length === 0) {
+        res.status(422).json({ error: "unrecognized" });
+        return;
+      }
+      res.json({ items });
+    }),
+  );
+
+  // POST /api/app/logs { items } — записать подтверждённые позиции. Гидратирующие
+  // (hydrating) идут в воду, остальные — в дневник со ВСЕМИ полями. Форма ответа
+  // совпадает с POST /favorites/:id/log — клиент уже умеет её читать.
+  router.post(
+    "/logs",
+    asyncHandler(async (req, res) => {
+      const user = currentUser(req);
+      const { items } = createLogsSchema.parse(req.body);
+
+      const createdFood: FoodLog[] = [];
+      let waterAdded = 0;
+      for (const it of items) {
+        if (it.hydrating) {
+          const amount = Math.round(it.weight) || 0;
+          if (amount > 0) {
+            await storage.logWater(user.id, amount);
+            waterAdded += amount;
+          }
+          continue;
+        }
+        const log = await storage.createFoodLog({
+          userId: user.id,
+          foodName: it.foodName,
+          calories: Math.round(it.calories) || 0,
+          protein: Math.round(it.protein) || 0,
+          fat: Math.round(it.fat) || 0,
+          carbs: Math.round(it.carbs) || 0,
+          weight: Math.round(it.weight) || 0,
+          mealType: it.mealType,
+          foodScore: it.foodScore ?? null,
+          nutritionAdvice: it.nutritionAdvice ?? null,
+          fiber: it.fiber ?? null,
+          sugar: it.sugar ?? null,
+          sodium: it.sodium ?? null,
+          saturatedFat: it.saturatedFat ?? null,
+        });
+        createdFood.push(log);
+      }
+      const day = await buildDayPayload(user, userToday(user.timezone ?? "Europe/Moscow"));
+      res.status(201).json({ ok: true, createdFood, waterAdded, day });
     }),
   );
 
