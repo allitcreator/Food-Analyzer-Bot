@@ -33,6 +33,10 @@ export const users = pgTable("users", {
   aiEveningReport: boolean("ai_evening_report").default(true),   // AI text in evening report
   smartFoodGrouping: boolean("smart_food_grouping").default(true), // AI grouping in Excel top products
   barcodeScanEnabled: boolean("barcode_scan_enabled").default(true), // detect barcodes on photos
+  // Умные напоминания о пропущенном приёме: обычное время выводится из истории,
+  // пинг только если приём реально не записан к этому времени. Когда включено —
+  // заменяет статические breakfast/lunch/dinner-напоминания по расписанию.
+  smartReminders: boolean("smart_reminders").notNull().default(false),
 
   timezone: text("timezone").default("Europe/Moscow"),          // IANA timezone
   mealBreakfastEnd: text("meal_breakfast_end").default("12:30"), // завтрак до HH:MM

@@ -127,6 +127,7 @@ export interface MeResponse {
   aiEveningReport: boolean | null;
   smartFoodGrouping: boolean | null;
   barcodeScanEnabled: boolean | null;
+  smartReminders: boolean | null;
   timezone: string | null;
   mealBreakfastEnd: string | null;
   mealLunchEnd: string | null;

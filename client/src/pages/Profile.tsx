@@ -289,6 +289,12 @@ function SettingsSection({
             checked={!!user.barcodeScanEnabled}
             onChange={(v) => patch({ barcodeScanEnabled: v })}
           />
+          <Toggle
+            label="Умные напоминания"
+            hint="Обычное время приёмов бот выводит из истории и пингует, только если приём не записан к этому времени. Заменяют напоминания о еде по расписанию."
+            checked={!!user.smartReminders}
+            onChange={(v) => patch({ smartReminders: v })}
+          />
         </CardContent>
       </Card>
 

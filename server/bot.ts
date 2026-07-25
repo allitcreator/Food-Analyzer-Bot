@@ -9,6 +9,7 @@ import { User, FoodLog, VisibleFavorite, FavoriteItem } from "@shared/schema";
 import { progressBar } from "./lib/goals";
 import { mealTypeByTime, buildMealTitle, toFavoriteItems, shouldSuggestFavorite, sameTitle, FAVORITE_SUGGEST_DAYS } from "./lib/favorites";
 import { createPersistentRecord, loadPersistentState } from "./lib/persistent-state";
+import { typicalMealTimes, dueSmartReminder, minutesToHHMM } from "./lib/smart-reminders";
 
 const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
 
@@ -459,6 +460,11 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
   const pendingFavSuggestion = createPersistentRecord("pendingFavSuggestion", (persisted.get("pendingFavSuggestion") ?? {}) as Record<string, { title: string; items: FavoriteItem[] }>);
   // Pending "save this whole meal to favorites" after a save_all.
   const pendingMealFavorite = createPersistentRecord("pendingMealFavorite", (persisted.get("pendingMealFavorite") ?? {}) as Record<string, { title: string; items: FavoriteItem[] }>);
+  // Умные напоминания: отложенные («напомнить позже») пинги.
+  // telegramId → { meal → ISO-время, до которого молчим }. ВАЖНО: вложенная
+  // мутация не персистится сама — после неё обязателен «touch» (переприсваивание
+  // верхнего ключа), см. шапку persistent-state.ts.
+  const smartSnooze = createPersistentRecord("smartSnooze", (persisted.get("smartSnooze") ?? {}) as Record<string, Record<string, string>>);
 
   // ─── Cosmetic UI state — intentionally NOT persisted ──────────────────────
   // These only affect the look of a message that's already on screen; after a
@@ -1087,6 +1093,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       ``,
       `⏰ *Авторепорт:* ${fmt(u.reportTime) === 'выкл' ? 'выкл' : u.reportTime || '21:00'}`,
       `🍽 *Напоминания о еде:* ${remParts}`,
+      `🔔 *Умные напоминания:* ${bool(u.smartReminders, false)} — пинг, только если приём не записан к обычному времени; заменяет напоминания по расписанию`,
       `⚖️ *Напоминание о весе:* ${weightR}`,
       ``,
       `🌍 *Часовой пояс:* ${u.timezone ?? 'Europe/Moscow'}`,
@@ -1113,6 +1120,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
         [
           { text: `📦 Штрихкоды ${bool(u.barcodeScanEnabled) ? '✅' : '❌'}`, callback_data: 'toggle_barcode' },
         ],
+        [{ text: `🔔 Умные напоминания ${bool(u.smartReminders, false) ? '✅' : '❌'}`, callback_data: 'toggle_smart_rmnd' }],
         [{ text: `⏰ Авторепорт: ${reportLabel}`, callback_data: 'settings_report_time' }],
         [{ text: '🍽 Напоминания о еде →',        callback_data: 'settings_reminders' }],
         [{ text: '⚖️ Напоминание о весе →',       callback_data: 'settings_weight_reminder' }],
@@ -1495,6 +1503,49 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
 
   const MEAL_LABELS: Record<string, string> = { breakfast: 'Завтрак', lunch: 'Обед', dinner: 'Ужин' };
 
+  // ─── Умные напоминания: сборка сообщения/клавиатуры и день в tz ───────────
+  const SMART_MEAL_ACC: Record<string, string> = { breakfast: 'завтрак', lunch: 'обед', dinner: 'ужин' };
+
+  function buildSmartReminderKeyboard(meal: string) {
+    return {
+      inline_keyboard: [
+        [{ text: '🔁 Повторить как обычно', callback_data: `smart_rep_${meal}` }],
+        [
+          { text: '🙅 Пропустил приём', callback_data: `smart_skip_${meal}` },
+          { text: '⏰ Напомнить позже', callback_data: `smart_later_${meal}` },
+        ],
+      ],
+    };
+  }
+
+  async function sendSmartReminder(user: User, meal: string, medianMinutes: number) {
+    const at = minutesToHHMM(medianMinutes);
+    await bot.sendMessage(
+      user.telegramId!,
+      `🍽 Похоже, ${SMART_MEAL_ACC[meal] ?? 'приём'} ещё не записан — обычно ты ешь около ${at}.`,
+      { reply_markup: buildSmartReminderKeyboard(meal) },
+    );
+  }
+
+  // Календарный день (в tz пользователя) для произвольного момента — тем же
+  // форматом "YYYY-MM-DD", что и todayKey в тике, чтобы их можно было сравнивать.
+  function tzDayKey(date: Date, tz: string): string {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(date);
+    const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
+    return `${get('year')}-${get('month')}-${get('day')}`;
+  }
+
+  // Снять снуз конкретного приёма (после записи/пропуска), соблюдая touch-конвенцию.
+  function clearSmartSnooze(telegramId: string, meal: string) {
+    const rec = smartSnooze[telegramId];
+    if (!rec || !(meal in rec)) return;
+    delete rec[meal];
+    if (Object.keys(rec).length === 0) delete smartSnooze[telegramId];
+    else smartSnooze[telegramId] = rec; // touch
+  }
+
   bot.onText(/^\/reminders(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
@@ -1542,20 +1593,69 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
         }
       }
 
-      const meals: Array<{ field: string | null | undefined; meal: string }> = [
-        { field: user.breakfastReminder, meal: 'breakfast' },
-        { field: user.lunchReminder, meal: 'lunch' },
-        { field: user.dinnerReminder, meal: 'dinner' },
-      ];
+      // Статические напоминания о еде по расписанию. При smartReminders их
+      // подавляем — умная проверка ниже заменяет пинги по расписанию.
+      if (!user.smartReminders) {
+        const meals: Array<{ field: string | null | undefined; meal: string }> = [
+          { field: user.breakfastReminder, meal: 'breakfast' },
+          { field: user.lunchReminder, meal: 'lunch' },
+          { field: user.dinnerReminder, meal: 'dinner' },
+        ];
 
-      for (const { field, meal } of meals) {
-        if (!field || field === 'off' || field !== currentTime) continue;
-        if (!(await storage.claimNotificationSend(user.id, `meal_${meal}`, todayKey))) continue;
+        for (const { field, meal } of meals) {
+          if (!field || field === 'off' || field !== currentTime) continue;
+          if (!(await storage.claimNotificationSend(user.id, `meal_${meal}`, todayKey))) continue;
+          try {
+            console.log(`Sending ${meal} reminder to user ${user.id} at ${currentTime}`);
+            bot.sendMessage(user.telegramId!, `Время записать ${MEAL_LABELS[meal]?.toLowerCase()}! Отправьте текст или фото еды.`);
+          } catch (e) {
+            console.error(`Failed to send ${meal} reminder to user ${user.id}:`, e);
+          }
+        }
+      }
+
+      // Умные напоминания: обычное время приёмов из истории, пинг только если
+      // приём реально не записан к этому времени (+ обработка snooze).
+      if (user.smartReminders) {
         try {
-          console.log(`Sending ${meal} reminder to user ${user.id} at ${currentTime}`);
-          bot.sendMessage(user.telegramId!, `Время записать ${MEAL_LABELS[meal]?.toLowerCase()}! Отправьте текст или фото еды.`);
+          const logs = await storage.getMealLogTimes(user.id, 28);
+          const typical = typicalMealTimes(logs, tz, userNow);
+
+          const loggedMealsToday = new Set<string>();
+          for (const l of logs) {
+            if (tzDayKey(l.date, tz) === todayKey) loggedMealsToday.add(l.mealType);
+          }
+          const nowMinutes = userNow.getHours() * 60 + userNow.getMinutes();
+
+          // 1) Snooze: приём записали → снять; истёк и всё ещё не записан →
+          // удалить (до отправки) и повторить один раз за день (claim *_s2).
+          const userSnooze = smartSnooze[user.telegramId!];
+          if (userSnooze) {
+            for (const meal of Object.keys(userSnooze)) {
+              if (loggedMealsToday.has(meal)) {
+                clearSmartSnooze(user.telegramId!, meal);
+                continue;
+              }
+              if (new Date(userSnooze[meal]).getTime() <= Date.now()) {
+                clearSmartSnooze(user.telegramId!, meal); // touch/delete ДО отправки
+                const t = typical[meal as 'breakfast' | 'lunch' | 'dinner'];
+                if (t && await storage.claimNotificationSend(user.id, `smart_${meal}_s2`, todayKey)) {
+                  await sendSmartReminder(user, meal, t.medianMinutes);
+                }
+              }
+            }
+          }
+
+          // 2) Свежий пинг: первый подходящий приём в окне (claim — раз в день).
+          const due = dueSmartReminder(typical, loggedMealsToday, nowMinutes);
+          if (due) {
+            const t = typical[due]!;
+            if (await storage.claimNotificationSend(user.id, `smart_${due}`, todayKey)) {
+              await sendSmartReminder(user, due, t.medianMinutes);
+            }
+          }
         } catch (e) {
-          console.error(`Failed to send ${meal} reminder to user ${user.id}:`, e);
+          console.error(`Smart reminder check failed for user ${user.id}:`, e);
         }
       }
 
@@ -3057,6 +3157,51 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       return;
     }
 
+    // ─── Умные напоминания: повторить / пропустить / отложить ──────────────
+    if (query.data.startsWith("smart_rep_")) {
+      const meal = query.data.replace("smart_rep_", "");
+      const log = await storage.getTopMealFood(user.id, meal, 28);
+      if (!log) {
+        bot.answerCallbackQuery(query.id, { text: 'Не нашёл, что ты обычно ешь' }).catch(() => {});
+        return;
+      }
+      bot.answerCallbackQuery(query.id, { text: '🔁 Повторяю…' }).catch(() => {});
+      // mealType при записи возьмётся по текущему времени внутри applyItemsToToday.
+      const favItem: FavoriteItem = {
+        foodName: log.foodName, calories: log.calories, protein: log.protein,
+        fat: log.fat, carbs: log.carbs, weight: log.weight,
+      };
+      const reply = await applyItemsToToday(user, [favItem]);
+      clearSmartSnooze(telegramId, meal); // приём записан — снять отложку
+      bot.editMessageText(reply, {
+        chat_id: chatId, message_id: query.message?.message_id,
+      }).catch(() => {});
+      return;
+    }
+
+    if (query.data.startsWith("smart_skip_")) {
+      const meal = query.data.replace("smart_skip_", "");
+      clearSmartSnooze(telegramId, meal);
+      bot.editMessageText("👌 Ок, пропускаем сегодня.", {
+        chat_id: chatId, message_id: query.message?.message_id,
+      }).catch(() => {});
+      bot.answerCallbackQuery(query.id).catch(() => {});
+      return;
+    }
+
+    if (query.data.startsWith("smart_later_")) {
+      const meal = query.data.replace("smart_later_", "");
+      const until = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // +60 мин
+      const rec = smartSnooze[telegramId] ?? {};
+      rec[meal] = until;
+      smartSnooze[telegramId] = rec; // touch: персист вложенной мутации
+      bot.editMessageText("⏰ Ок, напомню через час.", {
+        chat_id: chatId, message_id: query.message?.message_id,
+      }).catch(() => {});
+      bot.answerCallbackQuery(query.id).catch(() => {});
+      return;
+    }
+
     // ─── Settings toggles ─────────────────────────────────────────────────
     const settingsToggles: Record<string, { field: keyof User; label: string; def: boolean }> = {
       toggle_micro:      { field: 'showMicronutrients', label: 'Микронутриенты',         def: false },
@@ -3065,6 +3210,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       toggle_ai_report:  { field: 'aiEveningReport',    label: 'AI в вечернем отчёте',    def: true  },
       toggle_smart_group:{ field: 'smartFoodGrouping',  label: 'Группировка в Excel',     def: true  },
       toggle_barcode:    { field: 'barcodeScanEnabled', label: 'Распознавание штрихкодов', def: true  },
+      toggle_smart_rmnd: { field: 'smartReminders',     label: 'Умные напоминания',       def: false },
     };
     if (settingsToggles[query.data]) {
       const { field, label, def } = settingsToggles[query.data];
@@ -3098,6 +3244,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
         `⏰ *Время и напоминания*`,
         `⏰ *Авторепорт* — во сколько бот сам присылает вечерний отчёт за день (или «выкл»).`,
         `🍽 *Напоминания о еде* — пинги записать завтрак / обед / ужин, плюс «📝 нет записей» — напоминание, если за день ничего не залогировано.`,
+        `🔔 *Умные напоминания* — обычное время приёмов бот выводит из твоей истории и пингует, только если приём реально не записан к этому времени. Заменяют напоминания о еде по расписанию.`,
         `⚖️ *Напоминание о весе* — во сколько и по каким дням недели напоминать взвеситься.`,
         ``,
         `🌍 *Часовой пояс* — по нему считаются «сегодня», время отчётов и напоминаний.`,

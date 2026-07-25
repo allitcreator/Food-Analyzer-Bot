@@ -207,6 +207,7 @@ export const settingsPatchSchema = z
     aiEveningReport: z.boolean().optional(),
     smartFoodGrouping: z.boolean().optional(),
     barcodeScanEnabled: z.boolean().optional(),
+    smartReminders: z.boolean().optional(),
     reportTime: hhmmOrOff.optional(),
     breakfastReminder: hhmmOrOff.optional(),
     lunchReminder: hhmmOrOff.optional(),

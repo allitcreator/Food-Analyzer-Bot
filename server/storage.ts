@@ -63,6 +63,11 @@ export interface IStorage {
   deleteFavorite(userId: number, id: number): Promise<void>;
   countRecentFoodName(userId: number, foodName: string, days: number): Promise<number>;
 
+  // Умные напоминания: время+тип записей еды за N дней (лёгкая выборка) и самое
+  // частое блюдо конкретного приёма за N дней.
+  getMealLogTimes(userId: number, days: number): Promise<{ date: Date; mealType: string }[]>;
+  getTopMealFood(userId: number, mealType: string, days: number): Promise<FoodLog | null>;
+
   // Persistent bot session state (survives deploy/restart).
   loadAllBotState(): Promise<{ telegramId: string; key: string; value: unknown }[]>;
   upsertBotState(telegramId: string, key: string, value: unknown): Promise<void>;
@@ -588,6 +593,56 @@ export class DatabaseStorage implements IStorage {
       )
     );
     return Number(row?.count ?? 0);
+  }
+
+  // ── Умные напоминания ───────────────────────────────────────────────────
+  // Только date+mealType записей еды за последние `days` дней — лёгкая выборка
+  // для вывода «обычного времени» приёмов и списка записанных сегодня приёмов.
+  async getMealLogTimes(userId: number, days: number): Promise<{ date: Date; mealType: string }[]> {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    const rows = await db.select({ date: foodLogs.date, mealType: foodLogs.mealType })
+      .from(foodLogs)
+      .where(and(eq(foodLogs.userId, userId), gte(foodLogs.date, since)));
+    return rows
+      .filter((r): r is { date: Date; mealType: string } => r.date != null)
+      .map((r) => ({ date: r.date, mealType: r.mealType }));
+  }
+
+  // Самое частое блюдо конкретного приёма за N дней (группировка по
+  // lower(food_name)); при равенстве числа — более свежее. Возвращает последнюю
+  // запись FoodLog этого блюда (её и «повторяем как обычно»), или null.
+  async getTopMealFood(userId: number, mealType: string, days: number): Promise<FoodLog | null> {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    const rows = await db.select().from(foodLogs).where(
+      and(eq(foodLogs.userId, userId), eq(foodLogs.mealType, mealType), gte(foodLogs.date, since)),
+    );
+    if (rows.length === 0) return null;
+
+    const groups = new Map<string, { count: number; latest: FoodLog }>();
+    for (const r of rows) {
+      const key = r.foodName.toLowerCase();
+      const g = groups.get(key);
+      if (!g) {
+        groups.set(key, { count: 1, latest: r });
+      } else {
+        g.count++;
+        if ((r.date?.getTime() ?? 0) > (g.latest.date?.getTime() ?? 0)) g.latest = r;
+      }
+    }
+
+    let best: { count: number; latest: FoodLog } | null = null;
+    for (const g of Array.from(groups.values())) {
+      if (
+        !best ||
+        g.count > best.count ||
+        (g.count === best.count && (g.latest.date?.getTime() ?? 0) > (best.latest.date?.getTime() ?? 0))
+      ) {
+        best = g;
+      }
+    }
+    return best ? best.latest : null;
   }
 
   // ── Persistent bot session state ────────────────────────────────────────
