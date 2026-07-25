@@ -1,4 +1,4 @@
-import { users, foodLogs, waterLogs, weightLogs, workoutLogs, barcodeProducts, type User, type InsertUser, type FoodLog, type InsertFoodLog, type WaterLog, type WeightLog, type WorkoutLog, type InsertWorkoutLog, type BarcodeProduct, type InsertBarcodeProduct } from "@shared/schema";
+import { users, foodLogs, waterLogs, weightLogs, workoutLogs, barcodeProducts, favorites, type User, type InsertUser, type FoodLog, type InsertFoodLog, type WaterLog, type WeightLog, type WorkoutLog, type InsertWorkoutLog, type BarcodeProduct, type InsertBarcodeProduct, type Favorite, type FavoriteItem } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, sql, desc, gte, lte, lt } from "drizzle-orm";
 import { calcGoalsFromProfile } from "./lib/goals";
@@ -54,6 +54,11 @@ export interface IStorage {
 
   getBarcodeProduct(barcode: string): Promise<BarcodeProduct | undefined>;
   upsertBarcodeProduct(product: InsertBarcodeProduct): Promise<BarcodeProduct>;
+
+  getFavorites(userId: number): Promise<Favorite[]>;
+  createFavorite(fav: { userId: number; title: string; items: FavoriteItem[] }): Promise<Favorite>;
+  deleteFavorite(userId: number, id: number): Promise<void>;
+  countRecentFoodName(userId: number, foodName: string, days: number): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -473,6 +478,37 @@ export class DatabaseStorage implements IStorage {
       .onConflictDoUpdate({ target: barcodeProducts.barcode, set: rest })
       .returning();
     return row;
+  }
+
+  async getFavorites(userId: number): Promise<Favorite[]> {
+    return db.select().from(favorites)
+      .where(eq(favorites.userId, userId))
+      .orderBy(desc(favorites.createdAt));
+  }
+
+  async createFavorite(fav: { userId: number; title: string; items: FavoriteItem[] }): Promise<Favorite> {
+    const [row] = await db.insert(favorites).values(fav).returning();
+    return row;
+  }
+
+  async deleteFavorite(userId: number, id: number): Promise<void> {
+    // Ownership check baked into the WHERE — a user can only delete their own.
+    await db.delete(favorites).where(and(eq(favorites.id, id), eq(favorites.userId, userId)));
+  }
+
+  // How many times a dish with this exact name (case-insensitive) was logged
+  // in the last `days` days — drives the "add to favorites?" suggestion.
+  async countRecentFoodName(userId: number, foodName: string, days: number): Promise<number> {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    const [row] = await db.select({ count: sql<number>`COUNT(*)` }).from(foodLogs).where(
+      and(
+        eq(foodLogs.userId, userId),
+        gte(foodLogs.date, since),
+        sql`LOWER(${foodLogs.foodName}) = LOWER(${foodName})`,
+      )
+    );
+    return Number(row?.count ?? 0);
   }
 
 }

@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, timestamp, real, index } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, real, index, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
@@ -110,11 +110,40 @@ export const barcodeProducts = pgTable("barcode_products", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// One saved item inside a favorite. A favorite bundles a whole meal (or a
+// single dish), so `items` is an array of these. Hydrating drinks carry
+// `hydrating: true` and are replayed into water tracking, not the food diary.
+export type FavoriteItem = {
+  foodName: string;
+  calories: number;
+  protein: number;
+  fat: number;
+  carbs: number;
+  weight: number;
+  hydrating?: boolean;
+};
+
+// User-saved favorites: "repeat this meal in one tap".
+export const favorites = pgTable("favorites", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  items: jsonb("items").notNull().$type<FavoriteItem[]>(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => ({
+  userIdx: index("favorites_user_id_idx").on(table.userId),
+}));
+
 export const usersRelations = relations(users, ({ many }) => ({
   logs: many(foodLogs),
   waterLogs: many(waterLogs),
   weightLogs: many(weightLogs),
   workoutLogs: many(workoutLogs),
+  favorites: many(favorites),
+}));
+
+export const favoritesRelations = relations(favorites, ({ one }) => ({
+  user: one(users, { fields: [favorites.userId], references: [users.id] }),
 }));
 
 export const foodLogsRelations = relations(foodLogs, ({ one }) => ({
@@ -139,6 +168,7 @@ export const insertWaterLogSchema = createInsertSchema(waterLogs).omit({ id: tru
 export const insertWeightLogSchema = createInsertSchema(weightLogs).omit({ id: true, date: true });
 export const insertWorkoutLogSchema = createInsertSchema(workoutLogs).omit({ id: true, date: true });
 export const insertBarcodeProductSchema = createInsertSchema(barcodeProducts).omit({ createdAt: true });
+export const insertFavoriteSchema = createInsertSchema(favorites).omit({ id: true, createdAt: true });
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -152,6 +182,8 @@ export type WorkoutLog = typeof workoutLogs.$inferSelect;
 export type InsertWorkoutLog = z.infer<typeof insertWorkoutLogSchema>;
 export type BarcodeProduct = typeof barcodeProducts.$inferSelect;
 export type InsertBarcodeProduct = z.infer<typeof insertBarcodeProductSchema>;
+export type Favorite = typeof favorites.$inferSelect;
+export type InsertFavorite = z.infer<typeof insertFavoriteSchema>;
 
 export type CreateFoodLogRequest = InsertFoodLog;
 export type StatsResponse = {

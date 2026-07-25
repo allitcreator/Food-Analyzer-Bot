@@ -5,8 +5,9 @@ import { IStorage } from "./storage";
 import { analyzeFoodText, analyzeFoodImage, generateEveningReport, generatePeriodAnalysis, transcribeVoice, askCoach, detectBarcode, generateWeightAnalysis, classifyIntent, analyzeWorkout, groupFoodNames, FoodItem } from "./openai";
 import { decodeBarcodeFromImage, isValidEanChecksum, classifyHydratingProduct, barcodeCacheToFoodItem, foodItemToBarcodeCache } from "./barcode";
 import { generateMonthlyPDF, extractTopFoods } from "./pdf";
-import { User, FoodLog } from "@shared/schema";
+import { User, FoodLog, Favorite, FavoriteItem } from "@shared/schema";
 import { progressBar } from "./lib/goals";
+import { mealTypeByTime, buildMealTitle, toFavoriteItems, shouldSuggestFavorite, FAVORITE_SUGGEST_DAYS } from "./lib/favorites";
 
 const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
 
@@ -310,6 +311,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     { command: "week",           description: "Разбивка по дням за 7 дней" },
     { command: "month",          description: "Статистика за месяц с графиками" },
     { command: "history",        description: "Последние записи питания" },
+    { command: "favorites",      description: "Избранные блюда и приёмы — записать в один тап ⭐" },
     { command: "pdf",            description: "PDF-отчёт с графиками" },
     { command: "export",         description: "Excel-экспорт (дата или диапазон)" },
     { command: "clear",          description: "Удалить записи за дату или диапазон" },
@@ -351,6 +353,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       "/week — Разбивка по дням за 7 дней",
       "/month — Статистика за месяц с графиками",
       "/history \\[ДД.ММ.ГГГГ\\] — Записи питания за сегодня или дату",
+      "/favorites — Избранные блюда и приёмы, запись в один тап ⭐",
       "/pdf — PDF-отчёт с графиками за месяц",
       "/export ДД.ММ.ГГГГ \\[ - ДД.ММ.ГГГГ\\] — Excel-экспорт",
       "/clear ДД.ММ.ГГГГ \\[ - ДД.ММ.ГГГГ\\] — Удалить записи",
@@ -434,6 +437,16 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
   const pendingMulti: Record<string, FoodItem[]> = {};
   const pendingWorkouts: Record<string, { description: string; workoutType: string; durationMin: number | null; caloriesBurned: number }> = {};
   const settingsMessageIds = new Map<string, number>(); // telegramId → settings message_id
+
+  // ─── Favorites: in-memory session state ──────────────────────────────────
+  // Pending "add to favorites?" suggestion after a single confirmed card.
+  const pendingFavSuggestion: Record<string, { title: string; items: FavoriteItem[] }> = {};
+  // Titles the user declined this session — don't nag again (per telegramId).
+  const dismissedFavSuggestions: Record<string, Set<string>> = {};
+  // Pending "save this whole meal to favorites" after a save_all.
+  const pendingMealFavorite: Record<string, { title: string; items: FavoriteItem[] }> = {};
+  // telegramId → whether their /favorites list is currently in delete mode.
+  const favoritesEditMode: Record<string, boolean> = {};
 
   async function refreshSettingsMessage(chatId: number, telegramId: string) {
     const msgId = settingsMessageIds.get(telegramId);
@@ -1603,6 +1616,9 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     return {
       inline_keyboard: [
         [
+          { text: '🔁 Повторить', callback_data: `hist_rep_${logId}` },
+        ],
+        [
           { text: '✏️ Изменить', callback_data: `hist_edit_${logId}` },
           { text: '🗑 Удалить', callback_data: `hist_del_${logId}` },
         ],
@@ -1639,6 +1655,129 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     const totCarbs = logs.reduce((s, f) => s + f.carbs, 0);
     await bot.sendMessage(chatId, formatTotalsLine(totCal, totProt, totFat, totCarbs, user));
   }
+
+  // ─── Favorites helpers ────────────────────────────────────────────────────
+  function buildFavoritesKeyboard(favs: Favorite[], editMode: boolean) {
+    const rows = favs.map((f) => {
+      const label = f.title.length > 40 ? f.title.slice(0, 39) + '…' : f.title;
+      return [{
+        text: editMode ? `🗑 ${label}` : `⭐ ${label}`,
+        callback_data: editMode ? `fav_del_${f.id}` : `fav_use_${f.id}`,
+      }];
+    });
+    rows.push([
+      editMode
+        ? { text: '← Готово', callback_data: 'fav_done' }
+        : { text: '🗑 Редактировать', callback_data: 'fav_edit' },
+    ]);
+    return { inline_keyboard: rows };
+  }
+
+  async function sendFavoritesList(chatId: number, userId: number, telegramId: string) {
+    const favs = await storage.getFavorites(userId);
+    if (favs.length === 0) {
+      bot.sendMessage(chatId,
+        "⭐ У вас пока нет избранного.\n\n" +
+        "Сохраняйте часто повторяющиеся блюда и приёмы — потом записывайте их в один тап. " +
+        "Кнопка «⭐ Сохранить приём в избранное» появляется после сохранения нескольких позиций, " +
+        "а частые блюда бот предложит добавить сам.");
+      return;
+    }
+    favoritesEditMode[telegramId] = false;
+    bot.sendMessage(chatId, "⭐ *Избранное*\n\nТапните позицию, чтобы записать её на сегодня:", {
+      parse_mode: 'Markdown',
+      reply_markup: buildFavoritesKeyboard(favs, false),
+    });
+  }
+
+  // Write favorite/repeat items to today (mealType by CURRENT time), then reply
+  // with a confirmation + daily progress — the same feedback style as confirm_yes.
+  async function applyItemsToToday(user: User, items: FavoriteItem[]): Promise<string> {
+    const now = getUserNow(user.timezone ?? 'Europe/Moscow');
+    const mealType = mealTypeByTime(now, {
+      breakfastEnd: user.mealBreakfastEnd ?? '12:30',
+      lunchEnd: user.mealLunchEnd ?? '16:30',
+    });
+    let savedFood = 0, waterMl = 0, addedCal = 0;
+    for (const it of items) {
+      if (it.hydrating) {
+        const amount = Math.round(Number(it.weight)) || 0;
+        await storage.logWater(user.id, amount);
+        waterMl += amount;
+        continue;
+      }
+      const cal = Math.round(Number(it.calories)) || 0;
+      await storage.createFoodLog({
+        userId: user.id,
+        foodName: it.foodName,
+        calories: cal,
+        protein: Math.round(Number(it.protein)) || 0,
+        fat: Math.round(Number(it.fat)) || 0,
+        carbs: Math.round(Number(it.carbs)) || 0,
+        weight: Math.round(Number(it.weight)) || 0,
+        mealType,
+        foodScore: null,
+        nutritionAdvice: null,
+        fiber: null, sugar: null, sodium: null, saturatedFat: null,
+      });
+      savedFood++;
+      addedCal += cal;
+    }
+
+    // Confirmation head — single item vs. a whole meal.
+    let head: string;
+    if (items.length === 1 && items[0].hydrating) {
+      const total = await storage.getDailyWater(user.id, now);
+      head = `💧 +${waterMl} мл, всего за день ${total} мл`;
+    } else if (savedFood === 1 && waterMl === 0) {
+      const only = items.find((i) => !i.hydrating)!;
+      const unit = getUnit(only.foodName);
+      head = `✅ Добавлено: ${only.foodName} (${Math.round(Number(only.weight)) || 0}${unit})`;
+    } else {
+      head = `✅ Записано: ${savedFood} поз. (+${addedCal} ккал)`;
+      if (waterMl > 0) head += `\n💧 В воду: ${waterMl} мл`;
+    }
+    const progress = await buildDailyProgress(storage, user.id, user, now);
+    return `${head}${progress}`;
+  }
+
+  // After a single confirmed card: if the dish is logged often and isn't already
+  // a favorite (and wasn't dismissed this session), offer to save it.
+  async function maybeSuggestFavorite(chatId: number, telegramId: string, user: User, item: FavoriteItem) {
+    try {
+      const title = item.foodName;
+      const recentCount = await storage.countRecentFoodName(user.id, title, FAVORITE_SUGGEST_DAYS);
+      const favs = await storage.getFavorites(user.id);
+      const dismissed = dismissedFavSuggestions[telegramId] ?? new Set<string>();
+      const ok = shouldSuggestFavorite({
+        title,
+        recentCount,
+        existingTitles: favs.map((f) => f.title),
+        dismissedTitles: Array.from(dismissed),
+      });
+      if (!ok) return;
+      pendingFavSuggestion[telegramId] = { title, items: [item] };
+      bot.sendMessage(chatId, `⭐ Вы часто едите «${title}». Добавить в избранное?`, {
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '⭐ Да', callback_data: 'fav_add_yes' },
+            { text: 'Нет', callback_data: 'fav_add_no' },
+          ]],
+        },
+      });
+    } catch (e) {
+      console.error("maybeSuggestFavorite error:", e);
+    }
+  }
+
+  bot.onText(/^\/favorites(@\w+)?$/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from?.id.toString();
+    if (!telegramId) return;
+    const user = await isUserAllowed(chatId, telegramId);
+    if (!user) return;
+    await sendFavoritesList(chatId, user.id, telegramId);
+  });
 
   bot.onText(/^\/history(@\w+)?(?:\s+(\d{2}\.\d{2}\.\d{4}))?$/, async (msg, match) => {
     const chatId = msg.chat.id;
@@ -1962,6 +2101,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         });
         await maybeCacheVisionBarcode(pending);
         delete (bot as any).pendingLogs[telegramId];
+        const favItem = toFavoriteItems([{ ...pending, weight: amount, hydrating: true }])[0];
+        await maybeSuggestFavorite(chatId, telegramId, user, favItem);
       } else if (pending) {
         const unit = getUnit(pending.foodName);
         await storage.createFoodLog({
@@ -1987,6 +2128,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         });
         await maybeCacheVisionBarcode(pending);
         delete (bot as any).pendingLogs[telegramId];
+        const favItem = toFavoriteItems([pending])[0];
+        await maybeSuggestFavorite(chatId, telegramId, user, favItem);
       } else {
         bot.sendMessage(chatId, "Срок действия предложения истек или данные не найдены.");
       }
@@ -2106,9 +2249,17 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       const progress = await buildDailyProgress(storage, user.id, user, getUserNow(user.timezone ?? 'Europe/Moscow'));
       let savedMsg = `✅ Сохранено ${savedCount} из ${items.length} позиций  (+${totalCal} ккал)`;
       if (waterMl > 0) savedMsg += `\n💧 В воду: ${waterMl} мл`;
+      // Offer to save the whole meal as a favorite (one-tap repeat later).
+      const mealTitle = buildMealTitle(items.map((i) => i.foodName));
+      pendingMealFavorite[telegramId] = { title: mealTitle, items: toFavoriteItems(items) };
       bot.editMessageText(`${savedMsg}${progress}`, {
         chat_id: chatId,
-        message_id: query.message?.message_id
+        message_id: query.message?.message_id,
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '⭐ Сохранить приём в избранное', callback_data: 'fav_meal_save' },
+          ]],
+        },
       });
     } else if (query.data === "cancel_multi") {
       delete pendingMulti[telegramId];
@@ -2256,6 +2407,105 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         step: 'history_field_input',
         data: { field, logId, messageId: query.message?.message_id, promptMessageId: promptMsg.message_id },
       };
+
+    // ─── Repeat a history entry onto today ────────────────────────────────
+    } else if (query.data.startsWith("hist_rep_")) {
+      const logId = parseInt(query.data.replace("hist_rep_", ""));
+      const log = await storage.getFoodLogById(logId, user.id);
+      if (!log) {
+        bot.answerCallbackQuery(query.id, { text: 'Запись не найдена' });
+        return;
+      }
+      bot.answerCallbackQuery(query.id, { text: '🔁 Повторяю…' }).catch(() => {});
+      const favItem: FavoriteItem = {
+        foodName: log.foodName, calories: log.calories, protein: log.protein,
+        fat: log.fat, carbs: log.carbs, weight: log.weight,
+      };
+      const reply = await applyItemsToToday(user, [favItem]);
+      bot.sendMessage(chatId, reply);
+
+    // ─── Favorites: use / edit / delete ───────────────────────────────────
+    } else if (query.data.startsWith("fav_use_")) {
+      const favId = parseInt(query.data.replace("fav_use_", ""));
+      const favs = await storage.getFavorites(user.id);
+      const fav = favs.find((f) => f.id === favId);
+      if (!fav) {
+        bot.answerCallbackQuery(query.id, { text: 'Избранное не найдено' });
+        return;
+      }
+      bot.answerCallbackQuery(query.id, { text: '⭐ Записываю…' }).catch(() => {});
+      const reply = await applyItemsToToday(user, fav.items);
+      bot.sendMessage(chatId, reply);
+
+    } else if (query.data === "fav_edit" || query.data === "fav_done") {
+      const editMode = query.data === "fav_edit";
+      favoritesEditMode[telegramId] = editMode;
+      bot.answerCallbackQuery(query.id).catch(() => {});
+      const favs = await storage.getFavorites(user.id);
+      if (favs.length === 0) {
+        bot.editMessageText("⭐ Избранное пусто.", {
+          chat_id: chatId, message_id: query.message?.message_id,
+        }).catch(() => {});
+        return;
+      }
+      bot.editMessageReplyMarkup(buildFavoritesKeyboard(favs, editMode), {
+        chat_id: chatId, message_id: query.message?.message_id,
+      }).catch(() => {});
+
+    } else if (query.data.startsWith("fav_del_")) {
+      const favId = parseInt(query.data.replace("fav_del_", ""));
+      await storage.deleteFavorite(user.id, favId);
+      bot.answerCallbackQuery(query.id, { text: '🗑 Удалено' }).catch(() => {});
+      const favs = await storage.getFavorites(user.id);
+      if (favs.length === 0) {
+        bot.editMessageText("⭐ Избранное пусто.", {
+          chat_id: chatId, message_id: query.message?.message_id,
+        }).catch(() => {});
+        return;
+      }
+      bot.editMessageReplyMarkup(buildFavoritesKeyboard(favs, true), {
+        chat_id: chatId, message_id: query.message?.message_id,
+      }).catch(() => {});
+
+    // ─── Favorites: smart suggestion + save whole meal ────────────────────
+    } else if (query.data === "fav_add_yes") {
+      const pend = pendingFavSuggestion[telegramId];
+      if (!pend) {
+        bot.answerCallbackQuery(query.id, { text: 'Данные устарели' });
+        return;
+      }
+      delete pendingFavSuggestion[telegramId];
+      await storage.createFavorite({ userId: user.id, title: pend.title, items: pend.items });
+      bot.answerCallbackQuery(query.id, { text: '⭐ Добавлено в избранное' }).catch(() => {});
+      bot.editMessageText(`⭐ «${pend.title}» добавлено в избранное. Открыть: /favorites`, {
+        chat_id: chatId, message_id: query.message?.message_id,
+      }).catch(() => {});
+
+    } else if (query.data === "fav_add_no") {
+      const pend = pendingFavSuggestion[telegramId];
+      if (pend) {
+        (dismissedFavSuggestions[telegramId] ??= new Set<string>()).add(pend.title);
+        delete pendingFavSuggestion[telegramId];
+      }
+      bot.answerCallbackQuery(query.id).catch(() => {});
+      bot.editMessageText("Хорошо, не буду предлагать это в этой сессии.", {
+        chat_id: chatId, message_id: query.message?.message_id,
+      }).catch(() => {});
+
+    } else if (query.data === "fav_meal_save") {
+      const pend = pendingMealFavorite[telegramId];
+      if (!pend) {
+        bot.answerCallbackQuery(query.id, { text: 'Данные устарели' });
+        return;
+      }
+      delete pendingMealFavorite[telegramId];
+      await storage.createFavorite({ userId: user.id, title: pend.title, items: pend.items });
+      bot.answerCallbackQuery(query.id, { text: '⭐ Приём сохранён' }).catch(() => {});
+      // Drop the button so the meal can't be saved twice.
+      bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
+        chat_id: chatId, message_id: query.message?.message_id,
+      }).catch(() => {});
+      bot.sendMessage(chatId, `⭐ Приём «${pend.title}» сохранён в избранное. Открыть: /favorites`);
 
     } else if (query.data.startsWith("rtime_")) {
       const time = query.data.replace("rtime_", "");
