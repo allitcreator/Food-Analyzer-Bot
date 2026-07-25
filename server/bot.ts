@@ -8,6 +8,7 @@ import { generateMonthlyPDF, extractTopFoods } from "./pdf";
 import { User, FoodLog, VisibleFavorite, FavoriteItem } from "@shared/schema";
 import { progressBar } from "./lib/goals";
 import { mealTypeByTime, buildMealTitle, toFavoriteItems, shouldSuggestFavorite, sameTitle, FAVORITE_SUGGEST_DAYS } from "./lib/favorites";
+import { createPersistentRecord, loadPersistentState } from "./lib/persistent-state";
 
 const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
 
@@ -258,12 +259,23 @@ function buildEnergyBalanceText(user: User, caloriesEaten: number, compact = fal
 
 // ─── Bot setup ───────────────────────────────────────────────────────────────
 
-export function setupBot(storage: IStorage, app?: import("express").Express): TelegramBot {
+export async function setupBot(storage: IStorage, app?: import("express").Express): Promise<TelegramBot> {
   const token = config.telegramBotToken;
   const ADMIN_TELEGRAM_ID = config.adminTelegramId;
   const WEBHOOK_URL = config.webhookUrl;
   const WEBHOOK_SECRET = config.webhookSecret;
   const useWebhook = !!WEBHOOK_URL && !!WEBHOOK_SECRET && !!app;
+
+  // Load persisted session state BEFORE any handler is registered / polling
+  // starts, so restored state (pending cards, dialogs) is in place from the
+  // first update. A DB outage degrades to empty snapshots — the bot still runs.
+  let persisted: Map<string, Record<string, unknown>>;
+  try {
+    persisted = await loadPersistentState();
+  } catch (e) {
+    console.error("Failed to load persistent bot state, starting empty:", e);
+    persisted = new Map();
+  }
 
   let bot: TelegramBot;
 
@@ -433,18 +445,28 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
     bot.sendMessage(chatId, `🏋️ *Тренер:*\n\n${answer}`, { parse_mode: "Markdown" });
   });
 
-  const userStates: Record<string, { step: string; data: Partial<User> & { reminderMeal?: string; field?: string; messageId?: number; promptMessageId?: number; idx?: number; settingsMsgId?: number; logId?: number; historyPage?: number } }> = {};
-  const pendingMulti: Record<string, FoodItem[]> = {};
-  const pendingWorkouts: Record<string, { description: string; workoutType: string; durationMin: number | null; caloriesBurned: number }> = {};
-  const settingsMessageIds = new Map<string, number>(); // telegramId → settings message_id
-
-  // ─── Favorites: in-memory session state ──────────────────────────────────
+  // ─── Persisted session state (survives deploy/restart via bot_state) ──────
+  // Wrapped in createPersistentRecord: reads/writes/deletes keep plain Record
+  // semantics, every mutation is mirrored into Postgres. Snapshots restored
+  // from `persisted` above.
+  const userStates = createPersistentRecord("userStates", (persisted.get("userStates") ?? {}) as Record<string, { step: string; data: Partial<User> & { reminderMeal?: string; field?: string; messageId?: number; promptMessageId?: number; idx?: number; settingsMsgId?: number; logId?: number; historyPage?: number } }>);
+  const pendingMulti = createPersistentRecord("pendingMulti", (persisted.get("pendingMulti") ?? {}) as Record<string, FoodItem[]>);
+  const pendingWorkouts = createPersistentRecord("pendingWorkouts", (persisted.get("pendingWorkouts") ?? {}) as Record<string, { description: string; workoutType: string; durationMin: number | null; caloriesBurned: number }>);
+  // pendingLogs lives on the bot instance (legacy shape used across handlers);
+  // make it a persisted record too.
+  (bot as any).pendingLogs = createPersistentRecord("pendingLogs", (persisted.get("pendingLogs") ?? {}) as Record<string, any>);
   // Pending "add to favorites?" suggestion after a single confirmed card.
-  const pendingFavSuggestion: Record<string, { title: string; items: FavoriteItem[] }> = {};
+  const pendingFavSuggestion = createPersistentRecord("pendingFavSuggestion", (persisted.get("pendingFavSuggestion") ?? {}) as Record<string, { title: string; items: FavoriteItem[] }>);
+  // Pending "save this whole meal to favorites" after a save_all.
+  const pendingMealFavorite = createPersistentRecord("pendingMealFavorite", (persisted.get("pendingMealFavorite") ?? {}) as Record<string, { title: string; items: FavoriteItem[] }>);
+
+  // ─── Cosmetic UI state — intentionally NOT persisted ──────────────────────
+  // These only affect the look of a message that's already on screen; after a
+  // restart the stale message ids / flags are worthless (and re-derivable), so
+  // persisting them would add churn for no benefit.
+  const settingsMessageIds = new Map<string, number>(); // telegramId → settings message_id
   // Titles the user declined this session — don't nag again (per telegramId).
   const dismissedFavSuggestions: Record<string, Set<string>> = {};
-  // Pending "save this whole meal to favorites" after a save_all.
-  const pendingMealFavorite: Record<string, { title: string; items: FavoriteItem[] }> = {};
   // telegramId → whether their /favorites list is currently in delete mode.
   const favoritesEditMode: Record<string, boolean> = {};
 
@@ -1496,21 +1518,12 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
   // backward compat
   function getMoscowNow(): Date { return getUserNow('Europe/Moscow'); }
 
-  const reportSentKeys = new Set<string>();
-  const reminderSentKeys = new Set<string>();
+  // Dedup of scheduled sends is now a Postgres at-most-once ledger
+  // (notification_sends) via storage.claimNotificationSend — the claim is taken
+  // BEFORE sending, so a restart can neither double-send nor lose a send.
+  let lastPersistenceCleanup = 0; // throttle for the housekeeping below
 
   async function checkScheduledNotifications() {
-    // Clean up old keys using UTC date (just for cleanup)
-    const utcKey = new Date().toISOString().slice(0, 10);
-    Array.from(reportSentKeys).forEach(key => {
-      const parts = key.split('_'); const keyDate = parts[parts.length - 1];
-      if (keyDate && keyDate.length === 10 && keyDate !== utcKey) reportSentKeys.delete(key);
-    });
-    Array.from(reminderSentKeys).forEach(key => {
-      const parts = key.split('_'); const keyDate = parts[parts.length - 1];
-      if (keyDate && keyDate.length === 10 && keyDate !== utcKey) reminderSentKeys.delete(key);
-    });
-
     const allUsers = await storage.getAllApprovedUsers();
     for (const user of allUsers) {
       const tz = user.timezone ?? 'Europe/Moscow';
@@ -1519,10 +1532,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       const todayKey = `${userNow.getFullYear()}-${String(userNow.getMonth() + 1).padStart(2, '0')}-${String(userNow.getDate()).padStart(2, '0')}`;
 
       if (user.reportTime && user.reportTime !== 'off' && user.reportTime === currentTime) {
-        const userDayKey = `${user.id}_report_${todayKey}`;
-        if (!reportSentKeys.has(userDayKey)) {
+        if (await storage.claimNotificationSend(user.id, 'report', todayKey)) {
           try {
-            reportSentKeys.add(userDayKey);
             console.log(`Sending evening report to user ${user.id} at ${currentTime}`);
             await sendEveningReport(user);
           } catch (e) {
@@ -1539,9 +1550,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
 
       for (const { field, meal } of meals) {
         if (!field || field === 'off' || field !== currentTime) continue;
-        const key = `${user.id}_${meal}_${todayKey}`;
-        if (reminderSentKeys.has(key)) continue;
-        reminderSentKeys.add(key);
+        if (!(await storage.claimNotificationSend(user.id, `meal_${meal}`, todayKey))) continue;
         try {
           console.log(`Sending ${meal} reminder to user ${user.id} at ${currentTime}`);
           bot.sendMessage(user.telegramId!, `Время записать ${MEAL_LABELS[meal]?.toLowerCase()}! Отправьте текст или фото еды.`);
@@ -1552,9 +1561,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
 
       // No-log reminder: fires if user set noLogReminderTime and has no food entries today
       if (user.noLogReminderTime && user.noLogReminderTime !== 'off' && user.noLogReminderTime === currentTime) {
-        const key = `${user.id}_nolog_${todayKey}`;
-        if (!reminderSentKeys.has(key)) {
-          reminderSentKeys.add(key);
+        if (await storage.claimNotificationSend(user.id, 'nolog', todayKey)) {
           try {
             const todayStats = await storage.getDailyStats(user.id, userNow);
             if (todayStats.calories === 0) {
@@ -1574,9 +1581,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
           : [];
         const dayOk = allowedDays.length === 0 || allowedDays.includes(todayDow);
         if (dayOk) {
-          const key = `${user.id}_weight_${todayKey}`;
-          if (!reminderSentKeys.has(key)) {
-            reminderSentKeys.add(key);
+          if (await storage.claimNotificationSend(user.id, 'weight', todayKey)) {
             try {
               bot.sendMessage(user.telegramId!, `⚖️ Время взвеситься! Запишите вес: /weight 75.0`);
             } catch (e) {
@@ -1585,6 +1590,15 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
           }
         }
       }
+    }
+
+    // Housekeeping: at most once an hour prune stale persisted rows so the
+    // tables don't grow unbounded. Both guarded — a failure never breaks the tick.
+    const nowMs = Date.now();
+    if (nowMs - lastPersistenceCleanup >= 60 * 60 * 1000) {
+      lastPersistenceCleanup = nowMs;
+      try { await storage.cleanupBotState(7); } catch (e) { console.error("cleanupBotState failed:", e); }
+      try { await storage.cleanupNotificationSends(14); } catch (e) { console.error("cleanupNotificationSends failed:", e); }
     }
   }
 
@@ -2181,6 +2195,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       if (pending.sugar != null) pending.sugar = Math.round(pending.sugar * ratio * 10) / 10;
       if (pending.sodium != null) pending.sodium = Math.round(pending.sodium * ratio);
       if (pending.saturatedFat != null) pending.saturatedFat = Math.round(pending.saturatedFat * ratio * 10) / 10;
+      // touch: вложенные мутации не триггерят персист — переприсваиваем верхний ключ
+      (bot as any).pendingLogs[telegramId] = pending;
 
       const unit = getUnit(pending.foodName);
       bot.editMessageText(buildConfirmMessage(pending, user.showMicronutrients ?? false), {
@@ -2324,6 +2340,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
           message_id: query.message?.message_id
         });
       } else {
+        // touch: splice — вложенная мутация, персист триггерит только переприсваивание ключа
+        pendingMulti[telegramId] = items;
         bot.editMessageText(buildMultiSummaryText(items), {
           chat_id: chatId,
           message_id: query.message?.message_id,
@@ -2634,6 +2652,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
       if (state) {
         state.data.activityLevel = activity;
         state.step = 'goal';
+        // touch: вложенные мутации не триггерят персист — переприсваиваем верхний ключ
+        userStates[telegramId] = state;
         bot.editMessageText("Ваша цель:", {
           chat_id: chatId,
           message_id: query.message?.message_id,
@@ -3303,6 +3323,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         }
 
         (pending as any)[field] = field === 'weight' ? Math.round(val) : Math.round(val * 10) / 10;
+        // touch: вложенные мутации не триггерят персист — переприсваиваем верхний ключ
+        (bot as any).pendingLogs[telegramId] = pending;
         delete userStates[telegramId];
 
         // Delete prompt and user's input message
@@ -3407,6 +3429,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         }
 
         (item as any)[field] = field === 'weight' ? Math.round(val) : Math.round(val * 10) / 10;
+        // touch: мутация items[idx] — вложенная, персист триггерит только переприсваивание ключа
+        pendingMulti[telegramId] = items;
         delete userStates[telegramId];
 
         // Delete prompt and user's input message
@@ -3549,6 +3573,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         }
         state.data.age = val;
         state.step = 'weight';
+        // touch: вложенные мутации не триггерят персист — переприсваиваем верхний ключ
+        userStates[telegramId] = state;
         bot.sendMessage(chatId, "Ваш текущий вес (кг):");
         return;
       }
@@ -3559,6 +3585,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         }
         state.data.weight = val;
         state.step = 'height';
+        // touch: вложенные мутации не триггерят персист — переприсваиваем верхний ключ
+        userStates[telegramId] = state;
         bot.sendMessage(chatId, "Ваш рост (см):");
         return;
       }
@@ -3569,6 +3597,8 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         }
         state.data.height = val;
         state.step = 'activity';
+        // touch: вложенные мутации не триггерят персист — переприсваиваем верхний ключ
+        userStates[telegramId] = state;
         bot.sendMessage(chatId, "Ваш уровень активности:", {
           reply_markup: {
             inline_keyboard: [

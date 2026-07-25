@@ -1,4 +1,4 @@
-import { users, foodLogs, waterLogs, weightLogs, workoutLogs, barcodeProducts, favorites, type User, type InsertUser, type FoodLog, type InsertFoodLog, type WaterLog, type WeightLog, type WorkoutLog, type InsertWorkoutLog, type BarcodeProduct, type InsertBarcodeProduct, type Favorite, type VisibleFavorite, type FavoriteItem } from "@shared/schema";
+import { users, foodLogs, waterLogs, weightLogs, workoutLogs, barcodeProducts, favorites, botState, notificationSends, type User, type InsertUser, type FoodLog, type InsertFoodLog, type WaterLog, type WeightLog, type WorkoutLog, type InsertWorkoutLog, type BarcodeProduct, type InsertBarcodeProduct, type Favorite, type VisibleFavorite, type FavoriteItem } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, or, sql, desc, gte, lte, lt } from "drizzle-orm";
 import { calcGoalsFromProfile } from "./lib/goals";
@@ -62,6 +62,16 @@ export interface IStorage {
   setFavoriteShared(userId: number, id: number, isShared: boolean): Promise<Favorite | undefined>;
   deleteFavorite(userId: number, id: number): Promise<void>;
   countRecentFoodName(userId: number, foodName: string, days: number): Promise<number>;
+
+  // Persistent bot session state (survives deploy/restart).
+  loadAllBotState(): Promise<{ telegramId: string; key: string; value: unknown }[]>;
+  upsertBotState(telegramId: string, key: string, value: unknown): Promise<void>;
+  deleteBotState(telegramId: string, key: string): Promise<void>;
+  cleanupBotState(olderThanDays: number): Promise<void>;
+
+  // At-most-once ledger for scheduled notifications.
+  claimNotificationSend(userId: number, kind: string, dayKey: string): Promise<boolean>;
+  cleanupNotificationSends(olderThanDays: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -578,6 +588,45 @@ export class DatabaseStorage implements IStorage {
       )
     );
     return Number(row?.count ?? 0);
+  }
+
+  // ── Persistent bot session state ────────────────────────────────────────
+  async loadAllBotState(): Promise<{ telegramId: string; key: string; value: unknown }[]> {
+    const rows = await db
+      .select({ telegramId: botState.telegramId, key: botState.key, value: botState.value })
+      .from(botState);
+    return rows.map((r) => ({ telegramId: r.telegramId, key: r.key, value: r.value as unknown }));
+  }
+
+  async upsertBotState(telegramId: string, key: string, value: unknown): Promise<void> {
+    await db.insert(botState)
+      .values({ telegramId, key, value })
+      .onConflictDoUpdate({
+        target: [botState.telegramId, botState.key],
+        set: { value, updatedAt: sql`now()` },
+      });
+  }
+
+  async deleteBotState(telegramId: string, key: string): Promise<void> {
+    await db.delete(botState).where(and(eq(botState.telegramId, telegramId), eq(botState.key, key)));
+  }
+
+  async cleanupBotState(olderThanDays: number): Promise<void> {
+    await db.delete(botState).where(sql`${botState.updatedAt} < now() - make_interval(days => ${olderThanDays})`);
+  }
+
+  // Atomic exclusive claim: INSERT ON CONFLICT DO NOTHING, returning tells us
+  // whether the row was actually inserted (true = we own this send).
+  async claimNotificationSend(userId: number, kind: string, dayKey: string): Promise<boolean> {
+    const rows = await db.insert(notificationSends)
+      .values({ userId, kind, dayKey })
+      .onConflictDoNothing()
+      .returning({ userId: notificationSends.userId });
+    return rows.length > 0;
+  }
+
+  async cleanupNotificationSends(olderThanDays: number): Promise<void> {
+    await db.delete(notificationSends).where(sql`${notificationSends.sentAt} < now() - make_interval(days => ${olderThanDays})`);
   }
 
 }

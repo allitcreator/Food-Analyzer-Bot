@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, timestamp, real, index, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, real, index, jsonb, primaryKey } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
@@ -165,6 +165,34 @@ export const workoutLogsRelations = relations(workoutLogs, ({ one }) => ({
   user: one(users, { fields: [workoutLogs.userId], references: [users.id] }),
 }));
 
+// Persisted snapshot of the bot's in-memory session state so it survives a
+// deploy/restart. Keyed by (telegram_id, key): `telegram_id` is the bot's
+// chat-id string (the per-record key, e.g. a user's Telegram id), `key` is the
+// record name (e.g. "pendingLogs"), `value` is an arbitrary JSON snapshot.
+// Intentionally NO FK on users — state may appear before a user is approved or
+// even created (the id here is a raw chat id, not users.id).
+export const botState = pgTable("bot_state", {
+  telegramId: text("telegram_id").notNull(),
+  key: text("key").notNull(),
+  value: jsonb("value").notNull(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.telegramId, table.key] }),
+}));
+
+// At-most-once ledger for scheduled sends (evening report, meal / no-log /
+// weight reminders). A successful INSERT of (user, kind, day) claims that send;
+// a conflict means it already went out. Replaces the old in-memory Set<string>
+// dedup so a restart can't double-send or drop a scheduled notification.
+export const notificationSends = pgTable("notification_sends", {
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),        // "report" | "meal_breakfast" | "meal_lunch" | "meal_dinner" | "nolog" | "weight"
+  dayKey: text("day_key").notNull(),   // user-tz calendar day, e.g. "2026-07-25"
+  sentAt: timestamp("sent_at").notNull().defaultNow(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.kind, table.dayKey] }),
+}));
+
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true });
 export const insertFoodLogSchema = createInsertSchema(foodLogs).omit({ id: true, date: true });
 export const insertWaterLogSchema = createInsertSchema(waterLogs).omit({ id: true, date: true });
@@ -187,6 +215,8 @@ export type BarcodeProduct = typeof barcodeProducts.$inferSelect;
 export type InsertBarcodeProduct = z.infer<typeof insertBarcodeProductSchema>;
 export type Favorite = typeof favorites.$inferSelect;
 export type InsertFavorite = z.infer<typeof insertFavoriteSchema>;
+export type BotState = typeof botState.$inferSelect;
+export type NotificationSend = typeof notificationSends.$inferSelect;
 
 /**
  * A favorite as shown in the "visible" list: the user's own favorites plus

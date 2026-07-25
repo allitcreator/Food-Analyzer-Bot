@@ -12,8 +12,8 @@ export async function registerRoutes(
   // Schema changes are handled by versioned migrations (migrations/*.sql) applied
   // at container startup via `drizzle-kit migrate` in docker-entrypoint.sh.
 
-  // Start the bot
-  setupBot(storage, app);
+  // Start the bot (loads persisted session state before registering handlers)
+  await setupBot(storage, app);
 
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", timestamp: Date.now() });
