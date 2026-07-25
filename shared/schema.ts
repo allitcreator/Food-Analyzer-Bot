@@ -93,6 +93,23 @@ export const workoutLogs = pgTable("workout_logs", {
   userDateIdx: index("workout_logs_user_id_date_idx").on(table.userId, table.date),
 }));
 
+// Global, self-filling cache of packaged products keyed by barcode.
+// One product == one row for the whole bot (nutrition is per-product, not
+// per-user). Populated from Open Food Facts ("off") or from a confirmed
+// vision analysis ("vision"), so a scanned product is looked up only once.
+export const barcodeProducts = pgTable("barcode_products", {
+  barcode: text("barcode").primaryKey(),
+  foodName: text("food_name").notNull(),
+  caloriesPer100: real("calories_per_100").notNull(),
+  proteinPer100: real("protein_per_100").notNull(),
+  fatPer100: real("fat_per_100").notNull(),
+  carbsPer100: real("carbs_per_100").notNull(),
+  defaultWeight: integer("default_weight").notNull(), // typical serving/volume, g or ml
+  hydrating: boolean("hydrating").notNull().default(false),
+  source: text("source").notNull(), // "off" | "vision"
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const usersRelations = relations(users, ({ many }) => ({
   logs: many(foodLogs),
   waterLogs: many(waterLogs),
@@ -121,6 +138,7 @@ export const insertFoodLogSchema = createInsertSchema(foodLogs).omit({ id: true,
 export const insertWaterLogSchema = createInsertSchema(waterLogs).omit({ id: true, date: true });
 export const insertWeightLogSchema = createInsertSchema(weightLogs).omit({ id: true, date: true });
 export const insertWorkoutLogSchema = createInsertSchema(workoutLogs).omit({ id: true, date: true });
+export const insertBarcodeProductSchema = createInsertSchema(barcodeProducts).omit({ createdAt: true });
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -132,6 +150,8 @@ export type WeightLog = typeof weightLogs.$inferSelect;
 export type InsertWeightLog = z.infer<typeof insertWeightLogSchema>;
 export type WorkoutLog = typeof workoutLogs.$inferSelect;
 export type InsertWorkoutLog = z.infer<typeof insertWorkoutLogSchema>;
+export type BarcodeProduct = typeof barcodeProducts.$inferSelect;
+export type InsertBarcodeProduct = z.infer<typeof insertBarcodeProductSchema>;
 
 export type CreateFoodLogRequest = InsertFoodLog;
 export type StatsResponse = {

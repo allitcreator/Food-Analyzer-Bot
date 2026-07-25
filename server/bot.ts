@@ -3,7 +3,7 @@ import { config } from "./config";
 import ExcelJS from "exceljs";
 import { IStorage } from "./storage";
 import { analyzeFoodText, analyzeFoodImage, generateEveningReport, generatePeriodAnalysis, transcribeVoice, askCoach, detectBarcode, generateWeightAnalysis, classifyIntent, analyzeWorkout, groupFoodNames, FoodItem } from "./openai";
-import { decodeBarcodeFromImage, isValidEanChecksum, classifyHydratingProduct } from "./barcode";
+import { decodeBarcodeFromImage, isValidEanChecksum, classifyHydratingProduct, barcodeCacheToFoodItem, foodItemToBarcodeCache } from "./barcode";
 import { generateMonthlyPDF, extractTopFoods } from "./pdf";
 import { User, FoodLog } from "@shared/schema";
 import { progressBar } from "./lib/goals";
@@ -24,7 +24,16 @@ function formatTotalsLine(cal: number, prot: number, fat: number, carbs: number,
   return line;
 }
 
-async function lookupBarcodeProduct(barcode: string): Promise<(FoodItem & { barcode: string; foundInDb: boolean }) | null> {
+// Result of an Open Food Facts lookup:
+//  - a full FoodItem when OFF has the product WITH nutrition data;
+//  - a name-only marker (foundInDb:false) when OFF knows the product name but
+//    has no nutrients — the name is then forwarded to vision as a hint;
+//  - null when OFF does not know the barcode at all.
+type BarcodeLookupResult =
+  | (FoodItem & { barcode: string; foundInDb: true })
+  | { foundInDb: false; productName: string };
+
+async function lookupBarcodeProduct(barcode: string): Promise<BarcodeLookupResult | null> {
   try {
     const res = await fetch(`https://world.openfoodfacts.org/api/v0/product/${barcode}.json`, {
       signal: AbortSignal.timeout(10_000),
@@ -38,6 +47,14 @@ async function lookupBarcodeProduct(barcode: string): Promise<(FoodItem & { barc
     if (!name) return null;
 
     const n = p.nutriments || {};
+    // OFF knows the product name but carries no nutrition facts → return the
+    // name only, so the caller can hint vision instead of guessing blindly.
+    const hasEnergy = n["energy-kcal_100g"] != null || n["energy_100g"] != null;
+    const hasMacros = n["proteins_100g"] != null || n["fat_100g"] != null || n["carbohydrates_100g"] != null;
+    if (!hasEnergy && !hasMacros) {
+      return { foundInDb: false, productName: name };
+    }
+
     const cal100 = n["energy-kcal_100g"]
       ? Math.round(n["energy-kcal_100g"])
       : n["energy_100g"]
@@ -69,7 +86,7 @@ async function lookupBarcodeProduct(barcode: string): Promise<(FoodItem & { barc
       mealType: "snack",
       hydrating,
       barcode,
-      foundInDb: true,
+      foundInDb: true as const,
     };
   } catch (err) {
     console.error("Open Food Facts lookup error:", err);
@@ -501,6 +518,22 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         ]
       ]
     };
+  }
+
+  // Persist a confirmed, vision-analyzed packaged product into the global
+  // barcode cache. `item` may carry `barcode` + `barcodeSource="vision"` (set in
+  // the photo handler when a barcode was decoded but cache/OFF missed). Values
+  // are normalized to per-100 from the FINAL (possibly user-corrected) card.
+  async function maybeCacheVisionBarcode(item: any) {
+    if (!item || item.barcodeSource !== "vision" || !item.barcode) return;
+    const rec = foodItemToBarcodeCache(item, item.barcode, "vision");
+    if (!rec) return;
+    try {
+      await storage.upsertBarcodeProduct(rec);
+      console.log("Barcode cached from vision:", item.barcode, rec.foodName);
+    } catch (e) {
+      console.error("Barcode cache write (vision) error:", e);
+    }
   }
 
   async function processFoodItems(chatId: number, telegramId: string, items: FoodItem[]) {
@@ -1927,6 +1960,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
           chat_id: chatId,
           message_id: query.message?.message_id
         });
+        await maybeCacheVisionBarcode(pending);
         delete (bot as any).pendingLogs[telegramId];
       } else if (pending) {
         const unit = getUnit(pending.foodName);
@@ -1951,6 +1985,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
           chat_id: chatId,
           message_id: query.message?.message_id
         });
+        await maybeCacheVisionBarcode(pending);
         delete (bot as any).pendingLogs[telegramId];
       } else {
         bot.sendMessage(chatId, "Срок действия предложения истек или данные не найдены.");
@@ -2041,6 +2076,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
             const amount = Math.round(Number(item.weight)) || 0;
             await storage.logWater(user.id, amount);
             waterMl += amount;
+            await maybeCacheVisionBarcode(item);
             savedCount++;
             continue;
           }
@@ -2060,6 +2096,7 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
             sodium: item.sodium != null ? Number(item.sodium) : null,
             saturatedFat: item.saturatedFat != null ? Number(item.saturatedFat) : null,
           });
+          await maybeCacheVisionBarcode(item);
           savedCount++;
         } catch (e) {
           console.error("Error saving food item:", e);
@@ -3352,6 +3389,11 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
         }
         let analysis: any = null;
         let barcodeSource = false;
+        // When set, a decoded barcode whose product was NOT found in cache/OFF —
+        // the confirmed vision result should be persisted to the cache under it.
+        let cacheBarcode: string | null = null;
+        // Optional hint forwarded to vision (known product name / barcode).
+        let visionHint: { productName?: string; barcode?: string } | undefined;
 
         if (barcode) {
           console.log("Barcode detected:", barcode);
@@ -3359,17 +3401,41 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
             chat_id: chatId,
             message_id: statusMsg.message_id,
           });
-          const barcodeResult = await lookupBarcodeProduct(barcode);
-          if (barcodeResult) {
-            console.log("Barcode product found:", barcodeResult.foodName);
-            analysis = barcodeResult;
+
+          // 1) Self-filling local cache (global for all users).
+          const cached = await storage.getBarcodeProduct(barcode).catch((e) => {
+            console.error("Barcode cache read error:", e);
+            return undefined;
+          });
+          if (cached) {
+            console.log("Barcode product found in cache:", cached.foodName);
+            analysis = barcodeCacheToFoodItem(cached);
             barcodeSource = true;
           } else {
-            console.log("Barcode not found in DB, falling back to vision...");
-            await bot.editMessageText("🔍 Штрихкод не найден в базе, анализирую визуально...", {
-              chat_id: chatId,
-              message_id: statusMsg.message_id
-            });
+            // 2) Open Food Facts.
+            const off = await lookupBarcodeProduct(barcode);
+            if (off && off.foundInDb) {
+              console.log("Barcode product found in OFF:", off.foodName);
+              analysis = off;
+              barcodeSource = true;
+              // Persist the OFF hit so we don't hit the network next time.
+              const rec = foodItemToBarcodeCache(off, barcode, "off");
+              if (rec) {
+                await storage.upsertBarcodeProduct(rec).catch((e) => console.error("Barcode cache write (off) error:", e));
+              }
+            } else {
+              // 3) Miss — fall back to vision, remember the barcode to cache the
+              // confirmed result, and hint vision with the OFF name if we got one.
+              console.log("Barcode not found in cache/OFF, falling back to vision...");
+              cacheBarcode = barcode;
+              visionHint = off && off.foundInDb === false
+                ? { productName: off.productName, barcode }
+                : { barcode };
+              await bot.editMessageText("🔍 Штрихкод не найден в базе, анализирую визуально...", {
+                chat_id: chatId,
+                message_id: statusMsg.message_id
+              });
+            }
           }
         }
 
@@ -3379,12 +3445,17 @@ export function setupBot(storage: IStorage, app?: import("express").Express): Te
           const visionItems = await analyzeFoodImage(base64, userNow, {
             breakfastEnd: user.mealBreakfastEnd ?? '12:30',
             lunchEnd: user.mealLunchEnd ?? '16:30',
-          });
+          }, visionHint);
           console.log("Vision analysis result:", visionItems);
 
           await bot.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
 
           if (visionItems && visionItems.length > 0) {
+            // Only a single, unambiguous packaged product maps 1:1 to the barcode.
+            if (cacheBarcode && visionItems.length === 1) {
+              (visionItems[0] as any).barcode = cacheBarcode;
+              (visionItems[0] as any).barcodeSource = "vision";
+            }
             await processFoodItems(chatId, telegramId, visionItems);
           } else {
             bot.sendMessage(chatId, "Не удалось распознать еду на фото. Попробуйте более чёткий снимок.");

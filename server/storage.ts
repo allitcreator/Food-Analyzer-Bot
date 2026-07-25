@@ -1,4 +1,4 @@
-import { users, foodLogs, waterLogs, weightLogs, workoutLogs, type User, type InsertUser, type FoodLog, type InsertFoodLog, type WaterLog, type WeightLog, type WorkoutLog, type InsertWorkoutLog } from "@shared/schema";
+import { users, foodLogs, waterLogs, weightLogs, workoutLogs, barcodeProducts, type User, type InsertUser, type FoodLog, type InsertFoodLog, type WaterLog, type WeightLog, type WorkoutLog, type InsertWorkoutLog, type BarcodeProduct, type InsertBarcodeProduct } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, sql, desc, gte, lte, lt } from "drizzle-orm";
 import { calcGoalsFromProfile } from "./lib/goals";
@@ -51,6 +51,9 @@ export interface IStorage {
   updateWorkoutLog(id: number, userId: number, data: Partial<InsertWorkoutLog>): Promise<WorkoutLog>;
   deleteWorkoutLog(id: number): Promise<void>;
   deleteWorkoutLogsBySource(userId: number, date: Date, source: string): Promise<void>;
+
+  getBarcodeProduct(barcode: string): Promise<BarcodeProduct | undefined>;
+  upsertBarcodeProduct(product: InsertBarcodeProduct): Promise<BarcodeProduct>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -456,6 +459,20 @@ export class DatabaseStorage implements IStorage {
     await db.delete(workoutLogs).where(
       sql`${workoutLogs.userId} = ${userId} AND ${workoutLogs.source} = ${source} AND ${workoutLogs.date} >= ${start} AND ${workoutLogs.date} <= ${end}`
     );
+  }
+
+  async getBarcodeProduct(barcode: string): Promise<BarcodeProduct | undefined> {
+    const [row] = await db.select().from(barcodeProducts).where(eq(barcodeProducts.barcode, barcode));
+    return row;
+  }
+
+  async upsertBarcodeProduct(product: InsertBarcodeProduct): Promise<BarcodeProduct> {
+    const { barcode, ...rest } = product;
+    const [row] = await db.insert(barcodeProducts)
+      .values(product)
+      .onConflictDoUpdate({ target: barcodeProducts.barcode, set: rest })
+      .returning();
+    return row;
   }
 
 }

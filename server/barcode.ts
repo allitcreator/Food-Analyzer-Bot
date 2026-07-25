@@ -73,6 +73,99 @@ export function classifyHydratingProduct(input: {
 }
 
 /**
+ * Shape of a row in the global `barcode_products` cache, restricted to the
+ * fields the pure recompute helpers need (per-100 nutrition + serving).
+ */
+export interface BarcodeCacheRecord {
+  barcode: string;
+  foodName: string;
+  caloriesPer100: number;
+  proteinPer100: number;
+  fatPer100: number;
+  carbsPer100: number;
+  defaultWeight: number;
+  hydrating: boolean;
+  source: string;
+}
+
+/** FoodItem-compatible result of a barcode lookup (mirrors lookupBarcodeProduct). */
+export interface BarcodeFoodItem {
+  foodName: string;
+  calories: number;
+  protein: number;
+  fat: number;
+  carbs: number;
+  weight: number;
+  mealType: string;
+  hydrating: boolean;
+  barcode: string;
+  foundInDb: boolean;
+}
+
+/**
+ * Map a cached barcode record → FoodItem-shaped object, recomputing КБЖУ from
+ * the stored per-100 values onto a serving weight (defaults to the cached
+ * `defaultWeight`). Output matches what lookupBarcodeProduct returns so the
+ * photo flow can treat cache hits and OFF hits identically.
+ * Pure — no network / DB — so it is unit-testable in isolation.
+ */
+export function barcodeCacheToFoodItem(
+  rec: BarcodeCacheRecord,
+  weight?: number,
+): BarcodeFoodItem {
+  const w = weight != null && weight > 0 ? weight : rec.defaultWeight;
+  const ratio = w / 100;
+  return {
+    foodName: rec.foodName,
+    calories: Math.round(rec.caloriesPer100 * ratio),
+    protein: Math.round(rec.proteinPer100 * ratio),
+    fat: Math.round(rec.fatPer100 * ratio),
+    carbs: Math.round(rec.carbsPer100 * ratio),
+    weight: Math.round(w),
+    mealType: "snack",
+    hydrating: rec.hydrating,
+    barcode: rec.barcode,
+    foundInDb: true,
+  };
+}
+
+/**
+ * Build a cache record from a (possibly user-corrected) food card, normalizing
+ * КБЖУ to per-100 values: per100 = value / weight * 100. The card's weight
+ * becomes the cached `defaultWeight`. Returns null if weight ≤ 0 (cannot
+ * normalize). Pure — no network / DB.
+ */
+export function foodItemToBarcodeCache(
+  item: {
+    foodName: string;
+    calories: number;
+    protein: number;
+    fat: number;
+    carbs: number;
+    weight: number;
+    hydrating?: boolean;
+  },
+  barcode: string,
+  source: string,
+): BarcodeCacheRecord | null {
+  const weight = Number(item.weight);
+  if (!Number.isFinite(weight) || weight <= 0) return null;
+  const factor = 100 / weight;
+  const per100 = (v: number) => Math.round((Number(v) || 0) * factor * 10) / 10;
+  return {
+    barcode,
+    foodName: item.foodName,
+    caloriesPer100: per100(item.calories),
+    proteinPer100: per100(item.protein),
+    fatPer100: per100(item.fat),
+    carbsPer100: per100(item.carbs),
+    defaultWeight: Math.round(weight),
+    hydrating: item.hydrating === true,
+    source,
+  };
+}
+
+/**
  * Validate the check digit of an EAN-13 / EAN-8 / UPC-A (12-digit) code.
  * Uses the standard GTIN algorithm: from the rightmost data digit, weights
  * alternate 3, 1, 3, 1, … and the check digit closes the sum to a multiple of 10.

@@ -622,7 +622,8 @@ export async function generateWeightAnalysis(
 export async function analyzeFoodImage(
   imageBase64: string,
   currentTime?: Date,
-  mealBoundaries?: { breakfastEnd: string; lunchEnd: string }
+  mealBoundaries?: { breakfastEnd: string; lunchEnd: string },
+  hint?: { productName?: string; barcode?: string }
 ): Promise<FoodItem[] | null> {
   try {
     let timeHint = '';
@@ -649,6 +650,23 @@ export async function analyzeFoodImage(
       timeHint = `\nCurrent time: ${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}. Default mealType: "${defaultMeal}".`;
     }
 
+    // Barcode hint: the photo is a packaged product whose barcode was decoded
+    // but not found in any nutrition DB. Steer the model to read the label
+    // carefully and reuse the known product name.
+    let productHint = '';
+    if (hint?.productName || hint?.barcode) {
+      const parts: string[] = [
+        'IMPORTANT: this photo shows a single PACKAGED product with a barcode',
+      ];
+      if (hint.barcode) parts.push(`(barcode ${hint.barcode})`);
+      parts.push('.');
+      if (hint.productName) {
+        parts.push(`The product is most likely called "${hint.productName}" — use this exact name unless the visible label clearly says otherwise.`);
+      }
+      parts.push('Read the nutrition label on the package VERY carefully and report the per-serving КБЖУ exactly as printed.');
+      productHint = `\n${parts.join(' ')}`;
+    }
+
     const response = await callAI("analyzeFoodImage", {
       model: "openai/gpt-4o",
       temperature: 0,
@@ -666,7 +684,7 @@ export async function analyzeFoodImage(
 5. Rate nutritional quality 1-10. Write nutritionAdvice ONLY if foodScore <= 5, otherwise set to "".
 6. Estimate micronutrients based on typical composition or label.
 7. Hydration flag: if the item is a DRINK, set hydrating=true ONLY for plain water (still, sparkling, or mineral water WITHOUT sugar) or for unsweetened tea/coffee WITHOUT milk and WITHOUT sugar (≈0 kcal). For any caloric drink — juice, lemonade, milk, latte/cappuccino, sweet tea, cola/soda, beer, wine, smoothie, kefir, etc. — set hydrating=false. For non-drinks, omit the field or set hydrating=false.
-${timeHint}
+${productHint}${timeHint}
 Return ONLY a JSON object with key "items" containing an array. Each element:
 - foodName (string)
 - calories (number)

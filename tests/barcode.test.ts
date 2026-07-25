@@ -5,7 +5,13 @@
  */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { decodeBarcodeFromImage, isValidEanChecksum, classifyHydratingProduct } from "../server/barcode";
+import {
+  decodeBarcodeFromImage,
+  isValidEanChecksum,
+  classifyHydratingProduct,
+  barcodeCacheToFoodItem,
+  foodItemToBarcodeCache,
+} from "../server/barcode";
 
 describe("isValidEanChecksum", () => {
   test("valid EAN-13", () => {
@@ -114,6 +120,101 @@ describe("classifyHydratingProduct", () => {
 
   test("case-insensitive category tags", () => {
     assert.equal(classifyHydratingProduct({ categoriesTags: ["EN:WATERS"] }), true);
+  });
+});
+
+describe("barcodeCacheToFoodItem", () => {
+  const rec = {
+    barcode: "4600682000037",
+    foodName: "Сгущёнка",
+    caloriesPer100: 320,
+    proteinPer100: 7.2,
+    fatPer100: 8.5,
+    carbsPer100: 55,
+    defaultWeight: 40,
+    hydrating: false,
+    source: "vision",
+  };
+
+  test("recomputes КБЖУ on the cached default weight", () => {
+    const item = barcodeCacheToFoodItem(rec);
+    assert.equal(item.foodName, "Сгущёнка");
+    assert.equal(item.weight, 40);
+    assert.equal(item.calories, Math.round(320 * 0.4)); // 128
+    assert.equal(item.protein, Math.round(7.2 * 0.4)); // 3
+    assert.equal(item.fat, Math.round(8.5 * 0.4)); // 3
+    assert.equal(item.carbs, Math.round(55 * 0.4)); // 22
+    assert.equal(item.mealType, "snack");
+    assert.equal(item.foundInDb, true);
+    assert.equal(item.barcode, "4600682000037");
+    assert.equal(item.hydrating, false);
+  });
+
+  test("recomputes on an explicit override weight", () => {
+    const item = barcodeCacheToFoodItem(rec, 100);
+    assert.equal(item.weight, 100);
+    assert.equal(item.calories, 320);
+    assert.equal(item.protein, 7); // round(7.2)
+    assert.equal(item.carbs, 55);
+  });
+
+  test("non-positive override weight falls back to defaultWeight", () => {
+    assert.equal(barcodeCacheToFoodItem(rec, 0).weight, 40);
+    assert.equal(barcodeCacheToFoodItem(rec, -5).weight, 40);
+  });
+
+  test("carries the hydrating flag through", () => {
+    const water = { ...rec, foodName: "Вода", caloriesPer100: 0, proteinPer100: 0, fatPer100: 0, carbsPer100: 0, defaultWeight: 500, hydrating: true };
+    const item = barcodeCacheToFoodItem(water);
+    assert.equal(item.hydrating, true);
+    assert.equal(item.weight, 500);
+    assert.equal(item.calories, 0);
+  });
+});
+
+describe("foodItemToBarcodeCache", () => {
+  test("normalizes КБЖУ to per-100 and keeps weight as defaultWeight", () => {
+    const rec = foodItemToBarcodeCache(
+      { foodName: "Батончик", calories: 128, protein: 3, fat: 3.4, carbs: 22, weight: 40 },
+      "4600682000037",
+      "vision",
+    );
+    assert.ok(rec);
+    assert.equal(rec!.barcode, "4600682000037");
+    assert.equal(rec!.source, "vision");
+    assert.equal(rec!.defaultWeight, 40);
+    assert.equal(rec!.caloriesPer100, 320); // 128 / 40 * 100
+    assert.equal(rec!.proteinPer100, 7.5); // 3 / 40 * 100
+    assert.equal(rec!.fatPer100, 8.5); // 3.4 / 40 * 100
+    assert.equal(rec!.carbsPer100, 55); // 22 / 40 * 100
+    assert.equal(rec!.hydrating, false);
+  });
+
+  test("round-trips through barcodeCacheToFoodItem", () => {
+    const original = { foodName: "X", calories: 200, protein: 10, fat: 5, carbs: 30, weight: 50, hydrating: false };
+    const rec = foodItemToBarcodeCache(original, "1234567890128", "vision")!;
+    const back = barcodeCacheToFoodItem(rec);
+    assert.equal(back.weight, 50);
+    assert.equal(back.calories, 200);
+    assert.equal(back.protein, 10);
+    assert.equal(back.fat, 5);
+    assert.equal(back.carbs, 30);
+  });
+
+  test("defaults hydrating from the item flag", () => {
+    const rec = foodItemToBarcodeCache(
+      { foodName: "Вода", calories: 0, protein: 0, fat: 0, carbs: 0, weight: 500, hydrating: true },
+      "48000009",
+      "off",
+    );
+    assert.equal(rec!.hydrating, true);
+    assert.equal(rec!.source, "off");
+  });
+
+  test("returns null when weight is zero or invalid (cannot normalize)", () => {
+    assert.equal(foodItemToBarcodeCache({ foodName: "X", calories: 1, protein: 1, fat: 1, carbs: 1, weight: 0 }, "b", "vision"), null);
+    assert.equal(foodItemToBarcodeCache({ foodName: "X", calories: 1, protein: 1, fat: 1, carbs: 1, weight: -10 }, "b", "vision"), null);
+    assert.equal(foodItemToBarcodeCache({ foodName: "X", calories: 1, protein: 1, fat: 1, carbs: 1, weight: NaN }, "b", "vision"), null);
   });
 });
 
