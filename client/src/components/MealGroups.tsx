@@ -1,4 +1,4 @@
-import { Pencil, Trash2, Utensils } from "lucide-react";
+import { Pencil, Trash2, Utensils, RotateCw, Star } from "lucide-react";
 import type { FoodLog } from "@/lib/types";
 import { MEAL_LABELS, MEAL_ORDER, round } from "@/lib/format";
 import { Card } from "@/components/ui/Card";
@@ -7,10 +7,21 @@ interface MealGroupsProps {
   logs: FoodLog[];
   onEdit?: (log: FoodLog) => void;
   onDelete?: (log: FoodLog) => void;
+  onRepeat?: (log: FoodLog) => void;
+  onFavorite?: (log: FoodLog) => void;
+  /** Ids currently being repeated (disables their button + shows активность). */
+  repeatingId?: number | null;
 }
 
 /** Food entries grouped by meal type with per-meal calorie subtotals. */
-export function MealGroups({ logs, onEdit, onDelete }: MealGroupsProps) {
+export function MealGroups({
+  logs,
+  onEdit,
+  onDelete,
+  onRepeat,
+  onFavorite,
+  repeatingId,
+}: MealGroupsProps) {
   if (logs.length === 0) {
     return (
       <Card className="flex flex-col items-center gap-2 py-8 text-center text-muted-foreground">
@@ -46,6 +57,27 @@ export function MealGroups({ logs, onEdit, onDelete }: MealGroupsProps) {
                       {round(log.fat)} · У {round(log.carbs)}
                     </p>
                   </div>
+                  {onRepeat && (
+                    <button
+                      onClick={() => onRepeat(log)}
+                      disabled={repeatingId === log.id}
+                      className="rounded-full p-2 text-chart-1 hover:bg-secondary disabled:opacity-40"
+                      aria-label="Повторить на сегодня"
+                      title="Повторить на сегодня"
+                    >
+                      <RotateCw className={`h-4 w-4 ${repeatingId === log.id ? "animate-spin" : ""}`} />
+                    </button>
+                  )}
+                  {onFavorite && (
+                    <button
+                      onClick={() => onFavorite(log)}
+                      className="rounded-full p-2 text-chart-3 hover:bg-secondary"
+                      aria-label="В избранное"
+                      title="В избранное"
+                    >
+                      <Star className="h-4 w-4" />
+                    </button>
+                  )}
                   {onEdit && (
                     <button
                       onClick={() => onEdit(log)}

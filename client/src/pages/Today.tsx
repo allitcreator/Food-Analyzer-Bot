@@ -1,7 +1,8 @@
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Droplet, Flame, Dumbbell } from "lucide-react";
+import { Droplet, Flame, Dumbbell, Star, Pencil, Check, X } from "lucide-react";
 import { api } from "@/lib/api";
-import type { DayResponse } from "@/lib/types";
+import type { DayResponse, Favorite } from "@/lib/types";
 import { round } from "@/lib/format";
 import { hapticImpact, hapticNotification } from "@/lib/telegram";
 import { PageHeader } from "@/components/PageHeader";
@@ -10,6 +11,7 @@ import { Ring, MacroRing } from "@/components/Ring";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { MealGroups } from "@/components/MealGroups";
 import { ErrorScreen } from "@/components/StateScreens";
+import { toast } from "@/components/ui/Toast";
 
 export default function Today() {
   const qc = useQueryClient();
@@ -38,6 +40,7 @@ export default function Today() {
           <>
             <CaloriesCard data={data} />
             <MacrosCard data={data} />
+            <FavoritesCard />
             {data.energyBalance && <EnergyCard eb={data.energyBalance} />}
             <WaterCard
               total={data.waterTotal}
@@ -99,6 +102,89 @@ function MacrosCard({ data }: { data: DayResponse }) {
         <MacroRing label="Белки" value={round(data.totals.protein)} goal={data.goals.protein} colorVar="--chart-2" />
         <MacroRing label="Жиры" value={round(data.totals.fat)} goal={data.goals.fat} colorVar="--chart-3" />
         <MacroRing label="Углеводы" value={round(data.totals.carbs)} goal={data.goals.carbs} colorVar="--chart-4" />
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Horizontal row of saved-favorite chips: tap to log, edit mode to delete. */
+function FavoritesCard() {
+  const qc = useQueryClient();
+  const [editMode, setEditMode] = useState(false);
+
+  const { data } = useQuery({
+    queryKey: ["favorites"],
+    queryFn: api.favorites,
+  });
+
+  const logMutation = useMutation({
+    mutationFn: (fav: Favorite) => api.logFavorite(fav.id),
+    onSuccess: (_res, fav) => {
+      hapticNotification("success");
+      toast(`Записано: ${fav.title}`);
+      qc.invalidateQueries({ queryKey: ["day", "today"] });
+    },
+    onError: () => {
+      hapticNotification("error");
+      toast("Не удалось записать");
+    },
+  });
+
+  const delMutation = useMutation({
+    mutationFn: (id: number) => api.deleteFavorite(id),
+    onSuccess: () => {
+      hapticImpact("medium");
+      qc.invalidateQueries({ queryKey: ["favorites"] });
+    },
+  });
+
+  const favorites = data?.favorites ?? [];
+  if (favorites.length === 0) return null;
+
+  return (
+    <Card>
+      <CardContent className="pt-4">
+        <div className="mb-3 flex items-center justify-between">
+          <span className="flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
+            <Star className="h-4 w-4 text-chart-3" /> Избранное
+          </span>
+          <button
+            onClick={() => {
+              hapticImpact("light");
+              setEditMode((v) => !v);
+            }}
+            className="rounded-full p-1.5 text-muted-foreground hover:bg-secondary"
+            aria-label={editMode ? "Готово" : "Править"}
+          >
+            {editMode ? <Check className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+          </button>
+        </div>
+        <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+          {favorites.map((fav) => (
+            <div key={fav.id} className="relative shrink-0">
+              <button
+                disabled={logMutation.isPending || editMode}
+                onClick={() => {
+                  hapticImpact("medium");
+                  logMutation.mutate(fav);
+                }}
+                className="max-w-[160px] truncate rounded-full bg-secondary px-4 py-2 text-sm font-medium text-secondary-foreground active:scale-[0.97] disabled:opacity-60"
+                title={fav.title}
+              >
+                {fav.title}
+              </button>
+              {editMode && (
+                <button
+                  onClick={() => delMutation.mutate(fav.id)}
+                  className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow"
+                  aria-label={`Удалить ${fav.title}`}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
       </CardContent>
     </Card>
   );

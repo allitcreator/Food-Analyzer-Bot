@@ -21,6 +21,7 @@ import { ErrorScreen } from "@/components/StateScreens";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Input, Field, Select } from "@/components/ui/Input";
+import { toast } from "@/components/ui/Toast";
 
 export default function History() {
   const qc = useQueryClient();
@@ -41,6 +42,45 @@ export default function History() {
       hapticNotification("success");
       setDeleting(null);
       invalidate();
+    },
+  });
+
+  const repeatMutation = useMutation({
+    mutationFn: (log: FoodLog) => api.repeatLog(log.id),
+    onSuccess: (_res, log) => {
+      hapticNotification("success");
+      toast(`Повторено: ${log.foodName}`);
+      invalidate();
+    },
+    onError: () => {
+      hapticNotification("error");
+      toast("Не удалось повторить");
+    },
+  });
+
+  const favMutation = useMutation({
+    mutationFn: (log: FoodLog) =>
+      api.createFavorite({
+        title: log.foodName,
+        items: [
+          {
+            foodName: log.foodName,
+            calories: log.calories,
+            protein: log.protein,
+            fat: log.fat,
+            carbs: log.carbs,
+            weight: log.weight,
+          },
+        ],
+      }),
+    onSuccess: (_res, log) => {
+      hapticNotification("success");
+      toast(`В избранном: ${log.foodName}`);
+      qc.invalidateQueries({ queryKey: ["favorites"] });
+    },
+    onError: () => {
+      hapticNotification("error");
+      toast("Не удалось сохранить");
     },
   });
 
@@ -92,7 +132,14 @@ export default function History() {
           </>
         ) : (
           <>
-            <MealGroups logs={data.foodLogs} onEdit={setEditing} onDelete={setDeleting} />
+            <MealGroups
+              logs={data.foodLogs}
+              onEdit={setEditing}
+              onDelete={setDeleting}
+              onRepeat={(log) => repeatMutation.mutate(log)}
+              onFavorite={(log) => favMutation.mutate(log)}
+              repeatingId={repeatMutation.isPending ? repeatMutation.variables?.id : null}
+            />
             {data.foodLogs.length > 0 && <DayTotals data={data} />}
           </>
         )}

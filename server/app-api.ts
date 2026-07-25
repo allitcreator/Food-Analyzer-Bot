@@ -12,7 +12,8 @@ import { z, ZodError } from "zod";
 import { storage } from "./storage";
 import { telegramAuth } from "./lib/telegram-auth";
 import { computeEnergyBalance } from "./lib/energy";
-import type { User } from "@shared/schema";
+import { mealTypeByTime } from "./lib/favorites";
+import type { User, FoodLog, FavoriteItem } from "@shared/schema";
 import {
   dayQuerySchema,
   statsQuerySchema,
@@ -21,6 +22,7 @@ import {
   waterSchema,
   profilePatchSchema,
   settingsPatchSchema,
+  createFavoriteSchema,
   idParam,
 } from "@shared/routes";
 
@@ -81,6 +83,105 @@ function dayBounds(day: Date): { start: Date; end: Date } {
   return { start, end };
 }
 
+/** ISO "YYYY-MM-DD" from a server-local Date. */
+function isoOf(day: Date): string {
+  return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+}
+
+/** Current wall-clock time in the user's timezone (for "repeat"/favorites mealType). */
+function userNow(tz: string): Date {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+    hour12: false,
+  }).formatToParts(new Date());
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  let hour = get("hour");
+  if (hour === 24) hour = 0; // some engines emit 24 for midnight with hour12:false
+  return new Date(get("year"), get("month") - 1, get("day"), hour, get("minute"), get("second"));
+}
+
+/** The user's configured meal-time boundaries (same defaults as the bot). */
+function mealBoundaries(user: User) {
+  return {
+    breakfastEnd: user.mealBreakfastEnd ?? "12:30",
+    lunchEnd: user.mealLunchEnd ?? "16:30",
+  };
+}
+
+/** The full day payload (same shape GET /day returns) — reused after writes. */
+async function buildDayPayload(user: User, day: Date) {
+  const { start, end } = dayBounds(day);
+  const [totals, waterTotal, waterLogs, workouts, foodLogs] = await Promise.all([
+    storage.getDailyStats(user.id, day),
+    storage.getDailyWater(user.id, day),
+    storage.getDailyWaterLogs(user.id, day),
+    storage.getDailyWorkouts(user.id, day),
+    storage.getFoodLogsInRange(user.id, start, end),
+  ]);
+  const burnedTotal = workouts.reduce((s, w) => s + w.caloriesBurned, 0);
+  const energyBalance = computeEnergyBalance(user, totals.calories, burnedTotal);
+  return {
+    date: isoOf(day),
+    foodLogs,
+    waterTotal,
+    waterLogs,
+    workouts,
+    totals,
+    goals: userGoals(user),
+    energyBalance,
+  };
+}
+
+/**
+ * Write favorite/repeat items onto today, assigning mealType by the user's
+ * CURRENT wall-clock time. Hydrating items go to water, the rest to the diary.
+ * Mirrors `applyItemsToToday` in server/bot.ts.
+ */
+async function applyItemsToToday(
+  user: User,
+  items: FavoriteItem[],
+): Promise<{ createdFood: FoodLog[]; waterAdded: number }> {
+  const tz = user.timezone ?? "Europe/Moscow";
+  const mealType = mealTypeByTime(userNow(tz), mealBoundaries(user));
+
+  const createdFood: FoodLog[] = [];
+  let waterAdded = 0;
+  for (const it of items) {
+    if (it.hydrating) {
+      const amount = Math.round(Number(it.weight)) || 0;
+      if (amount > 0) {
+        await storage.logWater(user.id, amount);
+        waterAdded += amount;
+      }
+      continue;
+    }
+    const log = await storage.createFoodLog({
+      userId: user.id,
+      foodName: it.foodName,
+      calories: Math.round(Number(it.calories)) || 0,
+      protein: Math.round(Number(it.protein)) || 0,
+      fat: Math.round(Number(it.fat)) || 0,
+      carbs: Math.round(Number(it.carbs)) || 0,
+      weight: Math.round(Number(it.weight)) || 0,
+      mealType,
+      foodScore: null,
+      nutritionAdvice: null,
+      fiber: null,
+      sugar: null,
+      sodium: null,
+      saturatedFat: null,
+    });
+    createdFood.push(log);
+  }
+  return { createdFood, waterAdded };
+}
+
 // ─── Router ──────────────────────────────────────────────────────────────────
 
 export function createAppApiRouter(): Router {
@@ -120,29 +221,7 @@ export function createAppApiRouter(): Router {
       const tz = user.timezone ?? "Europe/Moscow";
       const { date } = dayQuerySchema.parse(req.query);
       const day = resolveDay(date, tz);
-      const { start, end } = dayBounds(day);
-
-      const [totals, waterTotal, waterLogs, workouts, foodLogs] = await Promise.all([
-        storage.getDailyStats(user.id, day),
-        storage.getDailyWater(user.id, day),
-        storage.getDailyWaterLogs(user.id, day),
-        storage.getDailyWorkouts(user.id, day),
-        storage.getFoodLogsInRange(user.id, start, end),
-      ]);
-
-      const burnedTotal = workouts.reduce((s, w) => s + w.caloriesBurned, 0);
-      const energyBalance = computeEnergyBalance(user, totals.calories, burnedTotal);
-
-      res.json({
-        date: `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`,
-        foodLogs,
-        waterTotal,
-        waterLogs,
-        workouts,
-        totals,
-        goals: userGoals(user),
-        energyBalance,
-      });
+      res.json(await buildDayPayload(user, day));
     }),
   );
 
@@ -235,6 +314,85 @@ export function createAppApiRouter(): Router {
       const id = idParam.parse(req.params.id);
       await storage.deleteWaterLog(id, user.id);
       res.json({ ok: true });
+    }),
+  );
+
+  // POST /api/app/logs/:id/repeat — copy a past food entry onto today
+  // (mealType by the user's current time). Ownership enforced via getFoodLogById.
+  router.post(
+    "/logs/:id/repeat",
+    asyncHandler(async (req, res) => {
+      const user = currentUser(req);
+      const id = idParam.parse(req.params.id);
+
+      const log = await storage.getFoodLogById(id, user.id);
+      if (!log) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      const { createdFood } = await applyItemsToToday(user, [
+        {
+          foodName: log.foodName,
+          calories: log.calories,
+          protein: log.protein,
+          fat: log.fat,
+          carbs: log.carbs,
+          weight: log.weight,
+        },
+      ]);
+      const day = await buildDayPayload(user, userToday(user.timezone ?? "Europe/Moscow"));
+      res.status(201).json({ ok: true, createdFood, waterAdded: 0, day });
+    }),
+  );
+
+  // GET /api/app/favorites — the user's saved meals/dishes.
+  router.get(
+    "/favorites",
+    asyncHandler(async (req, res) => {
+      const user = currentUser(req);
+      const favorites = await storage.getFavorites(user.id);
+      res.json({ favorites });
+    }),
+  );
+
+  // POST /api/app/favorites { title, items } — save a favorite.
+  router.post(
+    "/favorites",
+    asyncHandler(async (req, res) => {
+      const user = currentUser(req);
+      const { title, items } = createFavoriteSchema.parse(req.body);
+      const fav = await storage.createFavorite({ userId: user.id, title, items });
+      res.status(201).json(fav);
+    }),
+  );
+
+  // DELETE /api/app/favorites/:id — remove a favorite (ownership in the WHERE).
+  router.delete(
+    "/favorites/:id",
+    asyncHandler(async (req, res) => {
+      const user = currentUser(req);
+      const id = idParam.parse(req.params.id);
+      await storage.deleteFavorite(user.id, id);
+      res.json({ ok: true });
+    }),
+  );
+
+  // POST /api/app/favorites/:id/log — write a favorite onto today.
+  router.post(
+    "/favorites/:id/log",
+    asyncHandler(async (req, res) => {
+      const user = currentUser(req);
+      const id = idParam.parse(req.params.id);
+
+      const favorites = await storage.getFavorites(user.id);
+      const fav = favorites.find((f) => f.id === id);
+      if (!fav) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      const { createdFood, waterAdded } = await applyItemsToToday(user, fav.items);
+      const day = await buildDayPayload(user, userToday(user.timezone ?? "Europe/Moscow"));
+      res.status(201).json({ ok: true, createdFood, waterAdded, day });
     }),
   );
 

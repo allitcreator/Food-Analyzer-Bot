@@ -13,6 +13,9 @@ import type {
   UpdateLogBody,
   ProfilePatchBody,
   SettingsPatchBody,
+  Favorite,
+  CreateFavoriteBody,
+  LogApplyResponse,
 } from "./types";
 
 const BASE = "/api/app";
@@ -77,4 +80,16 @@ export const api = {
     request<MeResponse>("PATCH", "/profile", body),
   updateSettings: (body: SettingsPatchBody) =>
     request<MeResponse>("PATCH", "/settings", body),
+
+  // Favorites + one-tap repeat.
+  favorites: () =>
+    request<{ favorites: Favorite[] }>("GET", "/favorites"),
+  createFavorite: (body: CreateFavoriteBody) =>
+    request<Favorite>("POST", "/favorites", body),
+  deleteFavorite: (id: number) =>
+    request<{ ok: boolean }>("DELETE", `/favorites/${id}`),
+  logFavorite: (id: number) =>
+    request<LogApplyResponse>("POST", `/favorites/${id}/log`),
+  repeatLog: (id: number) =>
+    request<LogApplyResponse>("POST", `/logs/${id}/repeat`),
 };

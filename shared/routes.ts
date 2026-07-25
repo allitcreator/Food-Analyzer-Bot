@@ -112,6 +112,29 @@ export const profilePatchSchema = z
   .refine((o) => Object.keys(o).length > 0, "no fields to update");
 export type ProfilePatchBody = z.infer<typeof profilePatchSchema>;
 
+/** One item inside a favorite (mirrors `FavoriteItem` in shared/schema.ts). */
+export const favoriteItemSchema = z
+  .object({
+    foodName: z.string().min(1).max(200),
+    calories: z.number().int().min(0).max(50000),
+    protein: z.number().int().min(0).max(2000),
+    fat: z.number().int().min(0).max(2000),
+    carbs: z.number().int().min(0).max(2000),
+    weight: z.number().int().min(0).max(20000),
+    hydrating: z.boolean().optional(),
+  })
+  .strict();
+export type FavoriteItemInput = z.infer<typeof favoriteItemSchema>;
+
+/** POST /api/app/favorites — save a meal/dish for one-tap repeat later. */
+export const createFavoriteSchema = z
+  .object({
+    title: z.string().trim().min(1).max(120),
+    items: z.array(favoriteItemSchema).min(1).max(50),
+  })
+  .strict();
+export type CreateFavoriteBody = z.infer<typeof createFavoriteSchema>;
+
 /** PATCH /api/app/settings — toggles and times mirrored from /settings. */
 export const settingsPatchSchema = z
   .object({

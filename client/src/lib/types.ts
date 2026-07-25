@@ -14,6 +14,8 @@ import type {
   WaterBody,
   ProfilePatchBody,
   SettingsPatchBody,
+  FavoriteItemInput,
+  CreateFavoriteBody,
 } from "@shared/routes";
 
 export type {
@@ -24,6 +26,8 @@ export type {
   WaterBody,
   ProfilePatchBody,
   SettingsPatchBody,
+  FavoriteItemInput,
+  CreateFavoriteBody,
 };
 
 export type MealType = "breakfast" | "lunch" | "dinner" | "snack";
@@ -163,4 +167,21 @@ export type StatsResponse = WeekStatsResponse | MonthStatsResponse;
 
 export interface WeightResponse {
   logs: WeightLog[];
+}
+
+/** A saved favorite meal/dish (`createdAt` is an ISO string over the wire). */
+export interface Favorite {
+  id: number;
+  userId: number;
+  title: string;
+  items: FavoriteItemInput[];
+  createdAt: string | null;
+}
+
+/** Result of writing a favorite / repeating a log onto today. */
+export interface LogApplyResponse {
+  ok: boolean;
+  createdFood: FoodLog[];
+  waterAdded: number;
+  day: DayResponse;
 }

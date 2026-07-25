@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { MeResponse } from "@/lib/types";
 import { TabBar } from "@/components/TabBar";
+import { Toaster } from "@/components/ui/Toast";
 import { FullscreenSpinner } from "@/components/ui/Spinner";
 import { ErrorScreen } from "@/components/StateScreens";
 import Today from "@/pages/Today";
@@ -32,6 +33,7 @@ export default function App() {
         </Switch>
       </div>
       <TabBar />
+      <Toaster />
     </Router>
   );
 }

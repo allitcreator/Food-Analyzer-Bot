@@ -11,6 +11,7 @@ import {
   sameTitle,
   shouldSuggestFavorite,
 } from "../server/lib/favorites";
+import { createFavoriteSchema } from "../shared/routes";
 
 // Helper: a Date whose local wall-clock is HH:MM (matches how getUserNow builds it).
 const at = (h: number, m = 0) => new Date(2026, 0, 1, h, m, 0);
@@ -131,5 +132,58 @@ describe("shouldSuggestFavorite", () => {
   test("custom threshold respected", () => {
     assert.ok(!shouldSuggestFavorite({ ...base, recentCount: 3, threshold: 5 }));
     assert.ok(shouldSuggestFavorite({ ...base, recentCount: 5, threshold: 5 }));
+  });
+});
+
+describe("createFavoriteSchema (POST /api/app/favorites)", () => {
+  const item = {
+    foodName: "Овсянка",
+    calories: 300,
+    protein: 10,
+    fat: 6,
+    carbs: 50,
+    weight: 250,
+  };
+
+  test("accepts a valid single-item favorite", () => {
+    const parsed = createFavoriteSchema.parse({ title: "Завтрак", items: [item] });
+    assert.equal(parsed.title, "Завтрак");
+    assert.equal(parsed.items.length, 1);
+  });
+
+  test("trims the title", () => {
+    const parsed = createFavoriteSchema.parse({ title: "  Обед  ", items: [item] });
+    assert.equal(parsed.title, "Обед");
+  });
+
+  test("keeps the optional hydrating flag", () => {
+    const parsed = createFavoriteSchema.parse({
+      title: "Кофе",
+      items: [{ ...item, foodName: "Кофе", hydrating: true }],
+    });
+    assert.equal(parsed.items[0].hydrating, true);
+  });
+
+  test("rejects an empty title", () => {
+    assert.throws(() => createFavoriteSchema.parse({ title: "", items: [item] }));
+  });
+
+  test("rejects an empty items array", () => {
+    assert.throws(() => createFavoriteSchema.parse({ title: "X", items: [] }));
+  });
+
+  test("rejects non-integer / out-of-range macros", () => {
+    assert.throws(() =>
+      createFavoriteSchema.parse({ title: "X", items: [{ ...item, calories: 1.5 }] }),
+    );
+    assert.throws(() =>
+      createFavoriteSchema.parse({ title: "X", items: [{ ...item, weight: -1 }] }),
+    );
+  });
+
+  test("rejects unknown item fields (strict)", () => {
+    assert.throws(() =>
+      createFavoriteSchema.parse({ title: "X", items: [{ ...item, foodScore: 5 }] }),
+    );
   });
 });
