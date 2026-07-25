@@ -19,6 +19,13 @@ export function cacheControlForFile(filePath: string): string {
   if (/[\\/]assets[\\/]/.test(filePath)) {
     return "public, max-age=31536000, immutable";
   }
+  // Самохостимый telegram-web-app.js без хэша в имени: `no-store` тут — это
+  // лишний трафик на каждой загрузке Mini App, а `immutable` нельзя (файл под
+  // тем же URL обновляется при деплое). Компромисс — сутки кэша: скрипт быстрый
+  // на повторных заходах, а новая версия подхватится максимум через день.
+  if (/[\\/]telegram-web-app\.js$/.test(filePath)) {
+    return "public, max-age=86400";
+  }
   return "no-store";
 }
 

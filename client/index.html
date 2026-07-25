@@ -49,7 +49,18 @@
         });
       })();
     </script>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <!--
+      Self-host Telegram WebApp bridge вместо загрузки напрямую с telegram.org.
+      Раньше тут был блокирующий <script> с чужого домена в <head>: если сеть
+      пользователя не пускает к telegram.org, парсинг страницы висит до таймаута
+      → белый экран, наш бандл даже не стартует. Локальный путь убирает внешний
+      домен из критического пути. Снапшот лежит в client/public/ и обновляется
+      при сборке (script/build.ts). `%BASE_URL%` Vite заменяет на base "/app/"
+      (в dev и в prod), поэтому итог — "/app/telegram-web-app.js"; для классич.
+      (не type="module") скрипта root-absolute путь base НЕ получает, нужен
+      именно плейсхолдер.
+    -->
+    <script src="%BASE_URL%telegram-web-app.js"></script>
   </head>
   <body>
     <div id="root"></div>
