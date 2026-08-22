@@ -14,7 +14,7 @@ const openai = new OpenAI({
   apiKey: config.openrouterApiKey,
   baseURL: "https://openrouter.ai/api/v1",
   defaultHeaders: {
-    "HTTP-Referer": "https://alxthecreatortg.ru",
+    "HTTP-Referer": "https://alxforbot.online",
     "X-Title": "Food Analyzer Bot",
   },
 });

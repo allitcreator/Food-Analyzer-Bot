@@ -2,7 +2,7 @@
 
 Схема:
 ```
-Telegram --> https://alxthecreatortg.ru/api/telegram-webhook/<secret>
+Telegram --> https://alxforbot.online/api/telegram-webhook/<secret>
           --> nginx --> 127.0.0.1:8082 --> контейнер foodbot (порт 5000)
 ```
 
@@ -56,7 +56,7 @@ POSTGRES_DB=foodbot
 
 SESSION_SECRET=<openssl rand -hex 32>
 
-WEBHOOK_URL=https://alxthecreatortg.ru
+WEBHOOK_URL=https://alxforbot.online
 WEBHOOK_SECRET=<openssl rand -hex 32>
 
 TZ=Europe/Moscow
@@ -84,7 +84,7 @@ docker compose logs -f bot
 Должно быть:
 ```
 Running database migrations...
-Telegram webhook set: https://alxthecreatortg.ru/api/telegram-webhook/<secret>
+Telegram webhook set: https://alxforbot.online/api/telegram-webhook/<secret>
 ```
 
 ---
@@ -98,7 +98,7 @@ curl -s "https://api.telegram.org/bot<TOKEN>/getWebhookInfo" | python3 -m json.t
 Успешный ответ:
 ```json
 {
-    "url": "https://alxthecreatortg.ru/api/telegram-webhook/<secret>",
+    "url": "https://alxforbot.online/api/telegram-webhook/<secret>",
     "has_custom_certificate": false,
     "pending_update_count": 0,
     "last_error_message": ""
