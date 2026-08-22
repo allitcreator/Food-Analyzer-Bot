@@ -37,6 +37,9 @@ export const users = pgTable("users", {
   // пинг только если приём реально не записан к этому времени. Когда включено —
   // заменяет статические breakfast/lunch/dinner-напоминания по расписанию.
   smartReminders: boolean("smart_reminders").notNull().default(false),
+  // Токен быстрой записи с телефона (шорткат iOS → POST /api/quick). NULL, пока
+  // пользователь не вызвал /quick. Ездит в заголовке Authorization, не в URL.
+  quickToken: text("quick_token").unique(),
 
   timezone: text("timezone").default("Europe/Moscow"),          // IANA timezone
   mealBreakfastEnd: text("meal_breakfast_end").default("12:30"), // завтрак до HH:MM

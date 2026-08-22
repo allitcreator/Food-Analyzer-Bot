@@ -6,6 +6,8 @@ import { calcGoalsFromProfile } from "./lib/goals";
 export interface IStorage {
   getUser(id: number): Promise<User | undefined>;
   getUserByTelegramId(telegramId: string): Promise<User | undefined>;
+  getUserByQuickToken(token: string): Promise<User | undefined>;
+  setQuickToken(userId: number, token: string | null): Promise<void>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: number, data: Partial<User>): Promise<User>;
   deleteUser(id: number): Promise<void>;
@@ -88,6 +90,19 @@ export class DatabaseStorage implements IStorage {
   async getUserByTelegramId(telegramId: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.telegramId, telegramId));
     return user;
+  }
+
+  // Быстрая запись с телефона: поиск по Bearer-токену шортката. Пустую строку
+  // не ищем — иначе запрос без токена совпал бы с любым пользователем, у
+  // которого колонка пуста (в БД там NULL, но подстраховаться дешевле).
+  async getUserByQuickToken(token: string): Promise<User | undefined> {
+    if (!token) return undefined;
+    const [user] = await db.select().from(users).where(eq(users.quickToken, token));
+    return user;
+  }
+
+  async setQuickToken(userId: number, token: string | null): Promise<void> {
+    await db.update(users).set({ quickToken: token }).where(eq(users.id, userId));
   }
 
   async createUser(user: InsertUser): Promise<User> {

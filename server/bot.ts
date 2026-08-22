@@ -1,4 +1,5 @@
 import TelegramBot from "node-telegram-bot-api";
+import { randomBytes } from "crypto";
 import { config } from "./config";
 import ExcelJS from "exceljs";
 import { IStorage } from "./storage";
@@ -10,10 +11,69 @@ import { progressBar } from "./lib/goals";
 import { mealTypeByTime, buildMealTitle, toFavoriteItems, shouldSuggestFavorite, sameTitle, FAVORITE_SUGGEST_DAYS } from "./lib/favorites";
 import { createPersistentRecord, loadPersistentState } from "./lib/persistent-state";
 import { typicalMealTimes, dueSmartReminder, minutesToHHMM } from "./lib/smart-reminders";
+import { buildSyntheticUpdate, type SyntheticPayload } from "./lib/synthetic-update";
 
 const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
 
 let botInstance: TelegramBot | null = null;
+
+/** Живой экземпляр бота (нужен быстрой записи, чтобы залить фото и получить file_id). */
+export function getBotInstance(): TelegramBot | null {
+  return botInstance;
+}
+
+/**
+ * Быстрая запись с телефона (`POST /api/quick`): вбрасывает синтетический
+ * Telegram-Update в уже работающий `bot.on("message")` вместо того, чтобы
+ * дублировать всю цепочку распознавания — штрихкоды, мультиблюдо, карточку
+ * подтверждения с пропорциональным пересчётом. Карточка приходит пользователю
+ * обычным пушом в Telegram.
+ *
+ * Форму апдейта собирает `buildSyntheticUpdate` — это наш договор с формой
+ * объекта Update, а не публичный контракт библиотеки: смена
+ * `node-telegram-bot-api` заставит его переписать.
+ *
+ * @returns false, если бот ещё не поднят или payload пуст — вызывающий решает,
+ *          что ответить пользователю.
+ */
+export function injectUserMessage(
+  telegramId: string,
+  payload: SyntheticPayload,
+): boolean {
+  const bot = botInstance;
+  if (!bot) return false;
+
+  const update = buildSyntheticUpdate(telegramId, payload);
+  if (!update) return false;
+
+  bot.processUpdate(update as any);
+  return true;
+}
+
+/** Карточка /quick: адрес эндпоинта, токен и контракт тела запроса. */
+function buildQuickCardText(token: string): string {
+  // Базовый адрес берём из WEBHOOK_URL — это и есть публичный домен бота.
+  const base = config.webhookUrl?.replace(/\/+$/, "") || "https://<домен-бота>";
+  return [
+    "⚡ *Быстрая запись с телефона*",
+    "",
+    "Шорткат на iPhone шлёт еду сюда — карточка подтверждения приходит в этот чат.",
+    "",
+    "*URL*",
+    `\`${base}/api/quick\``,
+    "",
+    "*Заголовок*",
+    `\`Authorization: Bearer ${token}\``,
+    "",
+    "*Тело запроса* (JSON, плоский словарь)",
+    '`{"text": "овсянка на молоке 250 г"}`',
+    '`{"imageBase64": "<JPEG в base64>"}`',
+    "",
+    "Можно и то и другое сразу: фото с подписью «это борщ, 400 г».",
+    "",
+    "⚠️ Токен разрешает запись в твой дневник. Утёк — жми «Сбросить», старый сразу перестанет работать.",
+  ].join("\n");
+}
 
 function getUnit(foodName: string): string {
   return foodName.toLowerCase().match(LIQUID_PATTERN) ? 'мл' : 'г';
@@ -336,6 +396,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     { command: "editprofile", description: "Редактировать поля профиля по одному" },
     { command: "workout",     description: "История тренировок за сегодня" },
     { command: "settings",    description: "Настройки: AI, напоминания, отчёт, микронутриенты" },
+    { command: "quick",       description: "Токен для быстрой записи с телефона ⚡" },
     { command: "help",        description: "Список всех команд" },
   ]).catch(err => console.error("setMyCommands error:", err));
 
@@ -387,6 +448,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       "",
       "⚙️ *Настройки*",
       "/settings — AI-анализ, напоминания, авторепорт, микронутриенты",
+      "/quick — Токен для быстрой записи шорткатом с телефона ⚡",
       "",
       "🔧 *Админ*",
       "/users — Управление пользователями",
@@ -1142,6 +1204,27 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     bot.sendMessage(chatId, buildSettingsText(user), {
       parse_mode: 'Markdown',
       reply_markup: buildSettingsKeyboard(user)
+    });
+  });
+
+  // ─── /quick — токен быстрой записи с телефона ──────────────────────────────
+  bot.onText(/^\/quick(@\w+)?$/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from?.id.toString();
+    if (!telegramId) return;
+    const user = await isUserAllowed(chatId, telegramId);
+    if (!user) return;
+
+    // Токен выдаётся лениво — при первом вызове команды.
+    let token = user.quickToken;
+    if (!token) {
+      token = randomBytes(24).toString("hex");
+      await storage.setQuickToken(user.id, token);
+    }
+
+    bot.sendMessage(chatId, buildQuickCardText(token), {
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [[{ text: "🔄 Сбросить токен", callback_data: "quick_reset" }]] }
     });
   });
 
@@ -2218,6 +2301,19 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     }
     if (!user.isApproved && !user.isAdmin && !isGlobalAdmin) {
       bot.answerCallbackQuery(query.id, { text: "Ваша заявка на рассмотрении у администратора." }).catch(() => {});
+      return;
+    }
+
+    if (query.data === "quick_reset") {
+      const token = randomBytes(24).toString("hex");
+      await storage.setQuickToken(user.id, token);
+      bot.answerCallbackQuery(query.id, { text: "Токен обновлён — поправь его в шорткате" }).catch(() => {});
+      bot.editMessageText(buildQuickCardText(token), {
+        chat_id: chatId,
+        message_id: query.message?.message_id,
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: [[{ text: "🔄 Сбросить токен", callback_data: "quick_reset" }]] }
+      }).catch(() => {});
       return;
     }
 
@@ -3848,8 +3944,12 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
         // When set, a decoded barcode whose product was NOT found in cache/OFF —
         // the confirmed vision result should be persisted to the cache under it.
         let cacheBarcode: string | null = null;
-        // Optional hint forwarded to vision (known product name / barcode).
-        let visionHint: { productName?: string; barcode?: string } | undefined;
+        // Optional hint forwarded to vision (known product name / barcode /
+        // подпись пользователя к фото).
+        let visionHint: { productName?: string; barcode?: string; userNote?: string } | undefined;
+        // Подпись к фото — раньше молча терялась (P1-баг №10 из аудита).
+        const caption = msg.caption?.trim();
+        if (caption) visionHint = { userNote: caption };
 
         if (barcode) {
           console.log("Barcode detected:", barcode);
@@ -3885,8 +3985,8 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
               console.log("Barcode not found in cache/OFF, falling back to vision...");
               cacheBarcode = barcode;
               visionHint = off && off.foundInDb === false
-                ? { productName: off.productName, barcode }
-                : { barcode };
+                ? { ...visionHint, productName: off.productName, barcode }
+                : { ...visionHint, barcode };
               await bot.editMessageText("🔍 Штрихкод не найден в базе, анализирую визуально...", {
                 chat_id: chatId,
                 message_id: statusMsg.message_id

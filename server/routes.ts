@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupBot } from "./bot";
 import { createAppApiRouter } from "./app-api";
+import { createQuickRouter } from "./quick-api";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -21,6 +22,10 @@ export async function registerRoutes(
 
   // Telegram Mini App REST API (auth + rate-limit are applied inside the router).
   app.use("/api/app", createAppApiRouter());
+
+  // Быстрая запись с телефона: шорткат iOS шлёт сюда еду с Bearer-токеном.
+  // Монтируется ПОСЛЕ setupBot — роутер вбрасывает апдейты в живой бот.
+  app.use("/api/quick", createQuickRouter());
 
   return httpServer;
 }

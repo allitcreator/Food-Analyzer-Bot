@@ -186,7 +186,7 @@ Edge cases:
 - "протеиновый коктейль после тренировки" → "food" (it's a consumed product, not an exercise)
 - "пробежал 5 км и съел банан" → "both"
 - "10000 шагов" → "workout"
-- "выпил воды" → "other" (water tracking is separate)
+- "выпил 300 мл воды" → "food" (drinks go through the same chain; plain water is flagged as hydrating downstream and lands in the water counter, not the food diary)
 
 Return ONLY a JSON object: {"intent": "food"|"workout"|"both"|"other"}`
         },
@@ -623,7 +623,7 @@ export async function analyzeFoodImage(
   imageBase64: string,
   currentTime?: Date,
   mealBoundaries?: { breakfastEnd: string; lunchEnd: string },
-  hint?: { productName?: string; barcode?: string }
+  hint?: { productName?: string; barcode?: string; userNote?: string }
 ): Promise<FoodItem[] | null> {
   try {
     let timeHint = '';
@@ -665,6 +665,13 @@ export async function analyzeFoodImage(
       }
       parts.push('Read the nutrition label on the package VERY carefully and report the per-serving КБЖУ exactly as printed.');
       productHint = `\n${parts.join(' ')}`;
+    }
+
+    // Подпись к фото от пользователя («это борщ, 400 г»). Человек видит тарелку,
+    // модель — только пиксели: подпись точнее любой визуальной оценки, поэтому
+    // названия и веса из неё имеют приоритет над тем, что «кажется» на картинке.
+    if (hint?.userNote) {
+      productHint += `\nThe user captioned this photo: "${hint.userNote}". Trust this caption over your visual guess: if it names the dish, use that name; if it gives a weight, portion count or ingredients, use those numbers. The caption is written in Russian and may contain several dishes.`;
     }
 
     const response = await callAI("analyzeFoodImage", {

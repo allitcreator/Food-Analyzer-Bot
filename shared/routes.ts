@@ -166,6 +166,31 @@ export const analyzeSchema = z
 export type AnalyzeBody = z.infer<typeof analyzeSchema>;
 
 /**
+ * Быстрая запись с телефона: `POST /api/quick` (см. QUICK-ENTRY.md).
+ *
+ * Отличия от `analyzeSchema`: тело — ПЛОСКИЙ словарь (редактор JSON в iOS
+ * Shortcuts не умеет вложенность), и `text` с `imageBase64` можно прислать
+ * ВМЕСТЕ — это фото с подписью («это борщ, 400 г»), подпись уезжает в vision
+ * как userNote. Требуется хотя бы одно поле.
+ */
+export const quickSchema = z
+  .object({
+    text: z.string().trim().min(1).max(2000).optional(),
+    imageBase64: z
+      .string()
+      .min(1)
+      .max(1_400_000)
+      .regex(/^[A-Za-z0-9+/]+={0,2}$/, "expected base64")
+      .optional(),
+  })
+  .strict()
+  .refine(
+    (o) => Boolean(o.text) || Boolean(o.imageBase64),
+    "provide text, imageBase64 or both",
+  );
+export type QuickBody = z.infer<typeof quickSchema>;
+
+/**
  * Одна подтверждённая пользователем позиция для POST /api/app/logs. В отличие от
  * `favoriteItemSchema` числа НЕ целые (клиент пересчитывает БЖУ пропорционально
  * весу) и несёт полный набор полей `FoodItem` — сервер сохраняет их как есть.
