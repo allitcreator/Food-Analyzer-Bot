@@ -13,7 +13,6 @@ import { compressImageToBase64 } from "@/lib/image";
 import { scaleFoodByWeight } from "@shared/food-scale";
 import { MEAL_LABELS, round } from "@/lib/format";
 import { hapticImpact, hapticNotification } from "@/lib/telegram";
-import { crumb } from "@/lib/debug";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -70,12 +69,10 @@ export function AddFoodModal({
       return (await api.analyzeFood({ text: text.trim() })).items;
     },
     onSuccess: (items) => {
-      crumb("analyze:success-enter");
       hapticNotification("success");
       setRows(items.map((it) => ({ original: it, weight: it.weight })));
     },
     onError: (err) => {
-      crumb("analyze:error");
       hapticNotification("error");
       if (err instanceof ApiError) {
         toast(
@@ -94,20 +91,13 @@ export function AddFoodModal({
   const logMutation = useMutation({
     mutationFn: (items: AnalyzedItem[]) => api.createLogs(items),
     onSuccess: () => {
-      crumb("add-food:success-enter");
       hapticNotification("success");
-      crumb("add-food:after-haptic");
       toast("Записано");
-      crumb("add-food:after-toast");
       // Today активен под модалкой — обычная инвалидация без refetchType.
       qc.invalidateQueries({ queryKey: ["day"] });
-      crumb("add-food:after-invalidate");
-      setTimeout(() => crumb("add-food:alive+1s"), 1000);
-      setTimeout(() => crumb("add-food:alive+3s"), 3000);
       handleOpenChange(false);
     },
     onError: () => {
-      crumb("add-food:error");
       hapticNotification("error");
       toast("Не удалось записать");
     },

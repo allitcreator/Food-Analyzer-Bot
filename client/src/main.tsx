@@ -4,12 +4,8 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
 import { initTelegram } from "./lib/telegram";
 import { applyTelegramTheme } from "./lib/theme";
-import { installCrumbReporter } from "./lib/debug";
 import App from "./App";
 import "./index.css";
-
-// ВРЕМЕННО: диагностика iOS-фриза — ставим репортер крошек как можно раньше.
-installCrumbReporter();
 
 /** Report to the DOM overlay installed by the inline script in index.html. */
 function reportFatal(source: string, err: unknown) {
