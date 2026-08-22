@@ -103,6 +103,19 @@ def ask(prompt: str, uuid_: str) -> dict:
     )
 
 
+def dictate(uuid_: str) -> dict:
+    """Диктовка вслух: сразу открывает распознавание речи, без клавиатуры."""
+    return action(
+        "is.workflow.actions.dictatetext",
+        {
+            "WFSpeechLanguage": "ru-RU",
+            "WFDictateTextStopListening": "After Pause",
+            "UUID": uuid_,
+            "CustomOutputName": "Продиктованное",
+        },
+    )
+
+
 def post(json_items: list[tuple[str, dict]]) -> dict:
     return action(
         "is.workflow.actions.downloadurl",
@@ -223,15 +236,28 @@ def build_text_only() -> dict:
 
 def build_full() -> dict:
     group = new_uuid()
+    dictate_uuid = new_uuid()
     ask_uuid = new_uuid()
     photo_uuid, resized_uuid, jpeg_uuid, b64_uuid = (new_uuid() for _ in range(4))
     caption_uuid = new_uuid()
 
+    # Три отдельных пункта, а не два: «Запросить ввод» открывает клавиатуру —
+    # микрофон на ней есть, но это лишний тап и не то, чего ждёшь от кнопки
+    # «Сказать». Диктовка вынесена в свой пункт и стартует сразу.
     return workflow([
         comment(HEADER_HINT),
-        menu_start("Что записываем?", ["🎤 Сказать или написать", "📷 Сфотографировать"], group),
+        menu_start(
+            "Что записываем?",
+            ["🎤 Сказать", "⌨️ Написать", "📷 Сфотографировать"],
+            group,
+        ),
 
-        menu_item("🎤 Сказать или написать", group),
+        menu_item("🎤 Сказать", group),
+        dictate(dictate_uuid),
+        post([("text", variable_value(dictate_uuid, "Продиктованное"))]),
+        notify("Отправил на разбор"),
+
+        menu_item("⌨️ Написать", group),
         ask("Что съел?", ask_uuid),
         post([("text", variable_value(ask_uuid, "Ввод"))]),
         notify("Отправил на разбор"),
