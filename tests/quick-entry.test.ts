@@ -109,8 +109,15 @@ describe("quickSchema", () => {
     assert.equal(quickSchema.safeParse({ text: "еда", confirm: 0 }).success, false);
   });
 
-  test("base64 с переносами строк отвергается — в шорткате нужен режим «Разрывы строк: Нет»", () => {
-    assert.equal(quickSchema.safeParse({ imageBase64: "aGVs\nbG8=" }).success, false);
+  test("base64 с переносами строк принимается и склеивается", () => {
+    // Действие «Кодировать в Base64» в Shortcuts по умолчанию рвёт строку на 76
+    // символов — требовать от человека лезть в настройки действия не хотим.
+    const parsed = quickSchema.safeParse({ imageBase64: "aGVs\r\nbG8=" });
+    assert.equal(parsed.success, true);
+    assert.equal(parsed.success && parsed.data.imageBase64, "aGVsbG8=");
+  });
+
+  test("data:-префикс по-прежнему отвергается — нужна голая base64", () => {
     assert.equal(quickSchema.safeParse({ imageBase64: "data:image/jpeg;base64,aGVsbG8=" }).success, false);
   });
 
@@ -119,5 +126,13 @@ describe("quickSchema", () => {
     assert.equal(quickSchema.safeParse({ text: "я".repeat(2001) }).success, false);
     assert.equal(quickSchema.safeParse({ imageBase64: "a".repeat(1_400_000) }).success, true);
     assert.equal(quickSchema.safeParse({ imageBase64: "a".repeat(1_400_001) }).success, false);
+  });
+
+  test("лимит считается по очищенной строке — переносы в него не входят", () => {
+    // 1.4 МБ данных + переносы каждые 76 символов: сырая строка длиннее лимита,
+    // очищенная — ровно на границе.
+    const chunks: string[] = [];
+    for (let i = 0; i < 1_400_000; i += 76) chunks.push("a".repeat(Math.min(76, 1_400_000 - i)));
+    assert.equal(quickSchema.safeParse({ imageBase64: chunks.join("\r\n") }).success, true);
   });
 });

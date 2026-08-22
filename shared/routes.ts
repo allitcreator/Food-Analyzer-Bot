@@ -172,16 +172,31 @@ export type AnalyzeBody = z.infer<typeof analyzeSchema>;
  * Shortcuts не умеет вложенность), и `text` с `imageBase64` можно прислать
  * ВМЕСТЕ — это фото с подписью («это борщ, 400 г»), подпись уезжает в vision
  * как userNote. Требуется хотя бы одно поле.
+ *
+ * Картинка терпима к переносам строк: действие «Кодировать в Base64» в
+ * Shortcuts по умолчанию рвёт строку на 76 символов, и требовать от человека
+ * лезть в настройки действия — лишний способ уронить сценарий на ровном месте.
+ * Пробельные символы вычищаются ДО проверки алфавита; верхняя граница длины
+ * применяется дважды, чтобы гигантская строка из одних переносов не доехала до
+ * нормализации.
  */
-export const quickSchema = z
-  .object({
-    text: z.string().trim().min(1).max(2000).optional(),
-    imageBase64: z
+const base64Image = z
+  .string()
+  .min(1)
+  .max(1_500_000)
+  .transform((s) => s.replace(/\s+/g, ""))
+  .pipe(
+    z
       .string()
       .min(1)
       .max(1_400_000)
-      .regex(/^[A-Za-z0-9+/]+={0,2}$/, "expected base64")
-      .optional(),
+      .regex(/^[A-Za-z0-9+/]+={0,2}$/, "expected base64"),
+  );
+
+export const quickSchema = z
+  .object({
+    text: z.string().trim().min(1).max(2000).optional(),
+    imageBase64: base64Image.optional(),
   })
   .strict()
   .refine(
