@@ -20,7 +20,7 @@ import { quickSchema, type QuickBody } from "@shared/routes";
 import { getBotInstance, injectUserMessage } from "./bot";
 import { extractBearerToken } from "./lib/quick-auth";
 import { describeQuickRejection, describeAuthRejection } from "./lib/quick-reject-log";
-import { bodyFromBinary, isBinaryContentType } from "./lib/quick-binary";
+import { bodyFromBinary, isBinaryContentType, detectImageKind } from "./lib/quick-binary";
 import type { User } from "@shared/schema";
 
 /**
@@ -158,6 +158,15 @@ export function createQuickRouter(): Router {
 
     const user = req.appUser as User;
     const body = parsed.data;
+
+    if (raw) {
+      // Формат важен: снимок едет без конвертации, а Telegram HEIC не примет.
+      const kind = detectImageKind(raw);
+      console.log("[quick] accepted:", `binary=${raw.length}`, `kind=${kind}`);
+      if (kind === "heic" || kind === "unknown") {
+        console.warn("[quick] формат снимка Telegram не поддерживает:", kind);
+      }
+    }
     res.status(202).json({
       ok: true,
       accepted: body.imageBase64 ? (body.text ? "photo+text" : "photo") : "text",

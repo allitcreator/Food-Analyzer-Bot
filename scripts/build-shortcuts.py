@@ -408,7 +408,7 @@ def build_full() -> dict:
     group = new_uuid()
     dictate_uuid = new_uuid()
     ask_uuid = new_uuid()
-    photo_uuid, resized_uuid, jpeg_uuid, b64_uuid = (new_uuid() for _ in range(4))
+    photo_uuid, b64_uuid = new_uuid(), new_uuid()
     caption_uuid, token_uuid = new_uuid(), new_uuid()
 
     # Три отдельных пункта, а не два: «Запросить ввод» открывает клавиатуру —
@@ -435,12 +435,15 @@ def build_full() -> dict:
 
         menu_item("📷 Сфотографировать", group),
         take_photo(photo_uuid),
-        resize(1280, resized_uuid, attachment_value(photo_uuid, "Снимок")),
-        to_jpeg(jpeg_uuid, attachment_value(resized_uuid, "Уменьшенное")),
         ask("Уточнить? Можно оставить пустым", caption_uuid),
         url_encode(b64_uuid, attachment_value(caption_uuid, "Ввод")),
+        # Снимок уходит как есть, без уменьшения и конвертации. Камера
+        # работает и кадр делается, но до сервера он не доезжал ни разу —
+        # значит теряется на обработке или на ссылке между действиями. Здесь
+        # между съёмкой и отправкой не осталось ничего, что можно потерять.
+        # Размер: полный кадр 3–5 МБ, поэтому nginx поднят до 8m.
         post_file(
-            attachment_value(jpeg_uuid, "JPEG"),
+            attachment_value(photo_uuid, "Снимок"),
             mixed_text([ENDPOINT + "?text=", (b64_uuid, "Подпись")]),
             token_uuid,
         ),

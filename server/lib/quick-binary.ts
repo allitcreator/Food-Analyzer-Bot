@@ -15,6 +15,26 @@
  */
 
 /**
+ * Формат картинки по сигнатуре первых байт.
+ *
+ * Нужен, потому что снимок теперь едет без конвертации, а iPhone по умолчанию
+ * снимает в HEIC — Telegram такой файл не принимает. Без этой проверки отказ
+ * прилетел бы из `sendPhoto` и выглядел бы как «опять ничего не пришло».
+ */
+export function detectImageKind(buffer: Buffer): "jpeg" | "png" | "heic" | "unknown" {
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return "jpeg";
+  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return "png";
+  }
+  // HEIC/HEIF: контейнер ISO-BMFF, бренд лежит в боксе ftyp сразу после длины.
+  if (buffer.length >= 12 && buffer.subarray(4, 8).toString("ascii") === "ftyp") {
+    const brand = buffer.subarray(8, 12).toString("ascii");
+    if (brand.startsWith("hei") || brand.startsWith("mif") || brand.startsWith("msf")) return "heic";
+  }
+  return "unknown";
+}
+
+/**
  * Считать ли тело бинарным.
  *
  * Правило от противного: JSON забирает `express.json`, всё остальное читаем

@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { buildSyntheticUpdate } from "../server/lib/synthetic-update";
 import { extractBearerToken } from "../server/lib/quick-auth";
 import { describeQuickRejection, describeAuthRejection } from "../server/lib/quick-reject-log";
-import { bodyFromBinary, isBinaryContentType } from "../server/lib/quick-binary";
+import { bodyFromBinary, isBinaryContentType, detectImageKind } from "../server/lib/quick-binary";
 import { quickSchema } from "../shared/routes";
 import { existsSync } from "node:fs";
 import { buildQuickCardText, buildTokenMessage, buildShortcutCaption, shortcutPath, diagShortcutPath, buildDiagText } from "../server/lib/quick-shortcut";
@@ -353,5 +353,30 @@ describe("isBinaryContentType", () => {
     assert.equal(isBinaryContentType("application/x-www-form-urlencoded"), true);
     assert.equal(isBinaryContentType(undefined), true);
     assert.equal(isBinaryContentType(""), true);
+  });
+});
+
+/**
+ * Снимок теперь уходит без конвертации, а iPhone по умолчанию снимает в HEIC.
+ * Telegram такой формат не принимает, поэтому тип надо знать заранее — иначе
+ * отказ прилетит из sendPhoto и будет выглядеть как «опять ничего не пришло».
+ */
+describe("detectImageKind", () => {
+  test("JPEG и PNG опознаются по сигнатуре", () => {
+    assert.equal(detectImageKind(Buffer.from([0xff, 0xd8, 0xff, 0xe0])), "jpeg");
+    assert.equal(detectImageKind(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), "png");
+  });
+
+  test("HEIC опознаётся по ftyp-боксу", () => {
+    const heic = Buffer.concat([
+      Buffer.from([0, 0, 0, 0x18]),
+      Buffer.from("ftypheic", "ascii"),
+    ]);
+    assert.equal(detectImageKind(heic), "heic");
+  });
+
+  test("мусор и обрезки не падают", () => {
+    assert.equal(detectImageKind(Buffer.from([1, 2, 3])), "unknown");
+    assert.equal(detectImageKind(Buffer.alloc(0)), "unknown");
   });
 });
