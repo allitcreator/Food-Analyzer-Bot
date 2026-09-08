@@ -421,50 +421,47 @@ def build_full() -> dict:
 
 DIAG_HINT = (
     "ДИАГНОСТИКА ФОТО-ВЕТКИ\n\n"
-    "Меряет длину base64 на трёх стадиях: сразу после съёмки, после уменьшения "
-    "и после конвертации в JPEG. Показывает три числа на экране и никуда их не "
-    "отправляет.\n\n"
-    "Как читать: первое число 0 — теряется сам снимок. Второе 0 — ломает "
-    "уменьшение. Третье 0 — ломает конвертация в JPEG. Все три больше нуля — "
-    "фото-ветка исправна, и дело в отправке.\n\n"
-    "Токен здесь не нужен: запросов на сервер шорткат не делает."
+    "Кодирует один и тот же снимок в base64 двумя способами и показывает две "
+    "длины. Ничего никуда не отправляет, токен не нужен.\n\n"
+    "impl — вход действия берётся неявно, от предыдущего действия. "
+    "expl — вход задан явной ссылкой на снимок.\n\n"
+    "Если impl больше нуля, а expl равен нулю, значит ссылки на результат "
+    "записаны неверно, и чинить нужно их. Если оба нуля — теряется сам снимок."
 )
 
 
 def build_diag() -> dict:
-    """Где именно теряется картинка — по одному замеру на каждый шаг.
+    """Какой способ передачи входа работает — неявный или явный.
 
-    Прошлые попытки чинились вслепую: сервер видит только итоговую пустую
-    строку и не может сказать, какое из трёх действий её обнулило. Здесь
-    каждое действие получает вход явной ссылкой на снимок или на результат
-    предыдущего шага, поэтому замеры независимы — сломанное звено видно сразу.
+    Прошлый замер дал три нуля подряд, а по документации и действия, и их
+    параметры заданы верно. Значит подозрение переходит на то, чем эти
+    действия связаны между собой: либо снимок не доезжает вовсе, либо
+    WFInput-ссылка не разрешается и обнуляет всё, что за ней.
+
+    Оба base64 кодируют ОДИН снимок, поэтому длины должны совпасть. Любое
+    расхождение — это и есть ответ.
     """
-    photo_uuid, resized_uuid, jpeg_uuid = (new_uuid() for _ in range(3))
-    b64_raw, b64_resized, b64_jpeg = (new_uuid() for _ in range(3))
-    n_raw, n_resized, n_jpeg = (new_uuid() for _ in range(3))
+    photo_uuid = new_uuid()
+    b64_impl, n_impl = new_uuid(), new_uuid()
+    b64_expl, n_expl = new_uuid(), new_uuid()
 
     return workflow([
         comment(DIAG_HINT),
         take_photo(photo_uuid),
 
-        # 1. Снимок как есть — проверяем, что камера вообще что-то отдала.
-        base64_encode(b64_raw, attachment_value(photo_uuid, "Снимок")),
-        count_chars(n_raw, attachment_value(b64_raw, "Base64"), "Raw"),
+        # Неявная цепочка: действие берёт результат предыдущего само.
+        action("is.workflow.actions.base64encode",
+               {"WFEncodeMode": "Encode", "UUID": b64_impl, "CustomOutputName": "Base64impl"}),
+        action("is.workflow.actions.count",
+               {"WFCountType": "Characters", "UUID": n_impl, "CustomOutputName": "Impl"}),
 
-        # 2. После уменьшения. Вход — снимок, а не предыдущий base64.
-        resize(1280, resized_uuid, attachment_value(photo_uuid, "Снимок")),
-        base64_encode(b64_resized, attachment_value(resized_uuid, "Уменьшенное")),
-        count_chars(n_resized, attachment_value(b64_resized, "Base64"), "Resized"),
-
-        # 3. После конвертации в JPEG — это то, что уходит на сервер.
-        to_jpeg(jpeg_uuid, attachment_value(resized_uuid, "Уменьшенное")),
-        base64_encode(b64_jpeg, attachment_value(jpeg_uuid, "JPEG")),
-        count_chars(n_jpeg, attachment_value(b64_jpeg, "JPEG-длина"), "Jpeg"),
+        # Явная ссылка на тот же снимок.
+        base64_encode(b64_expl, attachment_value(photo_uuid, "Снимок")),
+        count_chars(n_expl, attachment_value(b64_expl, "Base64"), "Expl"),
 
         show_result(mixed_text([
-            "raw=", (n_raw, "Raw"),
-            " resized=", (n_resized, "Resized"),
-            " jpeg=", (n_jpeg, "Jpeg"),
+            "impl=", (n_impl, "Impl"),
+            " expl=", (n_expl, "Expl"),
         ])),
     ])
 
@@ -492,7 +489,7 @@ NEEDS_EXPLICIT_INPUT = {
 }
 
 
-def validate(name: str, wf: dict) -> None:
+def validate(name: str, wf: dict, strict_inputs: bool = True) -> None:
     """Проверить собранный шорткат до подписи — на телефоне ошибка молчаливая.
 
     Shortcuts не жалуется на битую ссылку и не падает: подставляет пустую
@@ -510,7 +507,7 @@ def validate(name: str, wf: dict) -> None:
             if ref not in seen:
                 problems.append(f"действие {index} ({identifier}) ссылается на неизвестный выход {ref}")
 
-        if identifier in NEEDS_EXPLICIT_INPUT and "WFInput" not in params:
+        if strict_inputs and identifier in NEEDS_EXPLICIT_INPUT and "WFInput" not in params:
             problems.append(f"действие {index} ({identifier}) без явного WFInput")
 
         for key in ("WFImageResizeWidth", "WFImageResizeHeight", "WFImageCompressionQuality"):
@@ -540,7 +537,8 @@ def validate(name: str, wf: dict) -> None:
 def main() -> None:
     OUT_DIR.mkdir(exist_ok=True)
     for name, wf in (("eda-text", build_text_only()), ("eda-full", build_full()), ("eda-diag", build_diag())):
-        validate(name, wf)
+        # В диагностике отсутствие WFInput — часть эксперимента, а не ошибка.
+        validate(name, wf, strict_inputs=name != "eda-diag")
         path = OUT_DIR / f"{name}.unsigned.shortcut"
         with path.open("wb") as fh:
             plistlib.dump(wf, fh, fmt=plistlib.FMT_BINARY)

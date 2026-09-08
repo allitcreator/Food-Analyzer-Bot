@@ -283,10 +283,9 @@ describe("выдача диагностического шортката", () =>
 
   test("инструкция объясняет, что именно смотреть", () => {
     const text = buildDiagText();
-    // Три числа — весь смысл прогона.
-    assert.match(text, /raw=/);
-    assert.match(text, /resized=/);
-    assert.match(text, /jpeg=/);
+    // Два числа — весь смысл прогона: они должны совпасть.
+    assert.match(text, /impl=/);
+    assert.match(text, /expl=/);
     // Токен для диагностики не нужен — иначе человек полезет его вставлять.
     assert.match(text, /токен.*не нужен/i);
   });
