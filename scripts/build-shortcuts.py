@@ -162,6 +162,31 @@ def mixed_value(prefix: str, output_uuid: str, output_name: str) -> dict:
     }
 
 
+def mixed_text(parts: list) -> dict:
+    """Строка из кусков текста и переменных: ["a=", (uuid, "Имя"), " b=", ...].
+
+    Позиции в attachmentsByRange считаются в code units UTF-16, поэтому текст
+    в диагностике держим латиницей — так длина куска равна числу символов.
+    """
+    string = ""
+    attachments = {}
+    for part in parts:
+        if isinstance(part, tuple):
+            output_uuid, output_name = part
+            attachments[f"{{{len(string)}, 1}}"] = {
+                "Type": "ActionOutput",
+                "OutputUUID": output_uuid,
+                "OutputName": output_name,
+            }
+            string += OBJ
+        else:
+            string += part
+    return {
+        "Value": {"string": string, "attachmentsByRange": attachments},
+        "WFSerializationType": "WFTextTokenString",
+    }
+
+
 def token_text(uuid_: str) -> dict:
     """Действие «Текст» с токеном — единственное место, куда его надо вписать.
 
@@ -198,10 +223,10 @@ def post(json_items: list[tuple[str, dict]], token_uuid: str, uuid_: str | None 
     return action("is.workflow.actions.downloadurl", params)
 
 
-def count_chars(uuid_: str) -> dict:
+def count_chars(uuid_: str, input_: dict, name: str = "Символов") -> dict:
     return action(
         "is.workflow.actions.count",
-        {"WFCountType": "Characters", "UUID": uuid_, "CustomOutputName": "Символов"},
+        {"WFCountType": "Characters", "WFInput": input_, "UUID": uuid_, "CustomOutputName": name},
     )
 
 
@@ -396,39 +421,52 @@ def build_full() -> dict:
 
 DIAG_HINT = (
     "ДИАГНОСТИКА ФОТО-ВЕТКИ\n\n"
-    "Тот же путь, что и в основном шорткате, но с двумя остановками: сначала "
-    "показывает, сколько символов base64 получилось после сжатия, потом — что "
-    "ответил сервер.\n\n"
-    "Ориентир: фото 1280 px с качеством 0.7 — это примерно 300–600 тысяч "
-    "символов. Несколько миллионов означают, что сжатие не сработало и тело "
-    "запроса режется по дороге.\n\n"
-    "Токен подставь в заголовок Authorization, как в основном шорткате."
+    "Меряет длину base64 на трёх стадиях: сразу после съёмки, после уменьшения "
+    "и после конвертации в JPEG. Показывает три числа на экране и никуда их не "
+    "отправляет.\n\n"
+    "Как читать: первое число 0 — теряется сам снимок. Второе 0 — ломает "
+    "уменьшение. Третье 0 — ломает конвертация в JPEG. Все три больше нуля — "
+    "фото-ветка исправна, и дело в отправке.\n\n"
+    "Токен здесь не нужен: запросов на сервер шорткат не делает."
 )
 
 
 def build_diag() -> dict:
-    """Фото-ветка с показом размера и ответа сервера — чтобы не гадать по симптому.
+    """Где именно теряется картинка — по одному замеру на каждый шаг.
 
-    Уведомление «Отправил на разбор» в основном шорткате приходит всегда:
-    действие «Получить содержимое URL» на 4xx не прерывает выполнение, а молча
-    отдаёт тело ответа. Здесь тело показывается на экран.
+    Прошлые попытки чинились вслепую: сервер видит только итоговую пустую
+    строку и не может сказать, какое из трёх действий её обнулило. Здесь
+    каждое действие получает вход явной ссылкой на снимок или на результат
+    предыдущего шага, поэтому замеры независимы — сломанное звено видно сразу.
     """
-    photo_uuid, resized_uuid, jpeg_uuid, b64_uuid = (new_uuid() for _ in range(4))
-    count_uuid, post_uuid, token_uuid = new_uuid(), new_uuid(), new_uuid()
+    photo_uuid, resized_uuid, jpeg_uuid = (new_uuid() for _ in range(3))
+    b64_raw, b64_resized, b64_jpeg = (new_uuid() for _ in range(3))
+    n_raw, n_resized, n_jpeg = (new_uuid() for _ in range(3))
 
-    actions = [
+    return workflow([
         comment(DIAG_HINT),
-        token_text(token_uuid),
         take_photo(photo_uuid),
+
+        # 1. Снимок как есть — проверяем, что камера вообще что-то отдала.
+        base64_encode(b64_raw, attachment_value(photo_uuid, "Снимок")),
+        count_chars(n_raw, attachment_value(b64_raw, "Base64"), "Raw"),
+
+        # 2. После уменьшения. Вход — снимок, а не предыдущий base64.
         resize(1280, resized_uuid, attachment_value(photo_uuid, "Снимок")),
+        base64_encode(b64_resized, attachment_value(resized_uuid, "Уменьшенное")),
+        count_chars(n_resized, attachment_value(b64_resized, "Base64"), "Resized"),
+
+        # 3. После конвертации в JPEG — это то, что уходит на сервер.
         to_jpeg(jpeg_uuid, attachment_value(resized_uuid, "Уменьшенное")),
-        base64_encode(b64_uuid, attachment_value(jpeg_uuid, "JPEG")),
-        count_chars(count_uuid),
-        show_result(mixed_value("Символов base64: ", count_uuid, "Символов")),
-        post([("imageBase64", variable_value(b64_uuid, "Base64"))], token_uuid, post_uuid),
-        show_result(mixed_value("Ответ сервера: ", post_uuid, "Ответ")),
-    ]
-    return workflow(actions, import_questions(actions, token_uuid))
+        base64_encode(b64_jpeg, attachment_value(jpeg_uuid, "JPEG")),
+        count_chars(n_jpeg, attachment_value(b64_jpeg, "JPEG-длина"), "Jpeg"),
+
+        show_result(mixed_text([
+            "raw=", (n_raw, "Raw"),
+            " resized=", (n_resized, "Resized"),
+            " jpeg=", (n_jpeg, "Jpeg"),
+        ])),
+    ])
 
 
 def collect_output_refs(node: object) -> list[str]:

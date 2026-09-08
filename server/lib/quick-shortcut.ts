@@ -25,8 +25,18 @@ export function buildShortcutCaption(): string {
   return "⚡ Шорткат «Еда» — сохрани файл и открой его, дальше по инструкции выше.";
 }
 
+/**
+ * Токен отдельным сообщением — чтобы копировался одним тапом.
+ *
+ * В общей карточке он тонет среди текста: тап по строке кода выделяет её
+ * целиком, только если рядом нет другого содержимого.
+ */
+export function buildTokenMessage(token: string): string {
+  return `\`${token}\``;
+}
+
 /** Карточка /quick: как поставить шорткат, плюс контракт эндпоинта. */
-export function buildQuickCardText(token: string, webhookUrl?: string | null): string {
+export function buildQuickCardText(webhookUrl?: string | null): string {
   const base = webhookUrl?.replace(/\/+$/, "") || "https://<домен-бота>";
   return [
     "⚡ *Быстрая запись с телефона*",
@@ -35,9 +45,8 @@ export function buildQuickCardText(token: string, webhookUrl?: string | null): s
     "Голосом, текстом или фото.",
     "",
     "*Как поставить*",
-    "1. Скопируй токен — он понадобится через шаг:",
-    `\`${token}\``,
-    "2. Скачай файл из следующего сообщения и открой его — откроются «Команды».",
+    "1. Скопируй токен — он придёт следующим сообщением, одним тапом по строке.",
+    "2. Открой файл шортката — он придёт третьим сообщением.",
     "3. При импорте телефон сам спросит токен — вставь скопированное. " +
       "Слово `Bearer` добавлять не нужно, только сам токен.",
     "4. Если файл не открывается: Настройки → Команды → включи «Ненадёжные команды». " +
@@ -49,7 +58,7 @@ export function buildQuickCardText(token: string, webhookUrl?: string | null): s
     "",
     "*Если нужно собрать запрос самому*",
     `URL: \`${base}/api/quick\``,
-    `Заголовок: \`Authorization: Bearer ${token}\``,
+    "Заголовок: `Authorization: Bearer <токен>`",
     'Тело: `{"text": "овсянка на молоке 250 г"}` или `{"imageBase64": "<JPEG в base64>"}`',
     "",
     "Можно и то и другое сразу: фото с подписью «это борщ, 400 г».",

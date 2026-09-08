@@ -15,7 +15,7 @@ import { extractBearerToken } from "../server/lib/quick-auth";
 import { describeQuickRejection, describeAuthRejection } from "../server/lib/quick-reject-log";
 import { quickSchema } from "../shared/routes";
 import { existsSync } from "node:fs";
-import { buildQuickCardText, buildShortcutCaption, shortcutPath } from "../server/lib/quick-shortcut";
+import { buildQuickCardText, buildTokenMessage, buildShortcutCaption, shortcutPath } from "../server/lib/quick-shortcut";
 
 describe("buildSyntheticUpdate", () => {
   test("текст → message.text от лица пользователя", () => {
@@ -206,9 +206,15 @@ describe("выдача шортката из /quick", () => {
     assert.equal(existsSync(shortcutPath()), true, `нет файла: ${shortcutPath()}`);
   });
 
-  test("карточка содержит токен, адрес и шаги установки", () => {
-    const card = buildQuickCardText("t0ken123", "https://example.com");
-    assert.match(card, /t0ken123/);
+  test("токен уезжает отдельным сообщением — копируется одним тапом", () => {
+    const msg = buildTokenMessage("t0ken123");
+    assert.equal(msg, "`t0ken123`");
+    // В самой карточке токена быть не должно, иначе тап выделит лишнее.
+    assert.equal(buildQuickCardText("https://example.com").includes("t0ken123"), false);
+  });
+
+  test("карточка содержит адрес и шаги установки", () => {
+    const card = buildQuickCardText("https://example.com");
     assert.match(card, /https:\/\/example\.com\/api\/quick/);
     // Шаги импорта: без «Ненадёжных команд» файл не откроется, а токен
     // телефон спрашивает сам при импорте — оба пункта обязаны быть в тексте.
@@ -220,7 +226,7 @@ describe("выдача шортката из /quick", () => {
   });
 
   test("базовый адрес без хвостового слеша", () => {
-    const card = buildQuickCardText("t", "https://example.com/");
+    const card = buildQuickCardText("https://example.com/");
     assert.match(card, /https:\/\/example\.com\/api\/quick/);
     assert.equal(card.includes("example.com//api"), false);
   });

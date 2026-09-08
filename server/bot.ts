@@ -12,7 +12,7 @@ import { mealTypeByTime, buildMealTitle, toFavoriteItems, shouldSuggestFavorite,
 import { createPersistentRecord, loadPersistentState } from "./lib/persistent-state";
 import { typicalMealTimes, dueSmartReminder, minutesToHHMM } from "./lib/smart-reminders";
 import { buildSyntheticUpdate, type SyntheticPayload } from "./lib/synthetic-update";
-import { buildQuickCardText, buildShortcutCaption, shortcutPath, SHORTCUT_FILENAME } from "./lib/quick-shortcut";
+import { buildQuickCardText, buildTokenMessage, buildShortcutCaption, shortcutPath, SHORTCUT_FILENAME } from "./lib/quick-shortcut";
 import { existsSync } from "node:fs";
 
 const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
@@ -63,10 +63,14 @@ export function injectUserMessage(
  * записывать еду можно и без готового шортката.
  */
 async function sendQuickCard(bot: TelegramBot, chatId: number, token: string): Promise<void> {
-  await bot.sendMessage(chatId, buildQuickCardText(token, config.webhookUrl), {
+  await bot.sendMessage(chatId, buildQuickCardText(config.webhookUrl), {
     parse_mode: 'Markdown',
     reply_markup: { inline_keyboard: [[{ text: "🔄 Сбросить токен", callback_data: "quick_reset" }]] }
   });
+
+  // Токен отдельным сообщением: так он копируется одним тапом, не выделяя
+  // вместе с собой соседний текст.
+  await bot.sendMessage(chatId, buildTokenMessage(token), { parse_mode: 'Markdown' });
 
   const path = shortcutPath();
   if (!existsSync(path)) {
@@ -2314,12 +2318,15 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       const token = randomBytes(24).toString("hex");
       await storage.setQuickToken(user.id, token);
       bot.answerCallbackQuery(query.id, { text: "Токен обновлён — поправь его в шорткате" }).catch(() => {});
-      bot.editMessageText(buildQuickCardText(token, config.webhookUrl), {
+      bot.editMessageText(buildQuickCardText(config.webhookUrl), {
         chat_id: chatId,
         message_id: query.message?.message_id,
         parse_mode: 'Markdown',
         reply_markup: { inline_keyboard: [[{ text: "🔄 Сбросить токен", callback_data: "quick_reset" }]] }
       }).catch(() => {});
+      // Новый токен отдельным сообщением: в отредактированной карточке его нет,
+      // а без него шорткат перестанет работать прямо сейчас.
+      bot.sendMessage(chatId, buildTokenMessage(token), { parse_mode: 'Markdown' }).catch(() => {});
       return;
     }
 
