@@ -26,7 +26,11 @@ import uuid
 from pathlib import Path
 
 ENDPOINT = "https://alxforbot.online/api/quick"
-TOKEN_PLACEHOLDER = "Bearer ВСТАВЬ_СЮДА_ТОКЕН_ИЗ_КОМАНДЫ_QUICK"
+# Только токен, без слова Bearer: его подставляет заголовок. Двойной «Bearer
+# Bearer …» — самая частая ошибка при вставке вручную, и так она невозможна.
+TOKEN_PLACEHOLDER = "ВСТАВЬ_ТОКЕН_ИЗ_КОМАНДЫ_QUICK"
+
+TOKEN_QUESTION = "Вставь токен быстрой записи (команда /quick в боте)"
 
 OUT_DIR = Path(__file__).resolve().parent.parent / "shortcuts"
 
@@ -158,13 +162,34 @@ def mixed_value(prefix: str, output_uuid: str, output_name: str) -> dict:
     }
 
 
-def post(json_items: list[tuple[str, dict]], uuid_: str | None = None) -> dict:
+def token_text(uuid_: str) -> dict:
+    """Действие «Текст» с токеном — единственное место, куда его надо вписать.
+
+    Заголовок Authorization собирается из этого действия переменной, а сюда
+    значение попадает вопросом при импорте (WFWorkflowImportQuestions). Так
+    пользователю не нужно искать заголовок внутри «Получить содержимое URL»:
+    iOS спросит токен сама, при установке.
+    """
+    return action(
+        "is.workflow.actions.gettext",
+        {
+            "WFTextActionText": text_value(TOKEN_PLACEHOLDER),
+            "UUID": uuid_,
+            "CustomOutputName": "Токен",
+        },
+    )
+
+
+def post(json_items: list[tuple[str, dict]], token_uuid: str, uuid_: str | None = None) -> dict:
     params = {
         "WFURL": ENDPOINT,
         "WFHTTPMethod": "POST",
         "WFHTTPBodyType": "JSON",
         "ShowHeaders": True,
-        "WFHTTPHeaders": dict_field([("Authorization", text_value(TOKEN_PLACEHOLDER))]),
+        # «Bearer » + переменная: сам токен живёт в действии «Текст» выше.
+        "WFHTTPHeaders": dict_field([
+            ("Authorization", mixed_value("Bearer ", token_uuid, "Токен")),
+        ]),
         "WFJSONValues": dict_field(json_items),
     }
     if uuid_:
@@ -269,14 +294,33 @@ def menu_end(group: str) -> dict:
 
 HEADER_HINT = (
     "БЫСТРАЯ ЗАПИСЬ ЕДЫ\n\n"
-    "Перед первым запуском: открой действие «Получить содержимое URL» ниже, "
-    "найди заголовок Authorization и замени текст после слова Bearer на свой токен "
-    "из команды /quick в боте.\n\n"
+    "Токен спрашивается один раз при импорте и попадает в действие «Текст» "
+    "сразу под этим комментарием. Если промахнулся — поменяй его там, лезть в "
+    "заголовки не нужно.\n\n"
+    "Токен берётся из команды /quick в боте.\n\n"
     "Карточка подтверждения с КБЖУ придёт в Telegram через несколько секунд."
 )
 
 
-def workflow(actions: list[dict]) -> dict:
+def import_questions(actions: list[dict], token_uuid: str) -> list[dict]:
+    """Вопрос, который iOS задаёт при импорте, и сама подставляет ответ.
+
+    ActionIndex — позиция действия в массиве, поэтому вычисляем её, а не
+    хардкодим: порядок действий меняется при любой правке сценария.
+    """
+    index = next(
+        i for i, act in enumerate(actions)
+        if act["WFWorkflowActionParameters"].get("UUID") == token_uuid
+    )
+    return [{
+        "ActionIndex": index,
+        "Category": "Parameter",
+        "ParameterKey": "WFTextActionText",
+        "Text": TOKEN_QUESTION,
+    }]
+
+
+def workflow(actions: list[dict], questions: list[dict] | None = None) -> dict:
     return {
         "WFWorkflowClientVersion": "2607.0.3",
         "WFWorkflowMinimumClientVersion": 900,
@@ -285,7 +329,7 @@ def workflow(actions: list[dict]) -> dict:
             "WFWorkflowIconStartColor": 4274264319,
             "WFWorkflowIconGlyphNumber": 61440,
         },
-        "WFWorkflowImportQuestions": [],
+        "WFWorkflowImportQuestions": questions or [],
         "WFWorkflowTypes": [],
         "WFWorkflowInputContentItemClasses": [],
         "WFWorkflowActions": actions,
@@ -293,13 +337,15 @@ def workflow(actions: list[dict]) -> dict:
 
 
 def build_text_only() -> dict:
-    ask_uuid = new_uuid()
-    return workflow([
+    ask_uuid, token_uuid = new_uuid(), new_uuid()
+    actions = [
         comment(HEADER_HINT),
+        token_text(token_uuid),
         ask("Что съел?", ask_uuid),
-        post([("text", variable_value(ask_uuid, "Ввод"))]),
+        post([("text", variable_value(ask_uuid, "Ввод"))], token_uuid),
         notify("Отправил на разбор"),
-    ])
+    ]
+    return workflow(actions, import_questions(actions, token_uuid))
 
 
 def build_full() -> dict:
@@ -307,13 +353,14 @@ def build_full() -> dict:
     dictate_uuid = new_uuid()
     ask_uuid = new_uuid()
     photo_uuid, resized_uuid, jpeg_uuid, b64_uuid = (new_uuid() for _ in range(4))
-    caption_uuid = new_uuid()
+    caption_uuid, token_uuid = new_uuid(), new_uuid()
 
     # Три отдельных пункта, а не два: «Запросить ввод» открывает клавиатуру —
     # микрофон на ней есть, но это лишний тап и не то, чего ждёшь от кнопки
     # «Сказать». Диктовка вынесена в свой пункт и стартует сразу.
-    return workflow([
+    actions = [
         comment(HEADER_HINT),
+        token_text(token_uuid),
         menu_start(
             "Что записываем?",
             ["🎤 Сказать", "⌨️ Написать", "📷 Сфотографировать"],
@@ -322,12 +369,12 @@ def build_full() -> dict:
 
         menu_item("🎤 Сказать", group),
         dictate(dictate_uuid),
-        post([("text", variable_value(dictate_uuid, "Продиктованное"))]),
+        post([("text", variable_value(dictate_uuid, "Продиктованное"))], token_uuid),
         notify("Отправил на разбор"),
 
         menu_item("⌨️ Написать", group),
         ask("Что съел?", ask_uuid),
-        post([("text", variable_value(ask_uuid, "Ввод"))]),
+        post([("text", variable_value(ask_uuid, "Ввод"))], token_uuid),
         notify("Отправил на разбор"),
 
         menu_item("📷 Сфотографировать", group),
@@ -339,11 +386,12 @@ def build_full() -> dict:
         post([
             ("imageBase64", variable_value(b64_uuid, "Base64")),
             ("text", variable_value(caption_uuid, "Ввод")),
-        ]),
+        ], token_uuid),
         notify("Отправил на разбор"),
 
         menu_end(group),
-    ])
+    ]
+    return workflow(actions, import_questions(actions, token_uuid))
 
 
 DIAG_HINT = (
@@ -366,19 +414,21 @@ def build_diag() -> dict:
     отдаёт тело ответа. Здесь тело показывается на экран.
     """
     photo_uuid, resized_uuid, jpeg_uuid, b64_uuid = (new_uuid() for _ in range(4))
-    count_uuid, post_uuid = new_uuid(), new_uuid()
+    count_uuid, post_uuid, token_uuid = new_uuid(), new_uuid(), new_uuid()
 
-    return workflow([
+    actions = [
         comment(DIAG_HINT),
+        token_text(token_uuid),
         take_photo(photo_uuid),
         resize(1280, resized_uuid, attachment_value(photo_uuid, "Снимок")),
         to_jpeg(jpeg_uuid, attachment_value(resized_uuid, "Уменьшенное")),
         base64_encode(b64_uuid, attachment_value(jpeg_uuid, "JPEG")),
         count_chars(count_uuid),
         show_result(mixed_value("Символов base64: ", count_uuid, "Символов")),
-        post([("imageBase64", variable_value(b64_uuid, "Base64"))], post_uuid),
+        post([("imageBase64", variable_value(b64_uuid, "Base64"))], token_uuid, post_uuid),
         show_result(mixed_value("Ответ сервера: ", post_uuid, "Ответ")),
-    ])
+    ]
+    return workflow(actions, import_questions(actions, token_uuid))
 
 
 def collect_output_refs(node: object) -> list[str]:
@@ -431,6 +481,19 @@ def validate(name: str, wf: dict) -> None:
 
         if "UUID" in params:
             seen.add(params["UUID"])
+
+    # Вопрос при импорте: битый ActionIndex молча ничего не спросит, и человек
+    # получит шорткат с плейсхолдером вместо токена.
+    actions = wf["WFWorkflowActions"]
+    for q in wf.get("WFWorkflowImportQuestions", []):
+        index = q["ActionIndex"]
+        if not 0 <= index < len(actions):
+            problems.append(f"вопрос импорта указывает на действие {index}, которого нет")
+            continue
+        if q["ParameterKey"] not in actions[index]["WFWorkflowActionParameters"]:
+            problems.append(
+                f"вопрос импорта: у действия {index} нет параметра {q['ParameterKey']}"
+            )
 
     if problems:
         raise SystemExit(f"{name}: " + "; ".join(problems))
