@@ -162,7 +162,13 @@ export function createQuickRouter(): Router {
     if (raw) {
       // Формат важен: снимок едет без конвертации, а Telegram HEIC не примет.
       const kind = detectImageKind(raw);
-      console.log("[quick] accepted:", `binary=${raw.length}`, `kind=${kind}`);
+      // Длина подписи, а не сама подпись: это еда пользователя.
+      console.log(
+        "[quick] accepted:",
+        `binary=${raw.length}`,
+        `kind=${kind}`,
+        `caption=${body.text?.length ?? 0}`,
+      );
       if (kind === "heic" || kind === "unknown") {
         console.warn("[quick] формат снимка Telegram не поддерживает:", kind);
       }
