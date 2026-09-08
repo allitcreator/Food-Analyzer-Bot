@@ -137,18 +137,23 @@ describe("quickSchema", () => {
     assert.equal(quickSchema.safeParse({ imageBase64: "data:image/jpeg;base64,aGVsbG8=" }).success, false);
   });
 
-  test("границы: текст до 2000 символов, картинка до 1.4 МБ base64", () => {
+  test("границы: текст до 2000 символов, картинка до 7.5 МБ base64", () => {
     assert.equal(quickSchema.safeParse({ text: "я".repeat(2000) }).success, true);
     assert.equal(quickSchema.safeParse({ text: "я".repeat(2001) }).success, false);
-    assert.equal(quickSchema.safeParse({ imageBase64: "a".repeat(1_400_000) }).success, true);
-    assert.equal(quickSchema.safeParse({ imageBase64: "a".repeat(1_400_001) }).success, false);
+    assert.equal(quickSchema.safeParse({ imageBase64: "a".repeat(7_500_000) }).success, true);
+    assert.equal(quickSchema.safeParse({ imageBase64: "a".repeat(8_000_001) }).success, false);
+  });
+
+  test("полный кадр с iPhone проходит — 4 МБ снимка это ~5.3 млн символов", () => {
+    // Ровно тот размер, на котором прод отвечал too_big: 3968174 байта.
+    assert.equal(quickSchema.safeParse({ imageBase64: "a".repeat(5_290_900) }).success, true);
   });
 
   test("лимит считается по очищенной строке — переносы в него не входят", () => {
     // 1.4 МБ данных + переносы каждые 76 символов: сырая строка длиннее лимита,
     // очищенная — ровно на границе.
     const chunks: string[] = [];
-    for (let i = 0; i < 1_400_000; i += 76) chunks.push("a".repeat(Math.min(76, 1_400_000 - i)));
+    for (let i = 0; i < 7_500_000; i += 76) chunks.push("a".repeat(Math.min(76, 7_500_000 - i)));
     assert.equal(quickSchema.safeParse({ imageBase64: chunks.join("\r\n") }).success, true);
   });
 });

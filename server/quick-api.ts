@@ -134,7 +134,7 @@ export function createQuickRouter(): Router {
   router.use(
     express.raw({
       type: (req) => isBinaryContentType(req.headers["content-type"]),
-      limit: "6mb",
+      limit: "10mb",
     }),
   );
 

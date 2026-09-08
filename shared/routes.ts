@@ -183,13 +183,17 @@ export type AnalyzeBody = z.infer<typeof analyzeSchema>;
 const base64Image = z
   .string()
   .min(1)
-  .max(1_500_000)
+  // 8 МБ: снимок едет с телефона полным кадром, без уменьшения и конвертации —
+  // именно они теряли картинку по дороге. Полный кадр iPhone это 3–5 МБ, в
+  // base64 примерно на треть больше. Потолок согласован с nginx
+  // (client_max_body_size 8m) и лимитом sendPhoto у Telegram (10 МБ).
+  .max(8_000_000)
   .transform((s) => s.replace(/\s+/g, ""))
   .pipe(
     z
       .string()
       .min(1)
-      .max(1_400_000)
+      .max(7_500_000)
       .regex(/^[A-Za-z0-9+/]+={0,2}$/, "expected base64"),
   );
 
