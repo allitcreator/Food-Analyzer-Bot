@@ -216,25 +216,25 @@ describe("выдача шортката из /quick", () => {
     const msg = buildTokenMessage("t0ken123");
     assert.equal(msg, "`t0ken123`");
     // В самой карточке токена быть не должно, иначе тап выделит лишнее.
-    assert.equal(buildQuickCardText("https://example.com").includes("t0ken123"), false);
+    assert.equal(buildQuickCardText().includes("t0ken123"), false);
   });
 
-  test("карточка содержит адрес и шаги установки", () => {
-    const card = buildQuickCardText("https://example.com");
-    assert.match(card, /https:\/\/example\.com\/api\/quick/);
-    // Шаги импорта: без «Ненадёжных команд» файл не откроется, а токен
-    // телефон спрашивает сам при импорте — оба пункта обязаны быть в тексте.
-    assert.match(card, /Ненадёжные/i);
-    assert.match(card, /спросит токен/i);
-    // Слово Bearer в инструкции только один раз и только как «не добавляй»:
-    // именно двойной Bearer ломал авторизацию.
-    assert.match(card, /Bearer.*не нужно/);
+  test("карточку можно прочитать за раз", () => {
+    const card = buildQuickCardText();
+    // Инструкцию, которую не читают, читать не будут и в третий раз: держим
+    // её в пределах экрана телефона.
+    assert.ok(card.length < 600, `карточка разрослась до ${card.length} символов`);
+    assert.ok(card.split("\n").filter((l) => l.trim()).length <= 10);
   });
 
-  test("базовый адрес без хвостового слеша", () => {
-    const card = buildQuickCardText("https://example.com/");
-    assert.match(card, /https:\/\/example\.com\/api\/quick/);
-    assert.equal(card.includes("example.com//api"), false);
+  test("оба обязательных шага на месте", () => {
+    const card = buildQuickCardText();
+    // Без токена шорткат получит 401, без файла ставить нечего — эти два
+    // шага сокращению не подлежат.
+    assert.match(card, /токен/i);
+    assert.match(card, /файл/i);
+    // Предупреждение про доступ к дневнику тоже остаётся.
+    assert.match(card, /Сбросить/);
   });
 
   test("подпись к файлу короче лимита Telegram", () => {

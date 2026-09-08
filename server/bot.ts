@@ -63,7 +63,7 @@ export function injectUserMessage(
  * записывать еду можно и без готового шортката.
  */
 async function sendQuickCard(bot: TelegramBot, chatId: number, token: string): Promise<void> {
-  await bot.sendMessage(chatId, buildQuickCardText(config.webhookUrl), {
+  await bot.sendMessage(chatId, buildQuickCardText(), {
     parse_mode: 'Markdown',
     reply_markup: { inline_keyboard: [[{ text: "🔄 Сбросить токен", callback_data: "quick_reset" }]] }
   });
@@ -2345,7 +2345,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       const token = randomBytes(24).toString("hex");
       await storage.setQuickToken(user.id, token);
       bot.answerCallbackQuery(query.id, { text: "Токен обновлён — поправь его в шорткате" }).catch(() => {});
-      bot.editMessageText(buildQuickCardText(config.webhookUrl), {
+      bot.editMessageText(buildQuickCardText(), {
         chat_id: chatId,
         message_id: query.message?.message_id,
         parse_mode: 'Markdown',
