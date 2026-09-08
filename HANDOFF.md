@@ -1,7 +1,7 @@
 # HANDOFF
 
-Статус: открыт
-Обновлено: 2026-09-08 14:46 MSK
+Статус: закрыт
+Обновлено: 2026-09-08 14:48 MSK
 Клиент: Claude
 
 ## Цель
@@ -408,13 +408,14 @@
 - `scripts/build-shortcuts.py` — числа строками, явные `WFInput`,
   `attachment_value`, `token_text`, `import_questions`, `mixed_text`,
   `validate`; `build_diag` переписан под пошаговый замер.
-- `shortcuts/Еда (диагностика).shortcut` — новый, подписан `-m anyone`.
+- `shortcuts/Еда (диагностика).shortcut` — создан по ходу отладки, удалён
+  после закрытия задачи.
 - `server/lib/quick-reject-log.ts` — новый, `describeQuickRejection` и
   `describeAuthRejection`.
-- `server/lib/quick-binary.ts` — новый: `bodyFromBinary` (бинарное тело →
-  общий контракт, подпись из query), `isBinaryContentType`, `detectImageKind`.
-- `server/quick-api.ts` — `console.warn` с причиной отказа перед ответом 400,
-  `express.raw` для бинарного тела, разбор обоих форматов.
+- `server/lib/quick-binary.ts` — новый: `binaryQuickBody` (проверка без
+  перекодирования), `isBinaryContentType`, `detectImageKind`.
+- `server/quick-api.ts` — причина отказа в лог, `express.raw` для бинарного
+  тела, две ветки разбора, `dispatchInBackground`.
 - `server/lib/quick-shortcut.ts` — новый: путь к файлу, короткая карточка
   `/quick`, `buildTokenMessage`, тексты диагностики, подпись к документу.
 - `server/bot.ts` — `sendQuickCard` вместо локальной `buildQuickCardText`,
@@ -425,7 +426,8 @@
 
 ## Проверки
 
-- `npm test` — 174 теста, 0 падений (было 146). Все три новых блока сначала
+- `npm test` — 170 тестов, 0 падений (было 146). Стало меньше, чем на пике
+  (175): вместе с диагностикой и `bodyFromBinary` ушли их тесты. Все три новых блока сначала
   падали: контракт на `{ text: "", imageBase64 }`, лог и выдача шортката — на
   отсутствии модуля.
 - `python3 scripts/build-shortcuts.py` — три шортката собраны, `validate()`
