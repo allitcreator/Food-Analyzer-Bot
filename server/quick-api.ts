@@ -20,7 +20,7 @@ import { quickSchema, type QuickBody } from "@shared/routes";
 import { getBotInstance, injectUserMessage } from "./bot";
 import { extractBearerToken } from "./lib/quick-auth";
 import { describeQuickRejection, describeAuthRejection } from "./lib/quick-reject-log";
-import { bodyFromBinary } from "./lib/quick-binary";
+import { bodyFromBinary, isBinaryContentType } from "./lib/quick-binary";
 import type { User } from "@shared/schema";
 
 /**
@@ -133,7 +133,7 @@ export function createQuickRouter(): Router {
   // парсеры не конфликтуют.
   router.use(
     express.raw({
-      type: ["image/jpeg", "image/png", "application/octet-stream"],
+      type: (req) => isBinaryContentType(req.headers["content-type"]),
       limit: "6mb",
     }),
   );
@@ -149,6 +149,7 @@ export function createQuickRouter(): Router {
       console.warn(
         "[quick] rejected:",
         raw ? `binary=${raw.length}` : "json",
+        `ct=${req.headers["content-type"] ?? "<нет>"}`,
         describeQuickRejection(raw ? bodyFromBinary(raw, req.query as Record<string, unknown>) : req.body, parsed.error.issues),
       );
       res.status(400).json({ error: "validation_error", details: parsed.error.issues });

@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { buildSyntheticUpdate } from "../server/lib/synthetic-update";
 import { extractBearerToken } from "../server/lib/quick-auth";
 import { describeQuickRejection, describeAuthRejection } from "../server/lib/quick-reject-log";
-import { bodyFromBinary } from "../server/lib/quick-binary";
+import { bodyFromBinary, isBinaryContentType } from "../server/lib/quick-binary";
 import { quickSchema } from "../shared/routes";
 import { existsSync } from "node:fs";
 import { buildQuickCardText, buildTokenMessage, buildShortcutCaption, shortcutPath, diagShortcutPath, buildDiagText } from "../server/lib/quick-shortcut";
@@ -327,5 +327,31 @@ describe("bodyFromBinary", () => {
   test("пустое тело не выдаётся за картинку", () => {
     assert.equal(bodyFromBinary(Buffer.alloc(0), {}).imageBase64, undefined);
     assert.equal(quickSchema.safeParse(bodyFromBinary(Buffer.alloc(0), {})).success, false);
+  });
+});
+
+/**
+ * Какой Content-Type шлёт шорткат в режиме «тело = файл», заранее неизвестно:
+ * первый прогон дал body=undefined, то есть тип не совпал ни с express.json,
+ * ни со списком image/*. Поэтому правило простое и не требует угадывания —
+ * бинарём считаем всё, кроме JSON.
+ */
+describe("isBinaryContentType", () => {
+  test("JSON остаётся за express.json", () => {
+    assert.equal(isBinaryContentType("application/json"), false);
+    assert.equal(isBinaryContentType("application/json; charset=utf-8"), false);
+    assert.equal(isBinaryContentType("APPLICATION/JSON"), false);
+  });
+
+  test("картинки и octet-stream — бинарь", () => {
+    assert.equal(isBinaryContentType("image/jpeg"), true);
+    assert.equal(isBinaryContentType("application/octet-stream"), true);
+  });
+
+  test("незнакомый и отсутствующий тип тоже читаем как бинарь", () => {
+    // Ровно этот случай и уронил первый прогон.
+    assert.equal(isBinaryContentType("application/x-www-form-urlencoded"), true);
+    assert.equal(isBinaryContentType(undefined), true);
+    assert.equal(isBinaryContentType(""), true);
   });
 });

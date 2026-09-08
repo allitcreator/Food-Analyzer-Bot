@@ -14,6 +14,19 @@
  * плохое место (её пришлось бы кодировать вручную на стороне шортката).
  */
 
+/**
+ * Считать ли тело бинарным.
+ *
+ * Правило от противного: JSON забирает `express.json`, всё остальное читаем
+ * как байты. Перечислять типы картинок бесполезно — первый прогон бинарной
+ * отправки дал `body=undefined`, то есть шорткат прислал что-то, чего в
+ * списке `image/*` не оказалось, и запрос остался вообще без тела.
+ */
+export function isBinaryContentType(contentType: string | undefined): boolean {
+  if (!contentType) return true;
+  return !contentType.toLowerCase().trimStart().startsWith("application/json");
+}
+
 /** Разбор `?text=` — express отдаёт строку, массив или ничего. */
 function firstString(value: unknown): string | undefined {
   if (typeof value === "string") return value || undefined;
