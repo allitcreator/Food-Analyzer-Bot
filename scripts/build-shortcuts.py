@@ -116,18 +116,51 @@ def dictate(uuid_: str) -> dict:
     )
 
 
-def post(json_items: list[tuple[str, dict]]) -> dict:
-    return action(
-        "is.workflow.actions.downloadurl",
-        {
-            "WFURL": ENDPOINT,
-            "WFHTTPMethod": "POST",
-            "WFHTTPBodyType": "JSON",
-            "ShowHeaders": True,
-            "WFHTTPHeaders": dict_field([("Authorization", text_value(TOKEN_PLACEHOLDER))]),
-            "WFJSONValues": dict_field(json_items),
+def mixed_value(prefix: str, output_uuid: str, output_name: str) -> dict:
+    """Текст с переменной внутри: «Символов: <результат действия>».
+
+    Диапазон в attachmentsByRange считается в символах UTF-16, поэтому
+    переменную ставим в конец строки — так позиция равна длине префикса.
+    """
+    return {
+        "Value": {
+            "string": prefix + OBJ,
+            "attachmentsByRange": {
+                f"{{{len(prefix)}, 1}}": {
+                    "Type": "ActionOutput",
+                    "OutputUUID": output_uuid,
+                    "OutputName": output_name,
+                }
+            },
         },
+        "WFSerializationType": "WFTextTokenString",
+    }
+
+
+def post(json_items: list[tuple[str, dict]], uuid_: str | None = None) -> dict:
+    params = {
+        "WFURL": ENDPOINT,
+        "WFHTTPMethod": "POST",
+        "WFHTTPBodyType": "JSON",
+        "ShowHeaders": True,
+        "WFHTTPHeaders": dict_field([("Authorization", text_value(TOKEN_PLACEHOLDER))]),
+        "WFJSONValues": dict_field(json_items),
+    }
+    if uuid_:
+        params["UUID"] = uuid_
+        params["CustomOutputName"] = "Ответ"
+    return action("is.workflow.actions.downloadurl", params)
+
+
+def count_chars(uuid_: str) -> dict:
+    return action(
+        "is.workflow.actions.count",
+        {"WFCountType": "Characters", "UUID": uuid_, "CustomOutputName": "Символов"},
     )
+
+
+def show_result(value: dict) -> dict:
+    return action("is.workflow.actions.showresult", {"Text": value})
 
 
 def notify(body: str) -> dict:
@@ -278,9 +311,44 @@ def build_full() -> dict:
     ])
 
 
+DIAG_HINT = (
+    "ДИАГНОСТИКА ФОТО-ВЕТКИ\n\n"
+    "Тот же путь, что и в основном шорткате, но с двумя остановками: сначала "
+    "показывает, сколько символов base64 получилось после сжатия, потом — что "
+    "ответил сервер.\n\n"
+    "Ориентир: фото 1280 px с качеством 0.7 — это примерно 300–600 тысяч "
+    "символов. Несколько миллионов означают, что сжатие не сработало и тело "
+    "запроса режется по дороге.\n\n"
+    "Токен подставь в заголовок Authorization, как в основном шорткате."
+)
+
+
+def build_diag() -> dict:
+    """Фото-ветка с показом размера и ответа сервера — чтобы не гадать по симптому.
+
+    Уведомление «Отправил на разбор» в основном шорткате приходит всегда:
+    действие «Получить содержимое URL» на 4xx не прерывает выполнение, а молча
+    отдаёт тело ответа. Здесь тело показывается на экран.
+    """
+    photo_uuid, resized_uuid, jpeg_uuid, b64_uuid = (new_uuid() for _ in range(4))
+    count_uuid, post_uuid = new_uuid(), new_uuid()
+
+    return workflow([
+        comment(DIAG_HINT),
+        take_photo(photo_uuid),
+        resize(1280, resized_uuid),
+        to_jpeg(jpeg_uuid),
+        base64_encode(b64_uuid),
+        count_chars(count_uuid),
+        show_result(mixed_value("Символов base64: ", count_uuid, "Символов")),
+        post([("imageBase64", variable_value(b64_uuid, "Base64"))], post_uuid),
+        show_result(mixed_value("Ответ сервера: ", post_uuid, "Ответ")),
+    ])
+
+
 def main() -> None:
     OUT_DIR.mkdir(exist_ok=True)
-    for name, wf in (("eda-text", build_text_only()), ("eda-full", build_full())):
+    for name, wf in (("eda-text", build_text_only()), ("eda-full", build_full()), ("eda-diag", build_diag())):
         path = OUT_DIR / f"{name}.unsigned.shortcut"
         with path.open("wb") as fh:
             plistlib.dump(wf, fh, fmt=plistlib.FMT_BINARY)
