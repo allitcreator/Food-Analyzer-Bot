@@ -223,28 +223,6 @@ def post(json_items: list[tuple[str, dict]], token_uuid: str, uuid_: str | None 
     return action("is.workflow.actions.downloadurl", params)
 
 
-def url_with_caption(uuid_: str, caption_uuid: str) -> dict:
-    """Адрес с подписью, собранный в действии «Текст».
-
-    Почему не подстановка прямо в поле URL и не «URL-кодировать»: подпись
-    через них не доезжала — в логе сервера приходило пустое `?text=`. Здесь
-    используются только проверенные механизмы: действие «Текст» с переменной
-    внутри (так работает заголовок с токеном), а результат уходит в поле
-    ссылкой (так уехал сам снимок).
-
-    Процентное кодирование Shortcuts делает сам при запросе, отдельное
-    действие для этого не нужно.
-    """
-    return action(
-        "is.workflow.actions.gettext",
-        {
-            "WFTextActionText": mixed_text([ENDPOINT + "?text=", (caption_uuid, "Ввод")]),
-            "UUID": uuid_,
-            "CustomOutputName": "Адрес",
-        },
-    )
-
-
 def post_file(file_input: dict, url_value: dict, token_uuid: str) -> dict:
     """Снимок уходит телом запроса как файл — без base64.
 
@@ -450,15 +428,19 @@ def build_full() -> dict:
         menu_item("📷 Сфотографировать", group),
         take_photo(photo_uuid),
         ask("Уточнить? Можно оставить пустым", caption_uuid),
-        url_with_caption(b64_uuid, caption_uuid),
         # Снимок уходит как есть, без уменьшения и конвертации. Камера
         # работает и кадр делается, но до сервера он не доезжал ни разу —
         # значит теряется на обработке или на ссылке между действиями. Здесь
         # между съёмкой и отправкой не осталось ничего, что можно потерять.
         # Размер: полный кадр 3–5 МБ, поэтому nginx поднят до 8m.
+        # Подпись подставляется прямо в адрес. Промежуточные действия отсюда
+        # убраны намеренно: «URL-кодировать» возвращало пустоту, а сборка
+        # адреса в отдельном действии ломала отправку совсем — поле URL
+        # ссылку на другое действие не принимает. Кодирование Shortcuts
+        # делает сам при запросе.
         post_file(
             attachment_value(photo_uuid, "Снимок"),
-            attachment_value(b64_uuid, "Адрес"),
+            mixed_text([ENDPOINT + "?text=", (caption_uuid, "Ввод")]),
             token_uuid,
         ),
         notify("Отправил на разбор"),
