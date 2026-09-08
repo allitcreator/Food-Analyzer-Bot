@@ -8,6 +8,7 @@ import { decodeBarcodeFromImage, isValidEanChecksum, classifyHydratingProduct, b
 import { generateMonthlyPDF, extractTopFoods } from "./pdf";
 import { User, FoodLog, VisibleFavorite, FavoriteItem } from "@shared/schema";
 import { progressBar } from "./lib/goals";
+import { calculateBMR, calculateTDEE, buildEnergyBalanceText } from "./lib/energy";
 import { mealTypeByTime, buildMealTitle, toFavoriteItems, shouldSuggestFavorite, sameTitle, FAVORITE_SUGGEST_DAYS } from "./lib/favorites";
 import { createPersistentRecord, loadPersistentState } from "./lib/persistent-state";
 import { typicalMealTimes, dueSmartReminder, minutesToHHMM } from "./lib/smart-reminders";
@@ -284,51 +285,6 @@ function buildEditKeyboard(pending: any, unit: string) {
 function getUserNowModule(tz: string = 'Europe/Moscow'): Date {
   const now = new Date();
   return new Date(now.toLocaleString('en-US', { timeZone: tz }));
-}
-
-// ─── BMR / TDEE helpers (Mifflin-St Jeor) ──────────────────────────────────
-const ACTIVITY_MULTIPLIERS: Record<string, number> = {
-  sedentary: 1.2, light: 1.375, moderate: 1.55, active: 1.725, very_active: 1.9
-};
-
-function calculateBMR(user: { weight?: number | null; height?: number | null; age?: number | null; gender?: string | null }): number | null {
-  if (!user.weight || !user.height || !user.age || !user.gender) return null;
-  const base = (10 * user.weight) + (6.25 * user.height) - (5 * user.age);
-  return Math.round(base + (user.gender === 'male' ? 5 : -161));
-}
-
-// Расчётный дневной расход по профилю (BMR × коэффициент активности).
-function calculateTDEE(user: { weight?: number | null; height?: number | null; age?: number | null; gender?: string | null; activityLevel?: string | null }): number | null {
-  const bmr = calculateBMR(user);
-  if (!bmr) return null;
-  const multiplier = ACTIVITY_MULTIPLIERS[user.activityLevel ?? 'sedentary'] ?? 1.2;
-  return Math.round(bmr * multiplier);
-}
-
-function buildEnergyBalanceText(user: User, caloriesEaten: number, compact = false): string {
-  const tdee = calculateTDEE(user);
-  if (!tdee) return '';
-
-  const balance = caloriesEaten - tdee;
-  const isDeficit = balance < 0;
-
-  if (compact) {
-    // Для buildDailyProgress — одна строка
-    const label = isDeficit ? `✅ Дефицит: ${Math.abs(balance)}` : `🚨 Профицит: +${balance}`;
-    return `\n📊 ${label} ккал`;
-  }
-
-  let text = `\n📊 Энергобаланс:\n`;
-  text += `  🍽 Съедено: ${caloriesEaten} ккал\n`;
-  text += `  🔥 Расход по профилю: ${tdee} ккал\n`;
-  if (isDeficit) {
-    text += `  ✅ Дефицит: ${Math.abs(balance)} ккал`;
-  } else if (balance === 0) {
-    text += `  ⚖️ Баланс: 0 ккал`;
-  } else {
-    text += `  🚨 Профицит: +${balance} ккал`;
-  }
-  return text;
 }
 
 // ─── Bot setup ───────────────────────────────────────────────────────────────

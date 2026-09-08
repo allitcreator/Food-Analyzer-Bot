@@ -40,6 +40,42 @@ export function calculateTDEE(user: BmrProfile): number | null {
   return Math.round(bmr * multiplier);
 }
 
+/**
+ * Готовый блок «Энергобаланс» для сообщений бота.
+ *
+ * Живёт здесь, а не в `bot.ts`, вместе с расчётами, на которых держится: там
+ * он соседствовал с дословной копией `calculateBMR`/`calculateTDEE`, и любая
+ * правка формулы разошлась бы с этим текстом.
+ *
+ * `compact` — однострочный вид для дневной сводки, где место дороже деталей.
+ * Неполный профиль даёт пустую строку: показывать нули вместо расхода значило
+ * бы врать пользователю.
+ */
+export function buildEnergyBalanceText(user: BmrProfile, caloriesEaten: number, compact = false): string {
+  const tdee = calculateTDEE(user);
+  if (!tdee) return "";
+
+  const balance = caloriesEaten - tdee;
+  const isDeficit = balance < 0;
+
+  if (compact) {
+    const label = isDeficit ? `✅ Дефицит: ${Math.abs(balance)}` : `🚨 Профицит: +${balance}`;
+    return `\n📊 ${label} ккал`;
+  }
+
+  let text = `\n📊 Энергобаланс:\n`;
+  text += `  🍽 Съедено: ${caloriesEaten} ккал\n`;
+  text += `  🔥 Расход по профилю: ${tdee} ккал\n`;
+  if (isDeficit) {
+    text += `  ✅ Дефицит: ${Math.abs(balance)} ккал`;
+  } else if (balance === 0) {
+    text += `  ⚖️ Баланс: 0 ккал`;
+  } else {
+    text += `  🚨 Профицит: +${balance} ккал`;
+  }
+  return text;
+}
+
 export type EnergyBalance = {
   bmr: number;
   tdee: number;
