@@ -103,6 +103,18 @@ describe("quickSchema", () => {
     assert.equal(quickSchema.safeParse({ text: "борщ 400 г", imageBase64: png }).success, true);
   });
 
+  test("фото без подписи: шорткат всё равно шлёт поле text", () => {
+    // «Запросить ввод» с пустым ответом отдаёт пустую строку, поэтому рядом с
+    // картинкой приезжает text: "" — это фото без подписи, а не ошибка ввода.
+    const empty = quickSchema.safeParse({ text: "", imageBase64: png });
+    assert.equal(empty.success, true);
+    assert.equal(empty.success && empty.data.text, undefined);
+
+    const spaces = quickSchema.safeParse({ text: "   ", imageBase64: png });
+    assert.equal(spaces.success, true);
+    assert.equal(spaces.success && spaces.data.text, undefined);
+  });
+
   test("пустое тело и лишние поля отвергаются", () => {
     assert.equal(quickSchema.safeParse({}).success, false);
     assert.equal(quickSchema.safeParse({ text: "" }).success, false);

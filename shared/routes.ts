@@ -195,7 +195,17 @@ const base64Image = z
 
 export const quickSchema = z
   .object({
-    text: z.string().trim().min(1).max(2000).optional(),
+    // Пустая подпись — не ошибка, а обычное «просто фото»: действие «Запросить
+    // ввод» в шорткате при пустом ответе всё равно кладёт в тело text: "".
+    // Поэтому пустую строку приводим к undefined, а не отвергаем — иначе фото
+    // без подписи не отправляется вовсе. Тело из одного пустого текста
+    // по-прежнему отвергается — его ловит refine ниже.
+    text: z
+      .string()
+      .trim()
+      .max(2000)
+      .transform((s) => s || undefined)
+      .optional(),
     imageBase64: base64Image.optional(),
   })
   .strict()
