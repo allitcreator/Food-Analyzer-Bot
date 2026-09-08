@@ -12,7 +12,7 @@ import { mealTypeByTime, buildMealTitle, toFavoriteItems, shouldSuggestFavorite,
 import { createPersistentRecord, loadPersistentState } from "./lib/persistent-state";
 import { typicalMealTimes, dueSmartReminder, minutesToHHMM } from "./lib/smart-reminders";
 import { buildSyntheticUpdate, type SyntheticPayload } from "./lib/synthetic-update";
-import { buildQuickCardText, buildTokenMessage, buildShortcutCaption, shortcutPath, SHORTCUT_FILENAME, buildDiagText, diagShortcutPath, DIAG_FILENAME } from "./lib/quick-shortcut";
+import { buildQuickCardText, buildTokenMessage, buildShortcutCaption, shortcutPath, SHORTCUT_FILENAME } from "./lib/quick-shortcut";
 import { existsSync } from "node:fs";
 
 const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
@@ -1236,33 +1236,6 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     }
 
     await sendQuickCard(bot, chatId, token);
-  });
-
-  // ─── /quickdiag — диагностика фото-ветки ──────────────────────────────────
-  // Команда намеренно не в списке /help: она нужна только когда фото не
-  // доезжает, и объяснять её всем незачем.
-  bot.onText(/^\/quickdiag(@\w+)?$/, async (msg) => {
-    const chatId = msg.chat.id;
-    const telegramId = msg.from?.id.toString();
-    if (!telegramId) return;
-    const user = await isUserAllowed(chatId, telegramId);
-    if (!user) return;
-
-    await bot.sendMessage(chatId, buildDiagText(), { parse_mode: 'Markdown' });
-
-    const path = diagShortcutPath();
-    if (!existsSync(path)) {
-      console.error("[quick] файл диагностики не найден:", path);
-      await bot.sendMessage(chatId, "⚠️ Файл диагностики не нашёлся на сервере.").catch(() => {});
-      return;
-    }
-
-    await bot
-      .sendDocument(chatId, path, {}, { filename: DIAG_FILENAME })
-      .catch(async (err) => {
-        console.error("[quick] не удалось отправить диагностику:", err);
-        await bot.sendMessage(chatId, "⚠️ Не получилось приложить файл. Попробуй ещё раз.").catch(() => {});
-      });
   });
 
   // ─── /editprofile ─────────────────────────────────────────────────────────

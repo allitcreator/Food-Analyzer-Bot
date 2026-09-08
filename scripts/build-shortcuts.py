@@ -246,17 +246,6 @@ def post_file(file_input: dict, url_value: dict, token_uuid: str) -> dict:
     )
 
 
-def count_chars(uuid_: str, input_: dict, name: str = "Символов") -> dict:
-    return action(
-        "is.workflow.actions.count",
-        {"WFCountType": "Characters", "WFInput": input_, "UUID": uuid_, "CustomOutputName": name},
-    )
-
-
-def show_result(value: dict) -> dict:
-    return action("is.workflow.actions.showresult", {"Text": value})
-
-
 def notify(body: str) -> dict:
     return action(
         "is.workflow.actions.notification",
@@ -268,49 +257,6 @@ def take_photo(uuid_: str) -> dict:
     return action(
         "is.workflow.actions.takephoto",
         {"UUID": uuid_, "CustomOutputName": "Снимок"},
-    )
-
-
-def resize(width: int, uuid_: str, input_: dict) -> dict:
-    # Ширина строкой, а не числом: в plist «Команд» числовые поля хранятся как
-    # строки, и сырой integer приложение молча не читает — ширина становится
-    # «Auto». Высоту не задаём намеренно, она считается по пропорции.
-    return action(
-        "is.workflow.actions.image.resize",
-        {
-            "WFImageResizeWidth": str(width),
-            "WFInput": input_,
-            "UUID": uuid_,
-            "CustomOutputName": "Уменьшенное",
-        },
-    )
-
-
-def to_jpeg(uuid_: str, input_: dict) -> dict:
-    return action(
-        "is.workflow.actions.image.convert",
-        {
-            "WFImageFormat": "JPEG",
-            "WFImageCompressionQuality": "0.7",
-            "WFInput": input_,
-            "UUID": uuid_,
-            "CustomOutputName": "JPEG",
-        },
-    )
-
-
-def base64_encode(uuid_: str, input_: dict) -> dict:
-    # Разрывы строк оставляем как есть: сервер вычищает пробельные символы сам
-    # (shared/routes.ts, quickSchema), а лишняя настройка — лишний способ
-    # сломать сценарий.
-    return action(
-        "is.workflow.actions.base64encode",
-        {
-            "WFEncodeMode": "Encode",
-            "WFInput": input_,
-            "UUID": uuid_,
-            "CustomOutputName": "Base64",
-        },
     )
 
 
@@ -450,53 +396,6 @@ def build_full() -> dict:
     return workflow(actions, import_questions(actions, token_uuid))
 
 
-DIAG_HINT = (
-    "ДИАГНОСТИКА ФОТО-ВЕТКИ\n\n"
-    "Кодирует один и тот же снимок в base64 двумя способами и показывает две "
-    "длины. Ничего никуда не отправляет, токен не нужен.\n\n"
-    "impl — вход действия берётся неявно, от предыдущего действия. "
-    "expl — вход задан явной ссылкой на снимок.\n\n"
-    "Если impl больше нуля, а expl равен нулю, значит ссылки на результат "
-    "записаны неверно, и чинить нужно их. Если оба нуля — теряется сам снимок."
-)
-
-
-def build_diag() -> dict:
-    """Какой способ передачи входа работает — неявный или явный.
-
-    Прошлый замер дал три нуля подряд, а по документации и действия, и их
-    параметры заданы верно. Значит подозрение переходит на то, чем эти
-    действия связаны между собой: либо снимок не доезжает вовсе, либо
-    WFInput-ссылка не разрешается и обнуляет всё, что за ней.
-
-    Оба base64 кодируют ОДИН снимок, поэтому длины должны совпасть. Любое
-    расхождение — это и есть ответ.
-    """
-    photo_uuid = new_uuid()
-    b64_impl, n_impl = new_uuid(), new_uuid()
-    b64_expl, n_expl = new_uuid(), new_uuid()
-
-    return workflow([
-        comment(DIAG_HINT),
-        take_photo(photo_uuid),
-
-        # Неявная цепочка: действие берёт результат предыдущего само.
-        action("is.workflow.actions.base64encode",
-               {"WFEncodeMode": "Encode", "UUID": b64_impl, "CustomOutputName": "Base64impl"}),
-        action("is.workflow.actions.count",
-               {"WFCountType": "Characters", "UUID": n_impl, "CustomOutputName": "Impl"}),
-
-        # Явная ссылка на тот же снимок.
-        base64_encode(b64_expl, attachment_value(photo_uuid, "Снимок")),
-        count_chars(n_expl, attachment_value(b64_expl, "Base64"), "Expl"),
-
-        show_result(mixed_text([
-            "impl=", (n_impl, "Impl"),
-            " expl=", (n_expl, "Expl"),
-        ])),
-    ])
-
-
 def collect_output_refs(node: object) -> list[str]:
     """Все OutputUUID, на которые ссылается поддерево параметров."""
     found: list[str] = []
@@ -511,16 +410,7 @@ def collect_output_refs(node: object) -> list[str]:
     return found
 
 
-# Действия, которые обязаны получать вход явно: они стоят в фото-ветке, где
-# неявная цепочка однажды уже порвалась и отправила пустой imageBase64.
-NEEDS_EXPLICIT_INPUT = {
-    "is.workflow.actions.image.resize",
-    "is.workflow.actions.image.convert",
-    "is.workflow.actions.base64encode",
-}
-
-
-def validate(name: str, wf: dict, strict_inputs: bool = True) -> None:
+def validate(name: str, wf: dict) -> None:
     """Проверить собранный шорткат до подписи — на телефоне ошибка молчаливая.
 
     Shortcuts не жалуется на битую ссылку и не падает: подставляет пустую
@@ -537,13 +427,6 @@ def validate(name: str, wf: dict, strict_inputs: bool = True) -> None:
         for ref in collect_output_refs(params):
             if ref not in seen:
                 problems.append(f"действие {index} ({identifier}) ссылается на неизвестный выход {ref}")
-
-        if strict_inputs and identifier in NEEDS_EXPLICIT_INPUT and "WFInput" not in params:
-            problems.append(f"действие {index} ({identifier}) без явного WFInput")
-
-        for key in ("WFImageResizeWidth", "WFImageResizeHeight", "WFImageCompressionQuality"):
-            if key in params and not isinstance(params[key], str):
-                problems.append(f"действие {index} ({identifier}): {key} должно быть строкой, а не {type(params[key]).__name__}")
 
         if "UUID" in params:
             seen.add(params["UUID"])
@@ -567,9 +450,8 @@ def validate(name: str, wf: dict, strict_inputs: bool = True) -> None:
 
 def main() -> None:
     OUT_DIR.mkdir(exist_ok=True)
-    for name, wf in (("eda-text", build_text_only()), ("eda-full", build_full()), ("eda-diag", build_diag())):
-        # В диагностике отсутствие WFInput — часть эксперимента, а не ошибка.
-        validate(name, wf, strict_inputs=name != "eda-diag")
+    for name, wf in (("eda-text", build_text_only()), ("eda-full", build_full())):
+        validate(name, wf)
         path = OUT_DIR / f"{name}.unsigned.shortcut"
         with path.open("wb") as fh:
             plistlib.dump(wf, fh, fmt=plistlib.FMT_BINARY)

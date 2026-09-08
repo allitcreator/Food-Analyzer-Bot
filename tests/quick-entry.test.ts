@@ -16,7 +16,7 @@ import { describeQuickRejection, describeAuthRejection } from "../server/lib/qui
 import { bodyFromBinary, isBinaryContentType, detectImageKind } from "../server/lib/quick-binary";
 import { quickSchema } from "../shared/routes";
 import { existsSync } from "node:fs";
-import { buildQuickCardText, buildTokenMessage, buildShortcutCaption, shortcutPath, diagShortcutPath, buildDiagText } from "../server/lib/quick-shortcut";
+import { buildQuickCardText, buildTokenMessage, buildShortcutCaption, shortcutPath } from "../server/lib/quick-shortcut";
 
 describe("buildSyntheticUpdate", () => {
   test("текст → message.text от лица пользователя", () => {
@@ -276,26 +276,6 @@ describe("describeAuthRejection", () => {
     assert.equal(out.includes(token), false);
   });
 })
-
-/**
- * Диагностический шорткат отдаётся отдельной командой: гонять его каждый раз
- * в /quick незачем, а передавать файл через AirDrop с компьютера — лишний шаг
- * ровно тогда, когда что-то и так не работает.
- */
-describe("выдача диагностического шортката", () => {
-  test("файл лежит в репозитории", () => {
-    assert.equal(existsSync(diagShortcutPath()), true, `нет файла: ${diagShortcutPath()}`);
-  });
-
-  test("инструкция объясняет, что именно смотреть", () => {
-    const text = buildDiagText();
-    // Два числа — весь смысл прогона: они должны совпасть.
-    assert.match(text, /impl=/);
-    assert.match(text, /expl=/);
-    // Токен для диагностики не нужен — иначе человек полезет его вставлять.
-    assert.match(text, /токен.*не нужен/i);
-  });
-});
 
 /**
  * Бинарная отправка фото: снимок уезжает телом запроса как файл, без base64.
