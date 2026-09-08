@@ -1,7 +1,7 @@
 # HANDOFF
 
 Статус: открыт
-Обновлено: 2026-09-08 12:39 MSK
+Обновлено: 2026-09-08 12:42 MSK
 Клиент: Claude
 
 ## Цель
@@ -179,6 +179,21 @@
     Из `take_photo` убран необязательный `WFCameraCaptureShowPreview`: сырое
     булево — тот же класс риска, что и сырые числа.
 
+17. **Первый прогон бинарной отправки: тело не распарсилось (`d711f96`).**
+
+    ```
+    [quick] rejected: json body=undefined issues=[invalid_type@<root>]
+    ```
+
+    Шорткат прислал файл с `Content-Type`, которого не было в списке
+    `image/*`; `express.json` его тоже не взял, и запрос остался вообще без
+    тела. Важное: сам запрос дошёл и авторизацию прошёл — то есть фото-ветка
+    в бинарном режиме доезжает до сервера, чего с base64 не случалось ни разу.
+
+    Правило переписано от противного: JSON забирает `express.json`, всё
+    остальное читается как байты (`isBinaryContentType`). `Content-Type`
+    добавлен в лог отказа.
+
 ## Текущее состояние
 
 Всё закоммичено, запушено и задеплоено. Прод на vps4 — `306eaba`, файлы
@@ -233,8 +248,8 @@
 - `shortcuts/Еда (диагностика).shortcut` — новый, подписан `-m anyone`.
 - `server/lib/quick-reject-log.ts` — новый, `describeQuickRejection` и
   `describeAuthRejection`.
-- `server/lib/quick-binary.ts` — новый, `bodyFromBinary`: бинарное тело →
-  общий контракт, подпись из query.
+- `server/lib/quick-binary.ts` — новый: `bodyFromBinary` (бинарное тело →
+  общий контракт, подпись из query) и `isBinaryContentType`.
 - `server/quick-api.ts` — `console.warn` с причиной отказа перед ответом 400,
   `express.raw` для бинарного тела, разбор обоих форматов.
 - `server/lib/quick-shortcut.ts` — новый: путь к файлу, текст карточки
@@ -247,7 +262,7 @@
 
 ## Проверки
 
-- `npm test` — 167 тестов, 0 падений (было 146). Все три новых блока сначала
+- `npm test` — 170 тестов, 0 падений (было 146). Все три новых блока сначала
   падали: контракт на `{ text: "", imageBase64 }`, лог и выдача шортката — на
   отсутствии модуля.
 - `python3 scripts/build-shortcuts.py` — три шортката собраны, `validate()`
@@ -365,7 +380,7 @@ ssh vps4 'cd ~/foodbot && docker compose logs --since=15m bot | grep "\[quick\]"
 ## Rollback
 
 ```
-git revert dd93e22 cf502a4 306eaba caba8a8 520395a 0a64489 643f03c ca4ef29 60a3dc0 90cd673
+git revert d711f96 dd93e22 cf502a4 306eaba caba8a8 520395a 0a64489 643f03c ca4ef29 60a3dc0 90cd673
 ```
 
 Затем на vps4: `cd ~/foodbot && git pull origin main && docker compose up -d --build`.
