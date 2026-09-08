@@ -11,6 +11,38 @@
  * хватает длин, набора ключей и кодов ошибок.
  */
 
+/** Плейсхолдер из `scripts/build-shortcuts.py` — признак «токен не подставили». */
+const TOKEN_PLACEHOLDER_MARK = "ВСТАВЬ";
+
+/**
+ * Причина отказа 401 — по тем же мотивам, что и у 400: клиент ответ не видит.
+ *
+ * Сам токен в лог не идёт ни при каком раскладе: он даёт полный доступ к
+ * дневнику, а nginx-логи мы от него уже однажды чистили.
+ */
+export function describeAuthRejection(
+  header: unknown,
+  parsedToken: string | null,
+  userFound: boolean,
+): string {
+  const raw = typeof header === "string" ? header : "";
+  if (!raw.trim()) return "no_header";
+
+  const parts = [`header_len=${raw.length}`, `scheme=${raw.trim().split(/\s+/)[0]}`];
+  parts.push(`placeholder=${raw.includes(TOKEN_PLACEHOLDER_MARK) ? "yes" : "no"}`);
+
+  if (!parsedToken) {
+    // Заголовок есть, но токен из него не вынулся: лишнее слово, перенос
+    // строки, обрезанное значение.
+    parts.push("parsed=no");
+    return parts.join(" ");
+  }
+
+  parts.push("parsed=yes", `token_len=${parsedToken.length}`);
+  parts.push(userFound ? "user=found" : "unknown_token");
+  return parts.join(" ");
+}
+
 /** Часть `ZodIssue`, которой достаточно для лога (без завязки на версию zod). */
 type QuickIssue = { readonly code: string; readonly path: ReadonlyArray<PropertyKey> };
 

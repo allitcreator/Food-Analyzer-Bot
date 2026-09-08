@@ -19,7 +19,7 @@ import { storage } from "./storage";
 import { quickSchema, type QuickBody } from "@shared/routes";
 import { getBotInstance, injectUserMessage } from "./bot";
 import { extractBearerToken } from "./lib/quick-auth";
-import { describeQuickRejection } from "./lib/quick-reject-log";
+import { describeQuickRejection, describeAuthRejection } from "./lib/quick-reject-log";
 import type { User } from "@shared/schema";
 
 /**
@@ -31,8 +31,10 @@ import type { User } from "@shared/schema";
  * - 403 `blocked` / `not_approved` — те же правила доступа, что и у Mini App.
  */
 const quickAuth: RequestHandler = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  const token = extractBearerToken(req.headers["authorization"]);
+  const header = req.headers["authorization"];
+  const token = extractBearerToken(header);
   if (!token) {
+    console.warn("[quick] auth rejected:", describeAuthRejection(header, null, false));
     res.status(401).json({ error: "invalid_token" });
     return;
   }
@@ -46,6 +48,7 @@ const quickAuth: RequestHandler = async (req: Request, res: Response, next: Next
   }
 
   if (!user) {
+    console.warn("[quick] auth rejected:", describeAuthRejection(header, token, false));
     res.status(401).json({ error: "invalid_token" });
     return;
   }

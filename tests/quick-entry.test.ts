@@ -12,7 +12,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { buildSyntheticUpdate } from "../server/lib/synthetic-update";
 import { extractBearerToken } from "../server/lib/quick-auth";
-import { describeQuickRejection } from "../server/lib/quick-reject-log";
+import { describeQuickRejection, describeAuthRejection } from "../server/lib/quick-reject-log";
 import { quickSchema } from "../shared/routes";
 import { existsSync } from "node:fs";
 import { buildQuickCardText, buildShortcutCaption, shortcutPath } from "../server/lib/quick-shortcut";
@@ -226,3 +226,38 @@ describe("выдача шортката из /quick", () => {
     assert.ok(buildShortcutCaption().length < 1024);
   });
 });
+
+/**
+ * 401 у быстрой записи тоже молчаливый: шорткат ответ не показывает. Причин
+ * ровно три и лечатся они по-разному — заголовок не тронут (в нём остался
+ * плейсхолдер), заголовок испорчен, токен неизвестен серверу. Сам токен в лог
+ * не пишем: он даёт полный доступ к дневнику.
+ */
+describe("describeAuthRejection", () => {
+  const token = "a".repeat(48);
+
+  test("заголовка нет", () => {
+    assert.match(describeAuthRejection(undefined, null, false), /no_header/);
+  });
+
+  test("плейсхолдер из шортката виден отдельно", () => {
+    const out = describeAuthRejection("Bearer ВСТАВЬ_СЮДА_ТОКЕН_ИЗ_КОМАНДЫ_QUICK", null, false);
+    assert.match(out, /placeholder=yes/);
+    assert.equal(out.includes("ВСТАВЬ"), false);
+  });
+
+  test("двойной Bearer — частая ошибка при вставке", () => {
+    const out = describeAuthRejection(`Bearer Bearer ${token}`, null, false);
+    assert.match(out, /parsed=no/);
+    assert.match(out, /placeholder=no/);
+    assert.equal(out.includes(token), false);
+  });
+
+  test("токен разобран, но серверу неизвестен", () => {
+    const out = describeAuthRejection(`Bearer ${token}`, token, false);
+    assert.match(out, /parsed=yes/);
+    assert.match(out, /token_len=48/);
+    assert.match(out, /unknown_token/);
+    assert.equal(out.includes(token), false);
+  });
+})
