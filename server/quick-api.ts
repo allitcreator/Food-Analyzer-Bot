@@ -19,6 +19,7 @@ import { storage } from "./storage";
 import { quickSchema, type QuickBody } from "@shared/routes";
 import { getBotInstance, injectUserMessage } from "./bot";
 import { extractBearerToken } from "./lib/quick-auth";
+import { describeQuickRejection } from "./lib/quick-reject-log";
 import type { User } from "@shared/schema";
 
 /**
@@ -125,6 +126,9 @@ export function createQuickRouter(): Router {
   router.post("/", (req: Request, res: Response) => {
     const parsed = quickSchema.safeParse(req.body);
     if (!parsed.success) {
+      // Клиент этот ответ не покажет — шорткат тело 4xx проглатывает, поэтому
+      // причину дублируем в лог (длины и коды, без содержимого полей).
+      console.warn("[quick] rejected:", describeQuickRejection(req.body, parsed.error.issues));
       res.status(400).json({ error: "validation_error", details: parsed.error.issues });
       return;
     }

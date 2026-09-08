@@ -12,6 +12,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { buildSyntheticUpdate } from "../server/lib/synthetic-update";
 import { extractBearerToken } from "../server/lib/quick-auth";
+import { describeQuickRejection } from "../server/lib/quick-reject-log";
 import { quickSchema } from "../shared/routes";
 
 describe("buildSyntheticUpdate", () => {
@@ -146,5 +147,48 @@ describe("quickSchema", () => {
     const chunks: string[] = [];
     for (let i = 0; i < 1_400_000; i += 76) chunks.push("a".repeat(Math.min(76, 1_400_000 - i)));
     assert.equal(quickSchema.safeParse({ imageBase64: chunks.join("\r\n") }).success, true);
+  });
+});
+
+/**
+ * Причина отказа 400 нужна в логе сервера: шорткат тело ответа не показывает —
+ * «Получить содержимое URL» на 4xx молча идёт дальше, и с телефона видно лишь
+ * что карточка не пришла. При этом в лог нельзя тащить сам base64 (мегабайты
+ * мусора) и текст подписи (это еда пользователя) — только длины и коды.
+ */
+describe("describeQuickRejection", () => {
+  test("длины полей и коды ошибок, без содержимого", () => {
+    const out = describeQuickRejection(
+      { text: "борщ", imageBase64: "aGVsbG8=" },
+      [{ code: "too_big", path: ["imageBase64"] }],
+    );
+    assert.match(out, /keys=\[text,imageBase64\]/);
+    assert.match(out, /text=4/);
+    assert.match(out, /imageBase64=8/);
+    assert.match(out, /issues=\[too_big@imageBase64\]/);
+    // Ни подпись, ни картинка в лог не попадают.
+    assert.equal(out.includes("борщ"), false);
+    assert.equal(out.includes("aGVsbG8="), false);
+  });
+
+  test("лишние ключи видны — под них у схемы strict", () => {
+    const out = describeQuickRejection(
+      { image: "aGVsbG8=" },
+      [{ code: "unrecognized_keys", path: [] }],
+    );
+    assert.match(out, /keys=\[image\]/);
+    assert.match(out, /issues=\[unrecognized_keys@<root>\]/);
+  });
+
+  test("поле не строкой — видно тип, а не длину", () => {
+    const out = describeQuickRejection({ text: 42, imageBase64: null }, []);
+    assert.match(out, /text=<number>/);
+    assert.match(out, /imageBase64=<null>/);
+  });
+
+  test("тело вообще не объект", () => {
+    assert.match(describeQuickRejection("плохо", []), /body=string/);
+    assert.match(describeQuickRejection(null, []), /body=null/);
+    assert.match(describeQuickRejection([1], []), /body=array/);
   });
 });
