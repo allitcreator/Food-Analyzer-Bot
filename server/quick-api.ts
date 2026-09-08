@@ -20,7 +20,7 @@ import { quickSchema, type QuickBody } from "@shared/routes";
 import { getBotInstance, injectUserMessage } from "./bot";
 import { extractBearerToken } from "./lib/quick-auth";
 import { describeQuickRejection, describeAuthRejection } from "./lib/quick-reject-log";
-import { bodyFromBinary, isBinaryContentType, detectImageKind } from "./lib/quick-binary";
+import { binaryQuickBody, isBinaryContentType, detectImageKind } from "./lib/quick-binary";
 import type { User } from "@shared/schema";
 
 /**
@@ -74,11 +74,11 @@ const quickAuth: RequestHandler = async (req: Request, res: Response, next: Next
  * дальше работает штатный обработчик фото. Текст рядом с фото становится
  * подписью — её читает vision (P1-баг №10: раньше подпись терялась).
  */
-export async function dispatchQuickEntry(user: User, body: QuickBody): Promise<void> {
+export async function dispatchQuickEntry(user: User, body: QuickBody, photo?: Buffer): Promise<void> {
   const telegramId = user.telegramId;
   if (!telegramId) throw new Error("user has no telegram id");
 
-  if (!body.imageBase64) {
+  if (!photo && !body.imageBase64) {
     if (!injectUserMessage(telegramId, { text: body.text })) {
       throw new Error("bot is not running");
     }
@@ -88,10 +88,11 @@ export async function dispatchQuickEntry(user: User, body: QuickBody): Promise<v
   const bot = getBotInstance();
   if (!bot) throw new Error("bot is not running");
 
-  const photo = Buffer.from(body.imageBase64, "base64");
+  // Бинарный путь отдаёт байты как есть; base64 декодируем только в JSON-ветке.
+  const bytes = photo ?? Buffer.from(body.imageBase64 as string, "base64");
   const sent = await bot.sendPhoto(
     Number(telegramId),
-    photo,
+    bytes,
     body.text ? { caption: body.text } : {},
     { filename: "quick.jpg", contentType: "image/jpeg" },
   );
@@ -140,26 +141,20 @@ export function createQuickRouter(): Router {
 
   router.post("/", (req: Request, res: Response) => {
     const raw = Buffer.isBuffer(req.body) ? req.body : null;
-    const parsed = quickSchema.safeParse(
-      raw ? bodyFromBinary(raw, req.query as Record<string, unknown>) : req.body,
-    );
-    if (!parsed.success) {
-      // Клиент этот ответ не покажет — шорткат тело 4xx проглатывает, поэтому
-      // причину дублируем в лог (длины и коды, без содержимого полей).
-      console.warn(
-        "[quick] rejected:",
-        raw ? `binary=${raw.length}` : "json",
-        `ct=${req.headers["content-type"] ?? "<нет>"}`,
-        describeQuickRejection(raw ? bodyFromBinary(raw, req.query as Record<string, unknown>) : req.body, parsed.error.issues),
-      );
-      res.status(400).json({ error: "validation_error", details: parsed.error.issues });
-      return;
-    }
-
     const user = req.appUser as User;
-    const body = parsed.data;
+    const contentType = `ct=${req.headers["content-type"] ?? "<нет>"}`;
 
+    // Бинарная ветка: снимок не перекодируем — байты уезжают в Telegram как
+    // есть. Клиент ответ 4xx не покажет (шорткат его проглатывает), поэтому
+    // причина отказа идёт в лог.
     if (raw) {
+      const binary = binaryQuickBody(raw, req.query as Record<string, unknown>);
+      if (!binary.success) {
+        console.warn("[quick] rejected:", `binary=${raw.length}`, contentType, binary.error);
+        res.status(400).json({ error: "validation_error", reason: binary.error });
+        return;
+      }
+
       // Формат важен: снимок едет без конвертации, а Telegram HEIC не примет.
       const kind = detectImageKind(raw);
       // Длина подписи, а не сама подпись: это еда пользователя.
@@ -167,29 +162,53 @@ export function createQuickRouter(): Router {
         "[quick] accepted:",
         `binary=${raw.length}`,
         `kind=${kind}`,
-        `caption=${body.text?.length ?? 0}`,
+        `caption=${binary.data.text?.length ?? 0}`,
       );
       if (kind === "heic" || kind === "unknown") {
         console.warn("[quick] формат снимка Telegram не поддерживает:", kind);
       }
+
+      res.status(202).json({ ok: true, accepted: binary.data.text ? "photo+text" : "photo" });
+      dispatchInBackground(user, { text: binary.data.text }, binary.data.photo);
+      return;
     }
+
+    const parsed = quickSchema.safeParse(req.body);
+    if (!parsed.success) {
+      console.warn(
+        "[quick] rejected:",
+        "json",
+        contentType,
+        describeQuickRejection(req.body, parsed.error.issues),
+      );
+      res.status(400).json({ error: "validation_error", details: parsed.error.issues });
+      return;
+    }
+
+    const body = parsed.data;
     res.status(202).json({
       ok: true,
       accepted: body.imageBase64 ? (body.text ? "photo+text" : "photo") : "text",
     });
-
-    // Разбор — уже после ответа. Ошибку показываем пользователю в Telegram:
-    // шорткат к этому моменту закрыт и HTTP-код никто не увидит.
-    void dispatchQuickEntry(user, body).catch((err) => {
-      console.error("[quick] dispatch failed:", err);
-      const bot = getBotInstance();
-      if (bot && user.telegramId) {
-        bot
-          .sendMessage(Number(user.telegramId), "⚠️ Не получилось принять быструю запись. Попробуй ещё раз или отправь сообщение боту напрямую.")
-          .catch(() => {});
-      }
-    });
+    dispatchInBackground(user, body);
   });
 
   return router;
+}
+
+/**
+ * Разбор уже после ответа: он занимает 3–30 секунд, шорткату столько висеть
+ * незачем. Ошибку показываем пользователю в Telegram — HTTP-код к этому
+ * моменту никто не увидит.
+ */
+function dispatchInBackground(user: User, body: QuickBody, photo?: Buffer): void {
+  void dispatchQuickEntry(user, body, photo).catch((err) => {
+    console.error("[quick] dispatch failed:", err);
+    const bot = getBotInstance();
+    if (bot && user.telegramId) {
+      bot
+        .sendMessage(Number(user.telegramId), "⚠️ Не получилось принять быструю запись. Попробуй ещё раз или отправь сообщение боту напрямую.")
+        .catch(() => {});
+    }
+  });
 }

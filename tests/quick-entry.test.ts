@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { buildSyntheticUpdate } from "../server/lib/synthetic-update";
 import { extractBearerToken } from "../server/lib/quick-auth";
 import { describeQuickRejection, describeAuthRejection } from "../server/lib/quick-reject-log";
-import { bodyFromBinary, isBinaryContentType, detectImageKind } from "../server/lib/quick-binary";
+import { isBinaryContentType, detectImageKind, binaryQuickBody } from "../server/lib/quick-binary";
 import { quickSchema } from "../shared/routes";
 import { existsSync } from "node:fs";
 import { buildQuickCardText, buildTokenMessage, buildShortcutCaption, shortcutPath } from "../server/lib/quick-shortcut";
@@ -278,44 +278,6 @@ describe("describeAuthRejection", () => {
 })
 
 /**
- * Бинарная отправка фото: снимок уезжает телом запроса как файл, без base64.
- * Так из шортката исчезает единственная гигантская строка — то самое место,
- * где картинка стабильно терялась. Подпись при этом едет в query, потому что
- * тело занято файлом.
- */
-describe("bodyFromBinary", () => {
-  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
-
-  test("буфер превращается в тот же контракт, что и JSON-тело", () => {
-    const body = bodyFromBinary(jpeg, {});
-    assert.equal(body.imageBase64, jpeg.toString("base64"));
-    assert.equal(body.text, undefined);
-    // Результат обязан проходить общую схему — контракт один на оба пути.
-    assert.equal(quickSchema.safeParse(body).success, true);
-  });
-
-  test("подпись приезжает в query", () => {
-    assert.equal(bodyFromBinary(jpeg, { text: "борщ 400 г" }).text, "борщ 400 г");
-  });
-
-  test("повторённый параметр не ломает разбор", () => {
-    // ?text=a&text=b express отдаёт массивом — берём первое непустое.
-    assert.equal(bodyFromBinary(jpeg, { text: ["борщ", "суп"] }).text, "борщ");
-  });
-
-  test("мусор в query игнорируется, фото важнее подписи", () => {
-    const body = bodyFromBinary(jpeg, { text: 42 as unknown as string });
-    assert.equal(body.text, undefined);
-    assert.equal(quickSchema.safeParse(body).success, true);
-  });
-
-  test("пустое тело не выдаётся за картинку", () => {
-    assert.equal(bodyFromBinary(Buffer.alloc(0), {}).imageBase64, undefined);
-    assert.equal(quickSchema.safeParse(bodyFromBinary(Buffer.alloc(0), {})).success, false);
-  });
-});
-
-/**
  * Какой Content-Type шлёт шорткат в режиме «тело = файл», заранее неизвестно:
  * первый прогон дал body=undefined, то есть тип не совпал ни с express.json,
  * ни со списком image/*. Поэтому правило простое и не требует угадывания —
@@ -363,5 +325,35 @@ describe("detectImageKind", () => {
   test("мусор и обрезки не падают", () => {
     assert.equal(detectImageKind(Buffer.from([1, 2, 3])), "unknown");
     assert.equal(detectImageKind(Buffer.alloc(0)), "unknown");
+  });
+});
+
+/**
+ * Бинарный путь не должен гонять снимок через base64 и обратно: на кадре в
+ * 4 МБ это лишние ~9 МБ на пике (строка + повторный буфер) без всякой пользы —
+ * в Telegram всё равно уезжают исходные байты.
+ */
+describe("binaryQuickBody", () => {
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+
+  test("буфер отдаётся как есть, без перекодирования", () => {
+    const parsed = binaryQuickBody(jpeg, {});
+    assert.equal(parsed.success, true);
+    // Тот же объект в памяти, а не копия через base64.
+    assert.equal(parsed.success && parsed.data.photo, jpeg);
+    assert.equal(parsed.success && parsed.data.text, undefined);
+  });
+
+  test("подпись из query подчиняется тем же правилам, что в JSON-теле", () => {
+    assert.equal(binaryQuickBody(jpeg, { text: "борщ" }).data?.text, "борщ");
+    // Пустая и пробельная подпись — это «просто фото», а не ошибка.
+    assert.equal(binaryQuickBody(jpeg, { text: "   " }).data?.text, undefined);
+    // Слишком длинная — отказ, как и в JSON-пути.
+    assert.equal(binaryQuickBody(jpeg, { text: "я".repeat(2001) }).success, false);
+  });
+
+  test("пустое и слишком большое тело отвергаются", () => {
+    assert.equal(binaryQuickBody(Buffer.alloc(0), {}).success, false);
+    assert.equal(binaryQuickBody(Buffer.alloc(8_000_001), {}).success, false);
   });
 });
