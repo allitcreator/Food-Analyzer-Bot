@@ -1,7 +1,7 @@
 # HANDOFF
 
 Статус: открыт
-Обновлено: 2026-09-08 13:08 MSK
+Обновлено: 2026-09-08 13:10 MSK
 Клиент: Claude
 
 ## Цель
@@ -451,6 +451,14 @@ ssh vps4 'cd ~/foodbot && docker compose logs --since=15m bot | grep "\[quick\]"
 `build_diag`, закрыть HANDOFF, вернуться к этапу 2.3.
 
 ## Rollback
+
+Правка nginx живёт вне git и откатывается отдельно:
+
+```
+sudo sed -i '64s/client_max_body_size 8m;/client_max_body_size 2m;/' /etc/nginx/sites-available/bots && sudo nginx -t && sudo systemctl reload nginx
+```
+
+Код:
 
 ```
 git revert 00b4fcd d711f96 dd93e22 cf502a4 306eaba caba8a8 520395a 0a64489 643f03c ca4ef29 60a3dc0 90cd673
