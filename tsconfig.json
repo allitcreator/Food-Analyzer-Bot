@@ -6,6 +6,11 @@
     "tsBuildInfoFile": "./node_modules/typescript/tsbuildinfo",
     "noEmit": true,
     "module": "ESNext",
+    // Без target TypeScript целится в ES5 и запрещает итерацию Map/Set — отсюда
+    // росли все 14 ошибок в bot.ts: сначала TS2802 на for...of, а следом типы
+    // разъезжались в any. На эмит это не влияет (noEmit), сервер запускает tsx,
+    // клиент собирает Vite — обоим ES5 давно не нужен.
+    "target": "ES2022",
     "strict": true,
     "lib": ["esnext", "dom", "dom.iterable"],
     "jsx": "react-jsx",
