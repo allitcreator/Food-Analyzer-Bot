@@ -15,7 +15,7 @@ import { extractBearerToken } from "../server/lib/quick-auth";
 import { describeQuickRejection, describeAuthRejection } from "../server/lib/quick-reject-log";
 import { quickSchema } from "../shared/routes";
 import { existsSync } from "node:fs";
-import { buildQuickCardText, buildTokenMessage, buildShortcutCaption, shortcutPath } from "../server/lib/quick-shortcut";
+import { buildQuickCardText, buildTokenMessage, buildShortcutCaption, shortcutPath, diagShortcutPath, buildDiagText } from "../server/lib/quick-shortcut";
 
 describe("buildSyntheticUpdate", () => {
   test("текст → message.text от лица пользователя", () => {
@@ -270,3 +270,24 @@ describe("describeAuthRejection", () => {
     assert.equal(out.includes(token), false);
   });
 })
+
+/**
+ * Диагностический шорткат отдаётся отдельной командой: гонять его каждый раз
+ * в /quick незачем, а передавать файл через AirDrop с компьютера — лишний шаг
+ * ровно тогда, когда что-то и так не работает.
+ */
+describe("выдача диагностического шортката", () => {
+  test("файл лежит в репозитории", () => {
+    assert.equal(existsSync(diagShortcutPath()), true, `нет файла: ${diagShortcutPath()}`);
+  });
+
+  test("инструкция объясняет, что именно смотреть", () => {
+    const text = buildDiagText();
+    // Три числа — весь смысл прогона.
+    assert.match(text, /raw=/);
+    assert.match(text, /resized=/);
+    assert.match(text, /jpeg=/);
+    // Токен для диагностики не нужен — иначе человек полезет его вставлять.
+    assert.match(text, /токен.*не нужен/i);
+  });
+});
