@@ -14,6 +14,8 @@ import { buildSyntheticUpdate } from "../server/lib/synthetic-update";
 import { extractBearerToken } from "../server/lib/quick-auth";
 import { describeQuickRejection } from "../server/lib/quick-reject-log";
 import { quickSchema } from "../shared/routes";
+import { existsSync } from "node:fs";
+import { buildQuickCardText, buildShortcutCaption, shortcutPath } from "../server/lib/quick-shortcut";
 
 describe("buildSyntheticUpdate", () => {
   test("текст → message.text от лица пользователя", () => {
@@ -190,5 +192,37 @@ describe("describeQuickRejection", () => {
     assert.match(describeQuickRejection("плохо", []), /body=string/);
     assert.match(describeQuickRejection(null, []), /body=null/);
     assert.match(describeQuickRejection([1], []), /body=array/);
+  });
+});
+
+/**
+ * Выдача шортката из бота (/quick). Файл лежит в репозитории и уезжает
+ * документом, поэтому тест следит за двумя вещами: что файл на месте (иначе
+ * команда упадёт уже в проде) и что инструкция не растеряла шаги — без токена
+ * в заголовке шорткат молча получает 401.
+ */
+describe("выдача шортката из /quick", () => {
+  test("файл шортката лежит в репозитории", () => {
+    assert.equal(existsSync(shortcutPath()), true, `нет файла: ${shortcutPath()}`);
+  });
+
+  test("карточка содержит токен, адрес и шаги установки", () => {
+    const card = buildQuickCardText("t0ken123", "https://example.com");
+    assert.match(card, /t0ken123/);
+    assert.match(card, /https:\/\/example\.com\/api\/quick/);
+    // Шаги импорта: без «Ненадёжных команд» файл не откроется, без токена —
+    // не авторизуется. Оба пункта обязаны быть в тексте.
+    assert.match(card, /Ненадёжные/i);
+    assert.match(card, /Authorization/);
+  });
+
+  test("базовый адрес без хвостового слеша", () => {
+    const card = buildQuickCardText("t", "https://example.com/");
+    assert.match(card, /https:\/\/example\.com\/api\/quick/);
+    assert.equal(card.includes("example.com//api"), false);
+  });
+
+  test("подпись к файлу короче лимита Telegram", () => {
+    assert.ok(buildShortcutCaption().length < 1024);
   });
 });

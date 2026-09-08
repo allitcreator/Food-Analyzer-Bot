@@ -63,6 +63,27 @@ def variable_value(output_uuid: str, output_name: str) -> dict:
     }
 
 
+def attachment_value(output_uuid: str, output_name: str) -> dict:
+    """Явный вход действия — ссылка на результат конкретного предыдущего действия.
+
+    Отличается от variable_value: там переменная подставляется ВНУТРЬ текста
+    (WFTextTokenString + attachmentsByRange), здесь всё поле целиком и есть
+    ссылка (WFTextTokenAttachment). Для WFInput нужен именно второй вид.
+
+    Зачем вообще задавать вход явно: по умолчанию действие берёт результат
+    предыдущего неявно, и эта цепочка рвётся молча — Shortcuts подставляет
+    пустоту вместо ошибки. Так фото-ветка и отправляла пустой imageBase64.
+    """
+    return {
+        "Value": {
+            "Type": "ActionOutput",
+            "OutputUUID": output_uuid,
+            "OutputName": output_name,
+        },
+        "WFSerializationType": "WFTextTokenAttachment",
+    }
+
+
 def dict_field(items: list[tuple[str, dict]]) -> dict:
     """Словарь «ключ → значение» в том виде, в каком его хранят заголовки и JSON-тело."""
     return {
@@ -177,32 +198,46 @@ def take_photo(uuid_: str) -> dict:
     )
 
 
-def resize(width: int, uuid_: str) -> dict:
+def resize(width: int, uuid_: str, input_: dict) -> dict:
+    # Ширина строкой, а не числом: в plist «Команд» числовые поля хранятся как
+    # строки, и сырой integer приложение молча не читает — ширина становится
+    # «Auto». Высоту не задаём намеренно, она считается по пропорции.
     return action(
         "is.workflow.actions.image.resize",
-        {"WFImageResizeWidth": width, "UUID": uuid_, "CustomOutputName": "Уменьшенное"},
+        {
+            "WFImageResizeWidth": str(width),
+            "WFInput": input_,
+            "UUID": uuid_,
+            "CustomOutputName": "Уменьшенное",
+        },
     )
 
 
-def to_jpeg(uuid_: str) -> dict:
+def to_jpeg(uuid_: str, input_: dict) -> dict:
     return action(
         "is.workflow.actions.image.convert",
         {
             "WFImageFormat": "JPEG",
-            "WFImageCompressionQuality": 0.7,
+            "WFImageCompressionQuality": "0.7",
+            "WFInput": input_,
             "UUID": uuid_,
             "CustomOutputName": "JPEG",
         },
     )
 
 
-def base64_encode(uuid_: str) -> dict:
+def base64_encode(uuid_: str, input_: dict) -> dict:
     # Разрывы строк оставляем как есть: сервер вычищает пробельные символы сам
     # (shared/routes.ts, quickSchema), а лишняя настройка — лишний способ
     # сломать сценарий.
     return action(
         "is.workflow.actions.base64encode",
-        {"WFEncodeMode": "Encode", "UUID": uuid_, "CustomOutputName": "Base64"},
+        {
+            "WFEncodeMode": "Encode",
+            "WFInput": input_,
+            "UUID": uuid_,
+            "CustomOutputName": "Base64",
+        },
     )
 
 
@@ -297,9 +332,9 @@ def build_full() -> dict:
 
         menu_item("📷 Сфотографировать", group),
         take_photo(photo_uuid),
-        resize(1280, resized_uuid),
-        to_jpeg(jpeg_uuid),
-        base64_encode(b64_uuid),
+        resize(1280, resized_uuid, attachment_value(photo_uuid, "Снимок")),
+        to_jpeg(jpeg_uuid, attachment_value(resized_uuid, "Уменьшенное")),
+        base64_encode(b64_uuid, attachment_value(jpeg_uuid, "JPEG")),
         ask("Уточнить? Можно оставить пустым", caption_uuid),
         post([
             ("imageBase64", variable_value(b64_uuid, "Base64")),
@@ -336,9 +371,9 @@ def build_diag() -> dict:
     return workflow([
         comment(DIAG_HINT),
         take_photo(photo_uuid),
-        resize(1280, resized_uuid),
-        to_jpeg(jpeg_uuid),
-        base64_encode(b64_uuid),
+        resize(1280, resized_uuid, attachment_value(photo_uuid, "Снимок")),
+        to_jpeg(jpeg_uuid, attachment_value(resized_uuid, "Уменьшенное")),
+        base64_encode(b64_uuid, attachment_value(jpeg_uuid, "JPEG")),
         count_chars(count_uuid),
         show_result(mixed_value("Символов base64: ", count_uuid, "Символов")),
         post([("imageBase64", variable_value(b64_uuid, "Base64"))], post_uuid),
@@ -346,9 +381,65 @@ def build_diag() -> dict:
     ])
 
 
+def collect_output_refs(node: object) -> list[str]:
+    """Все OutputUUID, на которые ссылается поддерево параметров."""
+    found: list[str] = []
+    if isinstance(node, dict):
+        if node.get("Type") == "ActionOutput" and "OutputUUID" in node:
+            found.append(node["OutputUUID"])
+        for value in node.values():
+            found.extend(collect_output_refs(value))
+    elif isinstance(node, list):
+        for item in node:
+            found.extend(collect_output_refs(item))
+    return found
+
+
+# Действия, которые обязаны получать вход явно: они стоят в фото-ветке, где
+# неявная цепочка однажды уже порвалась и отправила пустой imageBase64.
+NEEDS_EXPLICIT_INPUT = {
+    "is.workflow.actions.image.resize",
+    "is.workflow.actions.image.convert",
+    "is.workflow.actions.base64encode",
+}
+
+
+def validate(name: str, wf: dict) -> None:
+    """Проверить собранный шорткат до подписи — на телефоне ошибка молчаливая.
+
+    Shortcuts не жалуется на битую ссылку и не падает: подставляет пустую
+    строку и идёт дальше. Поэтому целостность ссылок проверяем здесь, а не
+    распаковкой подписанного файла руками.
+    """
+    seen: set[str] = set()
+    problems: list[str] = []
+
+    for index, act in enumerate(wf["WFWorkflowActions"]):
+        identifier = act["WFWorkflowActionIdentifier"]
+        params = act["WFWorkflowActionParameters"]
+
+        for ref in collect_output_refs(params):
+            if ref not in seen:
+                problems.append(f"действие {index} ({identifier}) ссылается на неизвестный выход {ref}")
+
+        if identifier in NEEDS_EXPLICIT_INPUT and "WFInput" not in params:
+            problems.append(f"действие {index} ({identifier}) без явного WFInput")
+
+        for key in ("WFImageResizeWidth", "WFImageResizeHeight", "WFImageCompressionQuality"):
+            if key in params and not isinstance(params[key], str):
+                problems.append(f"действие {index} ({identifier}): {key} должно быть строкой, а не {type(params[key]).__name__}")
+
+        if "UUID" in params:
+            seen.add(params["UUID"])
+
+    if problems:
+        raise SystemExit(f"{name}: " + "; ".join(problems))
+
+
 def main() -> None:
     OUT_DIR.mkdir(exist_ok=True)
     for name, wf in (("eda-text", build_text_only()), ("eda-full", build_full()), ("eda-diag", build_diag())):
+        validate(name, wf)
         path = OUT_DIR / f"{name}.unsigned.shortcut"
         with path.open("wb") as fh:
             plistlib.dump(wf, fh, fmt=plistlib.FMT_BINARY)

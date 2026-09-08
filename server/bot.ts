@@ -12,6 +12,8 @@ import { mealTypeByTime, buildMealTitle, toFavoriteItems, shouldSuggestFavorite,
 import { createPersistentRecord, loadPersistentState } from "./lib/persistent-state";
 import { typicalMealTimes, dueSmartReminder, minutesToHHMM } from "./lib/smart-reminders";
 import { buildSyntheticUpdate, type SyntheticPayload } from "./lib/synthetic-update";
+import { buildQuickCardText, buildShortcutCaption, shortcutPath, SHORTCUT_FILENAME } from "./lib/quick-shortcut";
+import { existsSync } from "node:fs";
 
 const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
 
@@ -50,29 +52,36 @@ export function injectUserMessage(
   return true;
 }
 
-/** Карточка /quick: адрес эндпоинта, токен и контракт тела запроса. */
-function buildQuickCardText(token: string): string {
-  // Базовый адрес берём из WEBHOOK_URL — это и есть публичный домен бота.
-  const base = config.webhookUrl?.replace(/\/+$/, "") || "https://<домен-бота>";
-  return [
-    "⚡ *Быстрая запись с телефона*",
-    "",
-    "Шорткат на iPhone шлёт еду сюда — карточка подтверждения приходит в этот чат.",
-    "",
-    "*URL*",
-    `\`${base}/api/quick\``,
-    "",
-    "*Заголовок*",
-    `\`Authorization: Bearer ${token}\``,
-    "",
-    "*Тело запроса* (JSON, плоский словарь)",
-    '`{"text": "овсянка на молоке 250 г"}`',
-    '`{"imageBase64": "<JPEG в base64>"}`',
-    "",
-    "Можно и то и другое сразу: фото с подписью «это борщ, 400 г».",
-    "",
-    "⚠️ Токен разрешает запись в твой дневник. Утёк — жми «Сбросить», старый сразу перестанет работать.",
-  ].join("\n");
+/**
+ * Отправить карточку /quick и следом сам файл шортката.
+ *
+ * Файл шлём отдельным сообщением, а не подписью к документу: caption в Telegram
+ * ограничен 1024 символами, инструкция с токеном в него не влезает.
+ *
+ * Если файла на диске нет (собран не тем образом, потерялся при сборке) —
+ * карточка всё равно уходит: в ней есть и токен, и контракт эндпоинта, так что
+ * записывать еду можно и без готового шортката.
+ */
+async function sendQuickCard(bot: TelegramBot, chatId: number, token: string): Promise<void> {
+  await bot.sendMessage(chatId, buildQuickCardText(token, config.webhookUrl), {
+    parse_mode: 'Markdown',
+    reply_markup: { inline_keyboard: [[{ text: "🔄 Сбросить токен", callback_data: "quick_reset" }]] }
+  });
+
+  const path = shortcutPath();
+  if (!existsSync(path)) {
+    console.error("[quick] файл шортката не найден:", path);
+    return;
+  }
+
+  try {
+    await bot.sendDocument(chatId, path, { caption: buildShortcutCaption() }, { filename: SHORTCUT_FILENAME });
+  } catch (err) {
+    console.error("[quick] не удалось отправить шорткат:", err);
+    await bot
+      .sendMessage(chatId, "⚠️ Не получилось приложить файл шортката. Токен выше рабочий — попробуй ещё раз позже.")
+      .catch(() => {});
+  }
 }
 
 function getUnit(foodName: string): string {
@@ -1222,10 +1231,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       await storage.setQuickToken(user.id, token);
     }
 
-    bot.sendMessage(chatId, buildQuickCardText(token), {
-      parse_mode: 'Markdown',
-      reply_markup: { inline_keyboard: [[{ text: "🔄 Сбросить токен", callback_data: "quick_reset" }]] }
-    });
+    await sendQuickCard(bot, chatId, token);
   });
 
   // ─── /editprofile ─────────────────────────────────────────────────────────
@@ -2308,7 +2314,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       const token = randomBytes(24).toString("hex");
       await storage.setQuickToken(user.id, token);
       bot.answerCallbackQuery(query.id, { text: "Токен обновлён — поправь его в шорткате" }).catch(() => {});
-      bot.editMessageText(buildQuickCardText(token), {
+      bot.editMessageText(buildQuickCardText(token, config.webhookUrl), {
         chat_id: chatId,
         message_id: query.message?.message_id,
         parse_mode: 'Markdown',

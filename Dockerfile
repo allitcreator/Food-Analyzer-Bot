@@ -26,6 +26,9 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/drizzle.config.ts ./drizzle.config.ts
 COPY --from=builder /app/shared ./shared
 COPY --from=builder /app/migrations ./migrations
+# Подписанные шорткаты iOS — их отдаёт команда /quick (собрать в контейнере
+# нельзя: подпись ставит только macOS).
+COPY --from=builder /app/shortcuts ./shortcuts
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 COPY --from=builder /app/package.json ./package.json
 
