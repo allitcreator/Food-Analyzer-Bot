@@ -199,6 +199,20 @@ describe("describeQuickRejection", () => {
     assert.match(describeQuickRejection(null, []), /body=null/);
     assert.match(describeQuickRejection([1], []), /body=array/);
   });
+
+  // Ключи и пути ошибок приходят от клиента целиком: в них можно положить
+  // перевод строки и подделать соседнюю запись лога либо забить вывод мегабайтом мусора.
+  test("ключ от клиента: без переводов строки и не длиннее 40 символов", () => {
+    const out = describeQuickRejection(
+      { ["x".repeat(200)]: 1, "a\r\nWARN поддель\tb": 2 },
+      [{ code: "unrecognized_keys", path: ["y".repeat(200)] }],
+    );
+    assert.equal(out.includes("\n"), false, `перевод строки уехал в лог: ${out}`);
+    assert.equal(out.includes("\r"), false, `возврат каретки уехал в лог: ${out}`);
+    assert.equal(out.includes("\t"), false, `табуляция уехала в лог: ${out}`);
+    assert.equal(out.includes("x".repeat(41)), false, `длинный ключ не обрезан: ${out}`);
+    assert.equal(out.includes("y".repeat(41)), false, `длинный путь не обрезан: ${out}`);
+  });
 });
 
 /**
@@ -274,6 +288,29 @@ describe("describeAuthRejection", () => {
     assert.match(out, /token_len=48/);
     assert.match(out, /unknown_token/);
     assert.equal(out.includes(token), false);
+  });
+
+  test("известная схема видна как есть", () => {
+    assert.match(describeAuthRejection(`Bearer ${token}`, token, false), /scheme=Bearer/);
+    assert.match(describeAuthRejection(`Basic ${token}`, null, false), /scheme=Basic/);
+  });
+
+  // Главная ошибка настройки шортката — вставить токен без слова Bearer. Тогда
+  // «первый токен заголовка» — это весь токен целиком, а он даёт доступ к дневнику.
+  test("заголовок без схемы: токен не выдаётся за схему", () => {
+    // Токен из одних букв тоже не схема: у схем длина в единицы символов.
+    for (const bare of ["a1b2c3d4".repeat(6), "z".repeat(48), "Bearer=токен"]) {
+      const out = describeAuthRejection(bare, null, false);
+      assert.match(out, /scheme=<неразборчиво>/);
+      assert.equal(out.includes(bare), false, `токен утёк в лог: ${out}`);
+    }
+  });
+
+  test("управляющие символы из заголовка не ломают строку лога", () => {
+    const out = describeAuthRejection("Bearer\tX\r\nWARN поддель", null, false);
+    assert.equal(out.includes("\n"), false, `перевод строки уехал в лог: ${out}`);
+    assert.equal(out.includes("\r"), false, `возврат каретки уехал в лог: ${out}`);
+    assert.equal(out.includes("\t"), false, `табуляция уехала в лог: ${out}`);
   });
 })
 

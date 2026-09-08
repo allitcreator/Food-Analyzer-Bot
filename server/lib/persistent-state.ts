@@ -24,6 +24,8 @@
  * Telegram id), key = the record `name` (e.g. "pendingLogs"), value = JSON.
  */
 
+import { describeError } from "./safe-log";
+
 // Just the slice of storage this module needs — lets unit tests inject a fake
 // without pulling in the DB layer (and its env-dependent config).
 export interface PersistentStateSink {
@@ -47,7 +49,7 @@ export function createPersistentRecord<T>(
 ): Record<string, T> {
   const write = (fn: (s: PersistentStateSink) => Promise<void>) => {
     Promise.resolve(sink).then(fn).catch((err) =>
-      console.error(`persistent-state[${name}] write failed:`, err),
+      console.error(`persistent-state[${name}] write failed:`, describeError(err)),
     );
   };
   return new Proxy(snapshot, {

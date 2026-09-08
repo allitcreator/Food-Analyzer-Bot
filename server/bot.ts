@@ -5,6 +5,7 @@ import ExcelJS from "exceljs";
 import { IStorage } from "./storage";
 import { analyzeFoodText, analyzeFoodImage, generateEveningReport, generatePeriodAnalysis, transcribeVoice, askCoach, detectBarcode, generateWeightAnalysis, classifyIntent, analyzeWorkout, groupFoodNames, FoodItem } from "./openai";
 import { decodeBarcodeFromImage, isValidEanChecksum, classifyHydratingProduct, barcodeCacheToFoodItem, foodItemToBarcodeCache } from "./barcode";
+import { secretsMatch } from "./lib/webhook-auth";
 import { generateMonthlyPDF, extractTopFoods } from "./pdf";
 import { User, FoodLog, VisibleFavorite, FavoriteItem } from "@shared/schema";
 import { progressBar } from "./lib/goals";
@@ -15,6 +16,7 @@ import { typicalMealTimes, dueSmartReminder, minutesToHHMM } from "./lib/smart-r
 import { buildSyntheticUpdate, type SyntheticPayload } from "./lib/synthetic-update";
 import { buildQuickCardText, buildTokenMessage, buildShortcutCaption, shortcutPath, SHORTCUT_FILENAME } from "./lib/quick-shortcut";
 import { existsSync } from "node:fs";
+import { describeError } from "./lib/safe-log";
 
 const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
 
@@ -82,7 +84,7 @@ async function sendQuickCard(bot: TelegramBot, chatId: number, token: string): P
   try {
     await bot.sendDocument(chatId, path, { caption: buildShortcutCaption() }, { filename: SHORTCUT_FILENAME });
   } catch (err) {
-    console.error("[quick] не удалось отправить шорткат:", err);
+    console.error("[quick] не удалось отправить шорткат:", describeError(err));
     await bot
       .sendMessage(chatId, "⚠️ Не получилось приложить файл шортката. Токен выше рабочий — попробуй ещё раз позже.")
       .catch(() => {});
@@ -166,7 +168,7 @@ async function lookupBarcodeProduct(barcode: string): Promise<BarcodeLookupResul
       foundInDb: true as const,
     };
   } catch (err) {
-    console.error("Open Food Facts lookup error:", err);
+    console.error("Open Food Facts lookup error:", describeError(err));
     return null;
   }
 }
@@ -303,7 +305,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
   try {
     persisted = await loadPersistentState();
   } catch (e) {
-    console.error("Failed to load persistent bot state, starting empty:", e);
+    console.error("Failed to load persistent bot state, starting empty:", describeError(e));
     persisted = new Map();
   }
 
@@ -311,16 +313,20 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
 
   if (useWebhook) {
     bot = new TelegramBot(token);
-    const webhookPath = `/api/telegram-webhook/${WEBHOOK_SECRET}`;
+    // Путь фиксированный и без секрета: его печатает request-логгер на каждом
+    // апдейте, то есть секрет уезжал в docker logs. nginx проксирует префикс
+    // `/api/telegram-webhook/` целиком, поэтому конфиг менять не нужно.
+    // Аутентификация — только по заголовку, который Telegram шлёт сам.
+    const webhookPath = "/api/telegram-webhook/update";
     const webhookUrl = `${WEBHOOK_URL}${webhookPath}`;
     bot.setWebHook(webhookUrl, { secret_token: WEBHOOK_SECRET } as any).then(() => {
-      console.log("Telegram webhook set:", webhookUrl);
+      // Без URL: в нём домен и путь эндпоинта, а лог читают не только свои.
+      console.log("Telegram webhook set");
     }).catch(err => {
-      console.error("Failed to set webhook:", err);
+      console.error("Failed to set webhook:", describeError(err));
     });
     app.post(webhookPath, (req, res) => {
-      const secretHeader = req.headers["x-telegram-bot-api-secret-token"];
-      if (secretHeader !== WEBHOOK_SECRET) {
+      if (!secretsMatch(req.headers["x-telegram-bot-api-secret-token"], WEBHOOK_SECRET)) {
         res.sendStatus(403);
         return;
       }
@@ -340,7 +346,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
         bot.startPolling();
       }
     }).catch(err => {
-      console.error("Failed to check webhook info, starting polling:", err);
+      console.error("Failed to check webhook info, starting polling:", describeError(err));
       bot.startPolling();
     });
   }
@@ -367,7 +373,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     { command: "settings",    description: "Настройки: AI, напоминания, отчёт, микронутриенты" },
     { command: "quick",       description: "Токен для быстрой записи с телефона ⚡" },
     { command: "help",        description: "Список всех команд" },
-  ]).catch(err => console.error("setMyCommands error:", err));
+  ]).catch(err => console.error("setMyCommands error:", describeError(err)));
 
   // Middleware-like check
   const isUserAllowed = async (chatId: number, telegramId: string) => {
@@ -602,9 +608,10 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     if (!rec) return;
     try {
       await storage.upsertBarcodeProduct(rec);
-      console.log("Barcode cached from vision:", item.barcode, rec.foodName);
+      // Название продукта в лог не идёт: это то, что ест пользователь.
+      console.log("Barcode cached from vision");
     } catch (e) {
-      console.error("Barcode cache write (vision) error:", e);
+      console.error("Barcode cache write (vision) error:", describeError(e));
     }
   }
 
@@ -1431,7 +1438,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
         contentType: 'application/pdf'
       });
     } catch (err) {
-      console.error("PDF generation error:", err);
+      console.error("PDF generation error:", describeError(err));
       bot.sendMessage(chatId, "Не удалось сгенерировать отчёт. Попробуйте позже.");
     }
   }
@@ -1637,7 +1644,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
             console.log(`Sending evening report to user ${user.id} at ${currentTime}`);
             await sendEveningReport(user);
           } catch (e) {
-            console.error(`Failed to send report to user ${user.id}:`, e);
+            console.error(`Failed to send report to user ${user.id}:`, describeError(e));
           }
         }
       }
@@ -1658,7 +1665,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
             console.log(`Sending ${meal} reminder to user ${user.id} at ${currentTime}`);
             bot.sendMessage(user.telegramId!, `Время записать ${MEAL_LABELS[meal]?.toLowerCase()}! Отправьте текст или фото еды.`);
           } catch (e) {
-            console.error(`Failed to send ${meal} reminder to user ${user.id}:`, e);
+            console.error(`Failed to send ${meal} reminder to user ${user.id}:`, describeError(e));
           }
         }
       }
@@ -1704,7 +1711,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
             }
           }
         } catch (e) {
-          console.error(`Smart reminder check failed for user ${user.id}:`, e);
+          console.error(`Smart reminder check failed for user ${user.id}:`, describeError(e));
         }
       }
 
@@ -1717,7 +1724,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
               bot.sendMessage(user.telegramId!, `⚠️ Ты ещё ничего не записал сегодня. Не забудь залогировать еду!`);
             }
           } catch (e) {
-            console.error(`Failed to send no-log reminder to user ${user.id}:`, e);
+            console.error(`Failed to send no-log reminder to user ${user.id}:`, describeError(e));
           }
         }
       }
@@ -1734,7 +1741,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
             try {
               bot.sendMessage(user.telegramId!, `⚖️ Время взвеситься! Запишите вес: /weight 75.0`);
             } catch (e) {
-              console.error(`Failed to send weight reminder to user ${user.id}:`, e);
+              console.error(`Failed to send weight reminder to user ${user.id}:`, describeError(e));
             }
           }
         }
@@ -1746,8 +1753,8 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     const nowMs = Date.now();
     if (nowMs - lastPersistenceCleanup >= 60 * 60 * 1000) {
       lastPersistenceCleanup = nowMs;
-      try { await storage.cleanupBotState(7); } catch (e) { console.error("cleanupBotState failed:", e); }
-      try { await storage.cleanupNotificationSends(14); } catch (e) { console.error("cleanupNotificationSends failed:", e); }
+      try { await storage.cleanupBotState(7); } catch (e) { console.error("cleanupBotState failed:", describeError(e)); }
+      try { await storage.cleanupNotificationSends(14); } catch (e) { console.error("cleanupNotificationSends failed:", describeError(e)); }
     }
   }
 
@@ -1948,7 +1955,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
         },
       });
     } catch (e) {
-      console.error("maybeSuggestFavorite error:", e);
+      console.error("maybeSuggestFavorite error:", describeError(e));
     }
   }
 
@@ -2442,7 +2449,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
           await maybeCacheVisionBarcode(item);
           savedCount++;
         } catch (e) {
-          console.error("Error saving food item:", e);
+          console.error("Error saving food item:", describeError(e));
         }
       }
       const totalCal = items.reduce((s, i) => s + (i.hydrating ? 0 : i.calories), 0);
@@ -2836,10 +2843,13 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       const state = userStates[telegramId];
       if (state) {
         state.data.goal = goal;
-        console.log(`Profile save for user ${user.id}:`, JSON.stringify(state.data));
+        // Профиль — это вес, рост, возраст и пол; в лог идёт только факт записи.
+        console.log(`Profile saved for user ${user.id}`);
         await storage.updateUser(user.id, state.data);
         const updatedUser = await storage.calculateAndSetGoals(user.id);
-        console.log(`Goals calculated for user ${user.id}:`, JSON.stringify({ caloriesGoal: updatedUser.caloriesGoal, proteinGoal: updatedUser.proteinGoal, fatGoal: updatedUser.fatGoal, carbsGoal: updatedUser.carbsGoal }));
+        // Нормы КБЖУ выводятся из веса, роста, возраста и пола — в лог идёт
+        // только факт расчёта.
+        console.log(`Goals calculated for user ${user.id}`);
         delete userStates[telegramId];
         bot.editMessageText(`Профиль настроен!\n\nВаши нормы на день:\nКкал: ${updatedUser.caloriesGoal}\nБелки: ${updatedUser.proteinGoal}г\nЖиры: ${updatedUser.fatGoal}г\nУглеводы: ${updatedUser.carbsGoal}г\n\nХотите скорректировать калории?`, {
           chat_id: chatId,
@@ -2940,7 +2950,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
           await bot.sendMessage(chatId, "Не удалось сформировать анализ. Попробуйте позже.");
         }
       } catch (err) {
-        console.error('weight_analysis error:', err);
+        console.error('weight_analysis error:', describeError(err));
         bot.sendMessage(chatId, "Произошла ошибка при анализе веса. Попробуйте позже.");
       }
 
@@ -3828,7 +3838,9 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
 
     // Handle Text
     if (msg.text) {
-      console.log("Text received:", msg.text);
+      // Длина, а не текст: сообщение пользователя — это его еда и его планы.
+      const textLen = msg.text.length;
+      console.log(`Text received: len=${textLen}`);
       const statusMsg = await bot.sendMessage(chatId, "🔍 Анализирую...");
       try {
         const intent = await classifyIntent(msg.text);
@@ -3873,7 +3885,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
           }
         }
       } catch (err) {
-        console.error("Error processing text:", err);
+        console.error("Error processing text:", describeError(err));
         await bot.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
         bot.sendMessage(chatId, "Произошла ошибка при анализе текста.");
       }
@@ -3921,7 +3933,8 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
         if (caption) visionHint = { userNote: caption };
 
         if (barcode) {
-          console.log("Barcode detected:", barcode);
+          // EAN однозначно называет продукт — в лог идёт только факт.
+          console.log("Barcode detected");
           await bot.editMessageText(`🔍 Найден штрихкод: ${barcode}\nИщу в базе продуктов...`, {
             chat_id: chatId,
             message_id: statusMsg.message_id,
@@ -3929,24 +3942,24 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
 
           // 1) Self-filling local cache (global for all users).
           const cached = await storage.getBarcodeProduct(barcode).catch((e) => {
-            console.error("Barcode cache read error:", e);
+            console.error("Barcode cache read error:", describeError(e));
             return undefined;
           });
           if (cached) {
-            console.log("Barcode product found in cache:", cached.foodName);
+            console.log("Barcode product found in cache");
             analysis = barcodeCacheToFoodItem(cached);
             barcodeSource = true;
           } else {
             // 2) Open Food Facts.
             const off = await lookupBarcodeProduct(barcode);
             if (off && off.foundInDb) {
-              console.log("Barcode product found in OFF:", off.foodName);
+              console.log("Barcode product found in OFF");
               analysis = off;
               barcodeSource = true;
               // Persist the OFF hit so we don't hit the network next time.
               const rec = foodItemToBarcodeCache(off, barcode, "off");
               if (rec) {
-                await storage.upsertBarcodeProduct(rec).catch((e) => console.error("Barcode cache write (off) error:", e));
+                await storage.upsertBarcodeProduct(rec).catch((e) => console.error("Barcode cache write (off) error:", describeError(e)));
               }
             } else {
               // 3) Miss — fall back to vision, remember the barcode to cache the
@@ -3971,7 +3984,9 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
             breakfastEnd: user.mealBreakfastEnd ?? '12:30',
             lunchEnd: user.mealLunchEnd ?? '16:30',
           }, visionHint);
-          console.log("Vision analysis result:", visionItems);
+          // Только количество позиций: сами позиции — это тарелка пользователя.
+          const visionCount = visionItems?.length ?? 0;
+          console.log(`Vision analysis result: items=${visionCount}`);
 
           await bot.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
 
@@ -4001,7 +4016,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
           });
         }
       } catch (err: any) {
-        console.error("Error processing photo:", err);
+        console.error("Error processing photo:", describeError(err));
         bot.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
         bot.sendMessage(chatId, "Произошла ошибка при обработке фото.");
       }
@@ -4026,7 +4041,9 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
           return;
         }
 
-        console.log("Voice transcription:", transcript);
+        // Расшифровку голосового в лог не пишем — только её длину.
+        const voiceLen = transcript.length;
+        console.log(`Voice transcribed: len=${voiceLen}`);
         bot.sendMessage(chatId, `🗣 "${transcript}"\n\nАнализирую...`);
 
         const items = await analyzeFoodText(transcript, getUserNow(user.timezone ?? 'Europe/Moscow'), { breakfastEnd: user.mealBreakfastEnd ?? '12:30', lunchEnd: user.mealLunchEnd ?? '16:30' });
@@ -4036,7 +4053,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
           bot.sendMessage(chatId, "Не удалось распознать еду из голосового сообщения. Попробуй описать точнее.");
         }
       } catch (err) {
-        console.error("Error processing voice:", err);
+        console.error("Error processing voice:", describeError(err));
         bot.sendMessage(chatId, "Произошла ошибка при обработке голосового сообщения.");
       }
     }

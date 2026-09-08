@@ -21,6 +21,7 @@ import { getBotInstance, injectUserMessage } from "./bot";
 import { extractBearerToken } from "./lib/quick-auth";
 import { describeQuickRejection, describeAuthRejection } from "./lib/quick-reject-log";
 import { binaryQuickBody, isBinaryContentType, detectImageKind } from "./lib/quick-binary";
+import { describeError } from "./lib/safe-log";
 import type { User } from "@shared/schema";
 
 /**
@@ -193,6 +194,15 @@ export function createQuickRouter(): Router {
     dispatchInBackground(user, body);
   });
 
+  // Завершающий обработчик по образцу app-api: сюда прилетают ошибки БД из
+  // quickAuth (`next(err)`). Наружу — только код, потому что текст ошибки
+  // драйвера легко тащит фрагмент запроса; подробности остаются в логе.
+  router.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    console.error("[quick] error:", describeError(err));
+    if (res.headersSent) return;
+    res.status(500).json({ error: "internal_error" });
+  });
+
   return router;
 }
 
@@ -203,7 +213,7 @@ export function createQuickRouter(): Router {
  */
 function dispatchInBackground(user: User, body: QuickBody, photo?: Buffer): void {
   void dispatchQuickEntry(user, body, photo).catch((err) => {
-    console.error("[quick] dispatch failed:", err);
+    console.error("[quick] dispatch failed:", describeError(err));
     const bot = getBotInstance();
     if (bot && user.telegramId) {
       bot

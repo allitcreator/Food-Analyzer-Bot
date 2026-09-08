@@ -6,6 +6,7 @@ import { promisify } from "util";
 import { writeFile, readFile, unlink, mkdtemp } from "fs/promises";
 import { tmpdir } from "os";
 import path from "path";
+import { describeError } from "./lib/safe-log";
 
 const execFileAsync = promisify(execFile);
 
@@ -13,6 +14,9 @@ const execFileAsync = promisify(execFile);
 const openai = new OpenAI({
   apiKey: config.openrouterApiKey,
   baseURL: "https://openrouter.ai/api/v1",
+  // Иначе `OPENAI_LOG=debug` из окружения включает печать тел запросов, а в
+  // них уезжает и фото еды, и переписка пользователя с ИИ-тренером.
+  logLevel: "off",
   defaultHeaders: {
     "HTTP-Referer": "https://alxforbot.online",
     "X-Title": "Food Analyzer Bot",
@@ -55,9 +59,8 @@ async function callAI(
       minTimeout: 1000,
       maxTimeout: 4000,
       onFailedAttempt: ({ error, attemptNumber, retriesLeft }) => {
-        const e = error as any;
         console.error(
-          `[AI:${fnName}] attempt ${attemptNumber} failed (retriesLeft=${retriesLeft}): status=${e?.status ?? "n/a"} code=${e?.code ?? "n/a"} — ${e?.message ?? String(error)}`,
+          `[AI:${fnName}] attempt ${attemptNumber} failed (retriesLeft=${retriesLeft}): ${describeError(error)}`,
         );
       },
     },
@@ -161,7 +164,7 @@ Example output: {"items": [{...}, {...}]}`
     }
     return null;
   } catch (error) {
-    console.error("OpenAI Text Analysis Error:", error);
+    console.error("OpenAI Text Analysis Error:", describeError(error));
     return null;
   }
 }
@@ -197,8 +200,7 @@ Return ONLY a JSON object: {"intent": "food"|"workout"|"both"|"other"}`
     const result = JSON.parse(response.choices[0].message.content || '{"intent":"other"}');
     return (result.intent as MessageIntent) || "other";
   } catch (error) {
-    const e = error as any;
-    console.error(`[classifyIntent] failed, defaulting to "food": status=${e?.status ?? "n/a"} code=${e?.code ?? "n/a"} — ${e?.message ?? String(error)}`);
+    console.error(`[classifyIntent] failed, defaulting to "food": ${describeError(error)}`);
     return "food"; // default to food on error
   }
 }
@@ -252,7 +254,7 @@ Return ONLY a JSON object:
       description: result.description || result.workoutType,
     };
   } catch (error) {
-    console.error("OpenAI Workout Analysis Error:", error);
+    console.error("OpenAI Workout Analysis Error:", describeError(error));
     return null;
   }
 }
@@ -324,7 +326,7 @@ export async function generateEveningReport(
 
     return response.choices[0].message.content || null;
   } catch (error) {
-    console.error("OpenAI Evening Report Error:", error);
+    console.error("OpenAI Evening Report Error:", describeError(error));
     return null;
   }
 }
@@ -389,7 +391,7 @@ export async function generatePeriodAnalysis(params: {
 
     return response.choices[0].message.content || null;
   } catch (error) {
-    console.error("OpenAI Period Analysis Error:", error);
+    console.error("OpenAI Period Analysis Error:", describeError(error));
     return null;
   }
 }
@@ -474,12 +476,7 @@ export async function transcribeVoice(audioBuffer: Buffer, duration?: number): P
 
     return transcripts.length > 0 ? transcripts.join(" ") : null;
   } catch (error: any) {
-    console.error("Gemini Voice Transcription Error:", JSON.stringify({
-      message: error?.message,
-      status: error?.status,
-      code: error?.code,
-      body: error?.error,
-    }, null, 2));
+    console.error("Gemini Voice Transcription Error:", describeError(error));
     return null;
   }
 }
@@ -505,7 +502,7 @@ export async function detectBarcode(imageBase64: string): Promise<string | null>
     const digits = result.replace(/\D/g, "");
     return digits.length >= 8 ? digits : null;
   } catch (error) {
-    console.error("Barcode Detection Error:", error);
+    console.error("Barcode Detection Error:", describeError(error));
     return null;
   }
 }
@@ -566,7 +563,7 @@ export async function askCoach(
 
     return response.choices[0].message.content || null;
   } catch (error) {
-    console.error("OpenAI Coach Error:", error);
+    console.error("OpenAI Coach Error:", describeError(error));
     return null;
   }
 }
@@ -614,7 +611,7 @@ export async function generateWeightAnalysis(
 
     return response.choices[0].message.content || null;
   } catch (error) {
-    console.error("OpenAI Weight Analysis Error:", error);
+    console.error("OpenAI Weight Analysis Error:", describeError(error));
     return null;
   }
 }
@@ -743,7 +740,7 @@ Example: {"items": [{...}, {...}]}`
     }
     return null;
   } catch (error) {
-    console.error("OpenAI Vision Analysis Error:", error);
+    console.error("OpenAI Vision Analysis Error:", describeError(error));
     return null;
   }
 }
@@ -774,7 +771,7 @@ Example output: {"курица жареная": "Курица", "курица в
     });
     return JSON.parse(response.choices[0].message.content || "{}");
   } catch (error) {
-    console.error("Food Grouping AI Error:", error);
+    console.error("Food Grouping AI Error:", describeError(error));
     return {};
   }
 }

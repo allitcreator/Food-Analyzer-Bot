@@ -4,6 +4,7 @@ import { config } from "./config";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { describeError } from "./lib/safe-log";
 
 const app = express();
 const httpServer = createServer(app);
@@ -80,9 +81,13 @@ app.use((req, res, next) => {
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
+    // 5xx — это наша внутренняя поломка, и её текст бывает говорящим: путь на
+    // диске, кусок SQL, фрагмент тела запроса. Клиенту уходит общая фраза,
+    // подробности остаются в логе. Для 4xx message — это объяснение, что не так
+    // с запросом, его отдать можно.
+    const message = status >= 500 ? "Internal Server Error" : err.message || "Internal Server Error";
 
-    console.error("Internal Server Error:", err);
+    console.error("Internal Server Error:", describeError(err));
 
     if (res.headersSent) {
       return next(err);

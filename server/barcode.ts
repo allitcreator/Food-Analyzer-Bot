@@ -10,6 +10,8 @@
  * external (do NOT add it to the allowlist in script/build.ts).
  */
 
+import { describeError } from "./lib/safe-log";
+
 /**
  * Decode the first EAN-13 / EAN-8 / UPC-A / UPC-E barcode found in an image.
  * Returns the numeric code, or null if none is found / on any error.
@@ -28,7 +30,7 @@ export async function decodeBarcodeFromImage(imageBuffer: Buffer): Promise<strin
     }
     return null;
   } catch (error) {
-    console.error("Barcode Decode Error:", error);
+    console.error("Barcode Decode Error:", describeError(error));
     return null;
   }
 }

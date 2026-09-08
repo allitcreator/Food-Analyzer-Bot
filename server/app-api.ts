@@ -12,6 +12,7 @@ import { z, ZodError } from "zod";
 import { storage } from "./storage";
 import { telegramAuth } from "./lib/telegram-auth";
 import { computeEnergyBalance } from "./lib/energy";
+import { describeError } from "./lib/safe-log";
 import { mealTypeByTime, sameTitle } from "./lib/favorites";
 import { analyzeFoodImage, analyzeFoodText } from "./openai";
 import type { User, FoodLog, FavoriteItem, VisibleFavorite } from "@shared/schema";
@@ -566,7 +567,7 @@ export function createAppApiRouter(): Router {
       res.status(400).json({ error: "validation_error", details: err.flatten() });
       return;
     }
-    console.error("[app-api] error:", err);
+    console.error("[app-api] error:", describeError(err));
     res.status(500).json({ error: "internal_error" });
   });
 

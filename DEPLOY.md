@@ -2,7 +2,7 @@
 
 Схема:
 ```
-Telegram --> https://alxforbot.online/api/telegram-webhook/<secret>
+Telegram --> https://alxforbot.online/api/telegram-webhook/update
           --> nginx --> 127.0.0.1:8082 --> контейнер foodbot (порт 5000)
 ```
 
@@ -22,7 +22,11 @@ location /api/telegram-webhook/ {
 ```
 
 > **Важно:** `proxy_pass` без trailing slash — путь сохраняется полностью.
-> Бот получит запрос на `/api/telegram-webhook/<secret>`, а не на `/`.
+> Бот получит запрос на `/api/telegram-webhook/update`, а не на `/`.
+
+> **Секрета в пути нет:** путь печатается в логах nginx и приложения на каждом
+> апдейте. Запрос проверяется по заголовку `X-Telegram-Bot-Api-Secret-Token`,
+> который Telegram шлёт сам; заголовок nginx проксирует без настройки.
 
 Применить:
 ```bash
@@ -84,7 +88,7 @@ docker compose logs -f bot
 Должно быть:
 ```
 Running database migrations...
-Telegram webhook set: https://alxforbot.online/api/telegram-webhook/<secret>
+Telegram webhook set
 ```
 
 ---
@@ -98,7 +102,7 @@ curl -s "https://api.telegram.org/bot<TOKEN>/getWebhookInfo" | python3 -m json.t
 Успешный ответ:
 ```json
 {
-    "url": "https://alxforbot.online/api/telegram-webhook/<secret>",
+    "url": "https://alxforbot.online/api/telegram-webhook/update",
     "has_custom_certificate": false,
     "pending_update_count": 0,
     "last_error_message": ""
