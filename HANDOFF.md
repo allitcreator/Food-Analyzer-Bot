@@ -1,7 +1,7 @@
 # HANDOFF
 
 Статус: открыт
-Обновлено: 2026-09-08 14:42 MSK
+Обновлено: 2026-09-08 14:45 MSK
 Клиент: Claude
 
 ## Цель
@@ -467,6 +467,8 @@
   Правка откачена в `c7f5005`, шорткат пересобран и подписан.
 - После `c7f5005` пользователь подтвердил: фото с подписью работает.
 - Карточка `/quick` — 276 символов, тест держит границу 600.
+- `docs/IOS-SHORTCUTS.md` — 215 строк, ссылка добавлена в `QUICK-ENTRY.md`.
+  Документация, прогонов не требует; прод не затронут.
 - Ветка «🎤 Сказать» не проверялась ни разу за всю сессию.
 - Структура нового шортката проверена распаковкой до подписи: `WFHTTPBodyType`
   = `File`, `WFRequestVariable` ссылается на JPEG, URL собран как
@@ -584,7 +586,7 @@ sudo sed -i '64s/client_max_body_size 8m;/client_max_body_size 2m;/' /etc/nginx/
 Код:
 
 ```
-git revert ae21faa c7f5005 21eeb6f f0b74c3 00b4fcd d711f96 dd93e22 cf502a4 306eaba caba8a8 520395a 0a64489 643f03c ca4ef29 60a3dc0 90cd673
+git revert 8e9e796 ae21faa c7f5005 21eeb6f f0b74c3 00b4fcd d711f96 dd93e22 cf502a4 306eaba caba8a8 520395a 0a64489 643f03c ca4ef29 60a3dc0 90cd673
 ```
 
 Затем на vps4: `cd ~/foodbot && git pull origin main && docker compose up -d --build`.
