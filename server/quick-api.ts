@@ -13,13 +13,14 @@
  * Токен (в отличие от снесённого health-sync) ездит в заголовке, а не в URL:
  * прошлый аудит поймал утечку токена в nginx access-логи.
  */
-import { Router, type Request, type Response, type NextFunction, type RequestHandler } from "express";
+import express, { Router, type Request, type Response, type NextFunction, type RequestHandler } from "express";
 import rateLimit from "express-rate-limit";
 import { storage } from "./storage";
 import { quickSchema, type QuickBody } from "@shared/routes";
 import { getBotInstance, injectUserMessage } from "./bot";
 import { extractBearerToken } from "./lib/quick-auth";
 import { describeQuickRejection, describeAuthRejection } from "./lib/quick-reject-log";
+import { bodyFromBinary } from "./lib/quick-binary";
 import type { User } from "@shared/schema";
 
 /**
@@ -126,12 +127,30 @@ export function createQuickRouter(): Router {
     }),
   );
 
+  // Фото уезжает бинарём, а не строкой base64 в JSON: в шорткате iOS
+  // гигантская строка терялась по дороге, а файл в теле — штатный режим
+  // «Получить содержимое URL». express.json такие типы не трогает, поэтому
+  // парсеры не конфликтуют.
+  router.use(
+    express.raw({
+      type: ["image/jpeg", "image/png", "application/octet-stream"],
+      limit: "6mb",
+    }),
+  );
+
   router.post("/", (req: Request, res: Response) => {
-    const parsed = quickSchema.safeParse(req.body);
+    const raw = Buffer.isBuffer(req.body) ? req.body : null;
+    const parsed = quickSchema.safeParse(
+      raw ? bodyFromBinary(raw, req.query as Record<string, unknown>) : req.body,
+    );
     if (!parsed.success) {
       // Клиент этот ответ не покажет — шорткат тело 4xx проглатывает, поэтому
       // причину дублируем в лог (длины и коды, без содержимого полей).
-      console.warn("[quick] rejected:", describeQuickRejection(req.body, parsed.error.issues));
+      console.warn(
+        "[quick] rejected:",
+        raw ? `binary=${raw.length}` : "json",
+        describeQuickRejection(raw ? bodyFromBinary(raw, req.query as Record<string, unknown>) : req.body, parsed.error.issues),
+      );
       res.status(400).json({ error: "validation_error", details: parsed.error.issues });
       return;
     }

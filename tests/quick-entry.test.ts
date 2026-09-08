@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import { buildSyntheticUpdate } from "../server/lib/synthetic-update";
 import { extractBearerToken } from "../server/lib/quick-auth";
 import { describeQuickRejection, describeAuthRejection } from "../server/lib/quick-reject-log";
+import { bodyFromBinary } from "../server/lib/quick-binary";
 import { quickSchema } from "../shared/routes";
 import { existsSync } from "node:fs";
 import { buildQuickCardText, buildTokenMessage, buildShortcutCaption, shortcutPath, diagShortcutPath, buildDiagText } from "../server/lib/quick-shortcut";
@@ -288,5 +289,43 @@ describe("выдача диагностического шортката", () =>
     assert.match(text, /expl=/);
     // Токен для диагностики не нужен — иначе человек полезет его вставлять.
     assert.match(text, /токен.*не нужен/i);
+  });
+});
+
+/**
+ * Бинарная отправка фото: снимок уезжает телом запроса как файл, без base64.
+ * Так из шортката исчезает единственная гигантская строка — то самое место,
+ * где картинка стабильно терялась. Подпись при этом едет в query, потому что
+ * тело занято файлом.
+ */
+describe("bodyFromBinary", () => {
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+
+  test("буфер превращается в тот же контракт, что и JSON-тело", () => {
+    const body = bodyFromBinary(jpeg, {});
+    assert.equal(body.imageBase64, jpeg.toString("base64"));
+    assert.equal(body.text, undefined);
+    // Результат обязан проходить общую схему — контракт один на оба пути.
+    assert.equal(quickSchema.safeParse(body).success, true);
+  });
+
+  test("подпись приезжает в query", () => {
+    assert.equal(bodyFromBinary(jpeg, { text: "борщ 400 г" }).text, "борщ 400 г");
+  });
+
+  test("повторённый параметр не ломает разбор", () => {
+    // ?text=a&text=b express отдаёт массивом — берём первое непустое.
+    assert.equal(bodyFromBinary(jpeg, { text: ["борщ", "суп"] }).text, "борщ");
+  });
+
+  test("мусор в query игнорируется, фото важнее подписи", () => {
+    const body = bodyFromBinary(jpeg, { text: 42 as unknown as string });
+    assert.equal(body.text, undefined);
+    assert.equal(quickSchema.safeParse(body).success, true);
+  });
+
+  test("пустое тело не выдаётся за картинку", () => {
+    assert.equal(bodyFromBinary(Buffer.alloc(0), {}).imageBase64, undefined);
+    assert.equal(quickSchema.safeParse(bodyFromBinary(Buffer.alloc(0), {})).success, false);
   });
 });

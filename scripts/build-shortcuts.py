@@ -223,6 +223,37 @@ def post(json_items: list[tuple[str, dict]], token_uuid: str, uuid_: str | None 
     return action("is.workflow.actions.downloadurl", params)
 
 
+def url_encode(uuid_: str, input_: dict) -> dict:
+    """Подпись в query нужно закодировать: пробелы и кириллица ломают URL."""
+    return action(
+        "is.workflow.actions.urlencode",
+        {"WFEncodeMode": "Encode", "WFInput": input_, "UUID": uuid_, "CustomOutputName": "Подпись"},
+    )
+
+
+def post_file(file_input: dict, url_value: dict, token_uuid: str) -> dict:
+    """Снимок уходит телом запроса как файл — без base64.
+
+    Тело типа File шлёт байты как есть: из шортката исчезает единственная
+    гигантская строка, на которой всё и ломалось. Подпись в тело уже не
+    положить, поэтому она едет в query — отсюда url_value вместо простого
+    адреса.
+    """
+    return action(
+        "is.workflow.actions.downloadurl",
+        {
+            "WFURL": url_value,
+            "WFHTTPMethod": "POST",
+            "WFHTTPBodyType": "File",
+            "WFRequestVariable": file_input,
+            "ShowHeaders": True,
+            "WFHTTPHeaders": dict_field([
+                ("Authorization", mixed_value("Bearer ", token_uuid, "Токен")),
+            ]),
+        },
+    )
+
+
 def count_chars(uuid_: str, input_: dict, name: str = "Символов") -> dict:
     return action(
         "is.workflow.actions.count",
@@ -244,7 +275,7 @@ def notify(body: str) -> dict:
 def take_photo(uuid_: str) -> dict:
     return action(
         "is.workflow.actions.takephoto",
-        {"WFCameraCaptureShowPreview": True, "UUID": uuid_, "CustomOutputName": "Снимок"},
+        {"UUID": uuid_, "CustomOutputName": "Снимок"},
     )
 
 
@@ -406,12 +437,13 @@ def build_full() -> dict:
         take_photo(photo_uuid),
         resize(1280, resized_uuid, attachment_value(photo_uuid, "Снимок")),
         to_jpeg(jpeg_uuid, attachment_value(resized_uuid, "Уменьшенное")),
-        base64_encode(b64_uuid, attachment_value(jpeg_uuid, "JPEG")),
         ask("Уточнить? Можно оставить пустым", caption_uuid),
-        post([
-            ("imageBase64", variable_value(b64_uuid, "Base64")),
-            ("text", variable_value(caption_uuid, "Ввод")),
-        ], token_uuid),
+        url_encode(b64_uuid, attachment_value(caption_uuid, "Ввод")),
+        post_file(
+            attachment_value(jpeg_uuid, "JPEG"),
+            mixed_text([ENDPOINT + "?text=", (b64_uuid, "Подпись")]),
+            token_uuid,
+        ),
         notify("Отправил на разбор"),
 
         menu_end(group),
