@@ -16,7 +16,19 @@ import { describeError } from "./lib/safe-log";
 import { publicUser } from "./lib/public-user";
 import { mealTypeByTime, sameTitle } from "./lib/favorites";
 import { dayBoundsUtc, isValidDayKey, resolveTz, todayKey, wallClockDate } from "./lib/tz";
-import { analyzeFoodImage as defaultAnalyzeImage, analyzeFoodText as defaultAnalyzeText } from "./openai";
+import {
+  analyzeFoodImage as defaultAnalyzeImage,
+  analyzeFoodText as defaultAnalyzeText,
+  detectBarcode as defaultDetectBarcode,
+  transcribeVoice,
+  type FoodItem,
+} from "./openai";
+import { decodeBarcodeFromImage } from "./barcode";
+import { lookupBarcodeProduct } from "./lib/open-food-facts";
+import { findBarcode, resolveBarcodeProduct, visionHintForMiss } from "./lib/barcode-pipeline";
+import { prepareVoice } from "./lib/voice-transcode";
+import type { AiActionKind, AiQuota } from "./lib/ai-quota";
+import { getSharedAiQuota, quotaTz } from "./lib/ai-quota-instance";
 import type { User, FoodLog, FavoriteItem, VisibleFavorite } from "@shared/schema";
 import {
   dayQuerySchema,
@@ -29,8 +41,11 @@ import {
   createFavoriteSchema,
   updateFavoriteSchema,
   analyzeSchema,
+  transcribeSchema,
   createLogsSchema,
   idParam,
+  mealTypeEnum,
+  type AnalyzedItemInput,
 } from "@shared/routes";
 
 // ─── Dependencies ────────────────────────────────────────────────────────────
@@ -61,7 +76,15 @@ export type AppApiStorage = Pick<
   | "deleteFavorite"
   | "updateUser"
   | "calculateAndSetGoals"
+  | "getBarcodeProduct"
+  | "upsertBarcodeProduct"
 >;
+
+/**
+ * Результат расшифровки голоса: текст (null/пустой — не распознано), отказ
+ * по длительности или «занято» (все слоты перекодирования заняты).
+ */
+export type TranscribeResult = { text: string | null } | { tooLong: true } | { busy: true };
 
 /**
  * Зависимости роутера. В проде все по умолчанию (Postgres, боевой
@@ -73,7 +96,28 @@ export type AppApiDeps = {
   auth: RequestHandler;
   analyzeFoodImage: typeof defaultAnalyzeImage;
   analyzeFoodText: typeof defaultAnalyzeText;
+  /** zxing по пикселям фото. */
+  decodeBarcode: (image: Buffer) => Promise<string | null>;
+  /** AI-чтение штрихкода (только режим barcode). */
+  detectBarcodeAi: (imageBase64: string) => Promise<string | null>;
+  /** Open Food Facts. */
+  lookupBarcodeOff: typeof lookupBarcodeProduct;
+  /** Голос → текст: по умолчанию ffmpeg → ogg/opus → transcribeVoice. */
+  transcribeAudio: (audio: Buffer, mimeType: string) => Promise<TranscribeResult>;
+  /** Дневная AI-квота: по умолчанию общая с ботом (lib/ai-quota-instance.ts). */
+  aiQuota: Pick<AiQuota, "tryConsume">;
 };
+
+/** Боевая расшифровка: перекодирование, проверка длительности, LLM. */
+async function defaultTranscribeAudio(audio: Buffer, mimeType: string): Promise<TranscribeResult> {
+  const prepared = await prepareVoice(audio, mimeType);
+  if (!prepared.ok) {
+    if (prepared.reason === "too_long") return { tooLong: true };
+    if (prepared.reason === "busy") return { busy: true };
+    return { text: null };
+  }
+  return { text: await transcribeVoice(prepared.audio, prepared.durationSec ?? undefined) };
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -133,6 +177,37 @@ function mealBoundaries(user: User) {
     breakfastEnd: user.mealBreakfastEnd ?? "12:30",
     lunchEnd: user.mealLunchEnd ?? "16:30",
   };
+}
+
+/**
+ * Позиция для ответа /analyze — ровно поля `analyzedItemSchema` (она .strict(),
+ * клиент шлёт эти позиции в POST /logs как есть). Лишнее (barcode, foundInDb,
+ * что ещё добавила модель) отбрасываем; неизвестный mealType → `fallbackMeal`.
+ */
+function toAnalyzedItem(it: FoodItem, fallbackMeal: AnalyzedItemInput["mealType"]): AnalyzedItemInput {
+  const meal = mealTypeEnum.safeParse(it.mealType);
+  const out: AnalyzedItemInput = {
+    foodName: it.foodName,
+    calories: it.calories,
+    protein: it.protein,
+    fat: it.fat,
+    carbs: it.carbs,
+    weight: it.weight,
+    mealType: meal.success ? meal.data : fallbackMeal,
+  };
+  if (it.hydrating !== undefined) out.hydrating = it.hydrating;
+  // Модель бывает неаккуратна: оценка «3.6», совет длиннее лимита схемы.
+  if (it.foodScore !== undefined) {
+    out.foodScore = it.foodScore === null ? null : Math.min(10, Math.max(1, Math.round(it.foodScore)));
+  }
+  if (it.nutritionAdvice !== undefined) {
+    out.nutritionAdvice = it.nutritionAdvice === null ? null : it.nutritionAdvice.slice(0, 500);
+  }
+  if (it.fiber !== undefined) out.fiber = it.fiber;
+  if (it.sugar !== undefined) out.sugar = it.sugar;
+  if (it.sodium !== undefined) out.sodium = it.sodium;
+  if (it.saturatedFat !== undefined) out.saturatedFat = it.saturatedFat;
+  return out;
 }
 
 /** The full day payload (same shape GET /day returns) — reused after writes. */
@@ -213,8 +288,26 @@ export function createAppApiRouter(overrides: Partial<AppApiDeps> = {}): Router 
     auth = telegramAuth,
     analyzeFoodImage = defaultAnalyzeImage,
     analyzeFoodText = defaultAnalyzeText,
+    decodeBarcode = decodeBarcodeFromImage,
+    detectBarcodeAi = defaultDetectBarcode,
+    lookupBarcodeOff = lookupBarcodeProduct,
+    transcribeAudio = defaultTranscribeAudio,
+    aiQuota = getSharedAiQuota(),
   } = overrides;
   const router = Router();
+
+  /**
+   * Списать одно AI-действие из дневной квоты (общей с ботом). Отказ → 429
+   * `quota_exceeded`, возвращает false. Вызывать после валидации тела и до
+   * AI-вызова. Админу о Mini App-отказах не пишем — бота здесь нет.
+   */
+  function consumeAiQuota(user: User, kind: AiActionKind, res: Response): boolean {
+    const check = aiQuota.tryConsume(String(user.id), quotaTz(user), kind);
+    if (check.allowed) return true;
+    console.warn(`[ai-quota] limit reached (miniapp): userId=${user.id} reason=${check.reason}`);
+    res.status(429).json({ error: "quota_exceeded" });
+    return false;
+  }
 
   // Auth first — so the rate-limit key can use the resolved user id.
   router.use(auth);
@@ -245,8 +338,12 @@ export function createAppApiRouter(overrides: Partial<AppApiDeps> = {}): Router 
     message: { error: "rate_limited" },
   });
 
-  // POST /api/app/analyze { text? | imageBase64? } — распознать еду, ничего не
-  // пишем. Ровно одно из полей (см. analyzeSchema). 422, если AI не распознал.
+  // POST /api/app/analyze { text? | imageBase64?, mode? } — распознать еду,
+  // ничего не пишем. Ровно одно из text/imageBase64 (см. analyzeSchema).
+  // Фото сначала проверяем на штрихкод (lib/barcode-pipeline): в режиме photo —
+  // только zxing и только при включённой настройке, в режиме barcode — zxing,
+  // затем AI. Продукт из кэша/OFF → source "barcode"; иначе vision (с
+  // подсказкой, если код нашёлся). 422: unrecognized | no_barcode.
   router.post(
     "/analyze",
     analyzeLimiter,
@@ -254,18 +351,82 @@ export function createAppApiRouter(overrides: Partial<AppApiDeps> = {}): Router 
       const user = currentUser(req);
       const tz = userTz(user);
       const body = analyzeSchema.parse(req.body);
+      // Фото (в том числе режим barcode) — из фото-лимита, текст — из общего.
+      if (!consumeAiQuota(user, body.imageBase64 ? "photo" : "request", res)) return;
 
       const now = userNow(tz);
       const bounds = mealBoundaries(user);
-      const items = body.imageBase64
-        ? await analyzeFoodImage(body.imageBase64, now, bounds)
-        : await analyzeFoodText(body.text as string, now, bounds);
+      const mealByTime = mealTypeByTime(now, bounds);
+
+      let items: FoodItem[] | null;
+      if (body.imageBase64) {
+        const mode = body.mode ?? "photo";
+        let hint: { productName?: string; barcode: string } | undefined;
+        if (mode === "barcode" || (user.barcodeScanEnabled ?? true)) {
+          const code = await findBarcode(
+            Buffer.from(body.imageBase64, "base64"),
+            body.imageBase64,
+            { useAi: mode === "barcode" },
+            { decode: decodeBarcode, detectAi: detectBarcodeAi },
+          );
+          if (!code && mode === "barcode") {
+            res.status(422).json({ error: "no_barcode" });
+            return;
+          }
+          if (code) {
+            const product = await resolveBarcodeProduct(code, {
+              lookupOff: lookupBarcodeOff,
+              getCached: (c) => storage.getBarcodeProduct(c),
+              upsertCached: (rec) => storage.upsertBarcodeProduct(rec),
+            });
+            if (product.found) {
+              // OFF и кэш ставят "snack" — приём пищи считаем по времени, как у repeat.
+              const item = toAnalyzedItem({ ...product.item, mealType: mealByTime }, mealByTime);
+              res.json({ items: [item], source: "barcode" });
+              return;
+            }
+            hint = visionHintForMiss(code, product);
+          }
+        }
+        items = await analyzeFoodImage(body.imageBase64, now, bounds, hint);
+      } else {
+        items = await analyzeFoodText(body.text as string, now, bounds);
+      }
 
       if (!items || items.length === 0) {
         res.status(422).json({ error: "unrecognized" });
         return;
       }
-      res.json({ items });
+      res.json({ items: items.map((it) => toAnalyzedItem(it, mealByTime)), source: "vision" });
+    }),
+  );
+
+  // POST /api/app/transcribe { audioBase64, mimeType } — голос → текст, ничего
+  // не пишем. Тот же AI-лимит, что у /analyze, и дневная квота (request).
+  // 422: unrecognized | too_long; 503: busy — все слоты ffmpeg заняты.
+  // Ни текст расшифровки, ни аудио в лог не идут.
+  router.post(
+    "/transcribe",
+    analyzeLimiter,
+    asyncHandler(async (req, res) => {
+      const user = currentUser(req);
+      const body = transcribeSchema.parse(req.body);
+      if (!consumeAiQuota(user, "request", res)) return;
+      const result = await transcribeAudio(Buffer.from(body.audioBase64, "base64"), body.mimeType);
+      if ("busy" in result) {
+        res.status(503).json({ error: "busy" });
+        return;
+      }
+      if ("tooLong" in result) {
+        res.status(422).json({ error: "too_long" });
+        return;
+      }
+      const text = result.text?.trim();
+      if (!text) {
+        res.status(422).json({ error: "unrecognized" });
+        return;
+      }
+      res.json({ text });
     }),
   );
 
@@ -339,13 +500,19 @@ export function createAppApiRouter(overrides: Partial<AppApiDeps> = {}): Router 
     }),
   );
 
-  // GET /api/app/stats?range=week|month
+  // GET /api/app/stats?range=week|month&end=YYYY-MM-DD — end только для week:
+  // неделя кончается этим днём (не позже сегодняшнего), по умолчанию сегодня.
   router.get(
     "/stats",
     asyncHandler(async (req, res) => {
       const user = currentUser(req);
       const tz = userTz(user);
-      const { range } = statsQuerySchema.parse(req.query);
+      const { range, end } = statsQuerySchema.parse(req.query);
+      // Несуществующая дата или будущее по часам пользователя — 400.
+      if (end !== undefined && (!isValidDayKey(end) || end > todayKey(new Date(), tz))) {
+        res.status(400).json({ error: "validation_error" });
+        return;
+      }
 
       if (range === "month") {
         const [months, streak] = await Promise.all([
@@ -355,7 +522,7 @@ export function createAppApiRouter(overrides: Partial<AppApiDeps> = {}): Router 
         res.json({ range, streak, weeks: months });
       } else {
         const [days, streak] = await Promise.all([
-          storage.getWeeklyFullStats(user.id, tz),
+          storage.getWeeklyFullStats(user.id, tz, end),
           storage.getStreak(user.id, tz),
         ]);
         res.json({ range, streak, days });

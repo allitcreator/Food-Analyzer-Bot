@@ -9,6 +9,11 @@ export default {
         lg: ".5625rem", /* 9px */
         md: ".375rem", /* 6px */
         sm: ".1875rem", /* 3px */
+        card: "26px",
+      },
+      boxShadow: {
+        // Мягкая тёплая тень карточек; в тёмной теме --shadow = none.
+        soft: "var(--shadow)",
       },
       colors: {
         // Flat / base colors (regular buttons)
@@ -52,34 +57,38 @@ export default {
           border: "var(--destructive-border)",
         },
         ring: "hsl(var(--ring) / <alpha-value>)",
-        chart: {
-          "1": "hsl(var(--chart-1) / <alpha-value>)",
-          "2": "hsl(var(--chart-2) / <alpha-value>)",
-          "3": "hsl(var(--chart-3) / <alpha-value>)",
-          "4": "hsl(var(--chart-4) / <alpha-value>)",
-          "5": "hsl(var(--chart-5) / <alpha-value>)",
+        // Тёплая палитра (см. index.css): плашки БЖУ, вода, столбики недели.
+        "accent-soft": "hsl(var(--accent-soft) / <alpha-value>)",
+        fill: "hsl(var(--fill) / <alpha-value>)",
+        ok: {
+          DEFAULT: "hsl(var(--ok) / <alpha-value>)",
+          soft: "hsl(var(--ok-soft) / <alpha-value>)",
         },
-        sidebar: {
-          ring: "hsl(var(--sidebar-ring) / <alpha-value>)",
-          DEFAULT: "hsl(var(--sidebar) / <alpha-value>)",
-          foreground: "hsl(var(--sidebar-foreground) / <alpha-value>)",
-          border: "hsl(var(--sidebar-border) / <alpha-value>)",
+        bad: {
+          DEFAULT: "hsl(var(--destructive) / <alpha-value>)",
+          soft: "hsl(var(--bad-soft) / <alpha-value>)",
         },
-        "sidebar-primary": {
-          DEFAULT: "hsl(var(--sidebar-primary) / <alpha-value>)",
-          foreground: "hsl(var(--sidebar-primary-foreground) / <alpha-value>)",
-          border: "var(--sidebar-primary-border)",
+        prot: {
+          bg: "hsl(var(--prot-bg) / <alpha-value>)",
+          fg: "hsl(var(--prot-fg) / <alpha-value>)",
         },
-        "sidebar-accent": {
-          DEFAULT: "hsl(var(--sidebar-accent) / <alpha-value>)",
-          foreground: "hsl(var(--sidebar-accent-foreground) / <alpha-value>)",
-          border: "var(--sidebar-accent-border)"
+        fat: {
+          bg: "hsl(var(--fat-bg) / <alpha-value>)",
+          fg: "hsl(var(--fat-fg) / <alpha-value>)",
         },
-        status: {
-          online: "rgb(34 197 94)",
-          away: "rgb(245 158 11)",
-          busy: "rgb(239 68 68)",
-          offline: "rgb(156 163 175)",
+        carb: {
+          bg: "hsl(var(--carb-bg) / <alpha-value>)",
+          fg: "hsl(var(--carb-fg) / <alpha-value>)",
+        },
+        water: {
+          DEFAULT: "hsl(var(--water) / <alpha-value>)",
+          soft: "hsl(var(--water-soft) / <alpha-value>)",
+        },
+        wk: {
+          ok: "hsl(var(--wk-ok) / <alpha-value>)",
+          near: "hsl(var(--wk-near) / <alpha-value>)",
+          over: "hsl(var(--wk-over) / <alpha-value>)",
+          today: "hsl(var(--wk-today) / <alpha-value>)",
         },
       },
       fontFamily: {

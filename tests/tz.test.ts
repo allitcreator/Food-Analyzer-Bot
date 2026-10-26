@@ -24,6 +24,7 @@ import {
 } from "../server/lib/tz";
 import {
   lastNDayKeys,
+  dayKeysEndingAt,
   dayLabelRu,
   monthlyWeekDefs,
   bucketByDayKey,
@@ -295,6 +296,12 @@ describe("stats-days", () => {
     const now = iso("2026-10-26T04:30:00Z"); // 00:30 NY 26.10, 07:30 MSK
     assert.deepEqual(lastNDayKeys(now, "America/New_York", 2), ["2026-10-25", "2026-10-26"]);
     assert.deepEqual(lastNDayKeys(iso("2026-10-26T03:30:00Z"), "America/New_York", 2), ["2026-10-24", "2026-10-25"]);
+  });
+  test("dayKeysEndingAt: n дней по возрастанию, последний — заданный, через границу месяца", () => {
+    assert.deepEqual(dayKeysEndingAt("2026-11-02", 7), [
+      "2026-10-27", "2026-10-28", "2026-10-29", "2026-10-30", "2026-10-31", "2026-11-01", "2026-11-02",
+    ]);
+    assert.deepEqual(dayKeysEndingAt("2026-03-01", 2), ["2026-02-28", "2026-03-01"]);
   });
   test("monthlyWeekDefs: 4 недели по 7 дней, последняя кончается сегодня", () => {
     const defs = monthlyWeekDefs(iso("2026-10-25T21:30:00Z"), "Europe/Moscow");

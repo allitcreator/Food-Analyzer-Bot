@@ -29,3 +29,27 @@ export function todayInTimeZone(tz: string | null | undefined, now: Date = new D
   }
   return toISO(now);
 }
+
+function minutesInZone(now: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+  // Часть старых движков отдаёт полночь как "24" даже при h23.
+  return (get("hour") % 24) * 60 + get("minute");
+}
+
+/** Минуты от полуночи в таймзоне `tz` (пустая или неизвестная → Europe/Moscow). */
+export function minutesInTimeZone(tz: string | null | undefined, now: Date = new Date()): number {
+  for (const zone of [tz || DEFAULT_TIMEZONE, DEFAULT_TIMEZONE]) {
+    try {
+      return minutesInZone(now, zone);
+    } catch {
+      /* неизвестная зона — пробуем следующий вариант */
+    }
+  }
+  return now.getHours() * 60 + now.getMinutes();
+}

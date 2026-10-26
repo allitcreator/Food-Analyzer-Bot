@@ -40,6 +40,30 @@ export type AnalyzedItem = AnalyzedItemInput;
 /** Ответ POST /analyze — список распознанных позиций. */
 export interface AnalyzeResponse {
   items: AnalyzedItem[];
+  /** "barcode" — продукт найден по штрихкоду на фото, "vision" — распознан AI. */
+  source?: "barcode" | "vision";
+}
+
+/**
+ * Тело POST /analyze: текст ИЛИ сжатое фото. `mode: "barcode"` — на фото ищем
+ * только штрихкод; не нашли — 422 { error: "no_barcode" }.
+ */
+export type AnalyzeBody =
+  | { text: string }
+  | { imageBase64: string; mode?: "photo" | "barcode" };
+
+/** Тело POST /transcribe: голосовая запись в base64 без data:-префикса. */
+export interface TranscribeBody {
+  audioBase64: string;
+  mimeType: string;
+}
+
+/**
+ * Ответ POST /transcribe — распознанный текст. Ошибки: 422 "unrecognized"
+ * (речь не разобрана), 422 "too_long" (запись длиннее 60 с).
+ */
+export interface TranscribeResponse {
+  text: string;
 }
 
 export type MealType = "breakfast" | "lunch" | "dinner" | "snack";

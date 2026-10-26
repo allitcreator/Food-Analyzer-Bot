@@ -7,20 +7,20 @@ interface RingProps {
   size?: number;
   stroke?: number;
   className?: string;
-  colorVar?: string; // CSS var name, e.g. "--chart-1"
+  colorVar?: string; // CSS var name, e.g. "--primary"
+  trackVar?: string;
   children?: React.ReactNode;
-  track?: boolean;
 }
 
-/** SVG progress ring with an optional centered label. */
+/** SVG-кольцо прогресса с подписью по центру (необязательной). */
 export function Ring({
   progress,
-  size = 200,
-  stroke = 16,
+  size = 104,
+  stroke = 12,
   className,
   colorVar = "--primary",
+  trackVar = "--accent-soft",
   children,
-  track = true,
 }: RingProps) {
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
@@ -28,62 +28,36 @@ export function Ring({
   const offset = c * (1 - clamped);
 
   return (
-    <div className={cn("relative inline-flex items-center justify-center", className)}>
-      <svg width={size} height={size} className="-rotate-90">
-        {track && (
-          <circle
-            cx={size / 2}
-            cy={size / 2}
-            r={r}
-            fill="none"
-            stroke="hsl(var(--muted))"
-            strokeWidth={stroke}
-          />
-        )}
+    <div className={cn("relative inline-flex shrink-0 items-center justify-center", className)}>
+      <svg width={size} height={size} className="-rotate-90" aria-hidden>
         <circle
           cx={size / 2}
           cy={size / 2}
           r={r}
           fill="none"
-          stroke={`hsl(var(${colorVar}))`}
+          stroke={`hsl(var(${trackVar}))`}
           strokeWidth={stroke}
-          strokeLinecap="round"
-          strokeDasharray={c}
-          strokeDashoffset={offset}
-          style={{ transition: "stroke-dashoffset 0.6s ease" }}
         />
+        {clamped > 0 && (
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={r}
+            fill="none"
+            stroke={`hsl(var(${colorVar}))`}
+            strokeWidth={stroke}
+            strokeLinecap="round"
+            strokeDasharray={c}
+            strokeDashoffset={offset}
+            style={{ transition: "stroke-dashoffset 0.6s ease" }}
+          />
+        )}
       </svg>
       {children && (
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
           {children}
         </div>
       )}
-    </div>
-  );
-}
-
-interface MacroRingProps {
-  label: string;
-  value: number;
-  goal: number | null;
-  colorVar: string;
-  unit?: string;
-}
-
-/** Small labelled macro ring (protein / fat / carbs). */
-export function MacroRing({ label, value, goal, colorVar, unit = "г" }: MacroRingProps) {
-  const progress = goal && goal > 0 ? value / goal : 0;
-  return (
-    <div className="flex flex-col items-center gap-1">
-      <Ring progress={progress} size={78} stroke={8} colorVar={colorVar}>
-        <span className="text-base font-semibold leading-none">{value}</span>
-        {goal ? (
-          <span className="text-[10px] text-muted-foreground">/{goal}{unit}</span>
-        ) : (
-          <span className="text-[10px] text-muted-foreground">{unit}</span>
-        )}
-      </Ring>
-      <span className="text-xs text-muted-foreground">{label}</span>
     </div>
   );
 }

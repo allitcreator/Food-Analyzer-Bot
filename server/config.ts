@@ -26,8 +26,9 @@ export const config = {
   nodeEnv: process.env.NODE_ENV || "development",
   tz: process.env.TZ || "Europe/Moscow",
 
-  // Дневные лимиты AI в Telegram-боте на пользователя (см. server/lib/ai-quota.ts).
-  // Mini App и /api/quick ограничены отдельно, в своих роутерах.
+  // Дневные лимиты AI на пользователя (см. server/lib/ai-quota.ts), счётчик
+  // общий у бота и Mini App (lib/ai-quota-instance.ts). /api/quick ограничен
+  // отдельно, в своём роутере.
   aiDailyLimit:      parsePositiveInt(process.env.AI_DAILY_LIMIT, 150),
   aiDailyPhotoLimit: parsePositiveInt(process.env.AI_DAILY_PHOTO_LIMIT, 40),
   voiceMaxSeconds:   parsePositiveInt(process.env.VOICE_MAX_SECONDS, 300),

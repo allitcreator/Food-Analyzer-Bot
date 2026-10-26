@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mini App — 5 макетов экрана «Сегодня»</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    background: #e9ebf0; color: #111; padding: 32px 24px 64px;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1 { font-size: 26px; margin-bottom: 6px; }
+  .lead { color: #555; max-width: 900px; margin-bottom: 28px; font-size: 15px; line-height: 1.5; }
+  .grid { display: flex; flex-wrap: wrap; gap: 40px 32px; }
+  .variant { width: 375px; }
+  .variant h2 { font-size: 18px; margin-bottom: 4px; }
+  .variant .ref { font-size: 13px; color: #666; margin-bottom: 4px; }
+  .variant ul { font-size: 13px; color: #333; margin: 8px 0 14px 18px; line-height: 1.45; }
+  .phone {
+    width: 375px; height: 780px; border-radius: 44px; overflow: hidden; position: relative;
+    box-shadow: 0 0 0 10px #1b1b1d, 0 20px 50px rgba(0,0,0,.25);
+  }
+  .scroll { height: 100%; overflow-y: auto; padding-bottom: 96px; scrollbar-width: none; }
+  .scroll::-webkit-scrollbar { display: none; }
+  .tg-head { height: 52px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; font-size: 15px; font-weight: 600; }
+  .tg-head .x { opacity: .6; font-weight: 400; }
+  .tabbar { position: absolute; left: 0; right: 0; bottom: 0; display: flex; justify-content: space-around; padding: 8px 0 24px; font-size: 10px; font-weight: 500; }
+  .tabbar div { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .tabbar svg { width: 22px; height: 22px; }
+  .num { font-variant-numeric: tabular-nums; }
+  svg.ico { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ============ 1. Native minimal ============ */
+  .v1 { background: #f2f2f7; color: #000; }
+  .v1 .tg-head { background: #f2f2f7; }
+  .v1 .title { font-size: 32px; font-weight: 700; padding: 4px 16px 2px; letter-spacing: -.5px; }
+  .v1 .date { padding: 0 16px 14px; color: #8e8e93; font-size: 14px; }
+  .v1 .group { background: #fff; border-radius: 14px; margin: 0 16px 22px; overflow: hidden; }
+  .v1 .hero { padding: 18px 16px 16px; }
+  .v1 .hero .label { color: #8e8e93; font-size: 13px; font-weight: 500; }
+  .v1 .hero .big { font-size: 52px; font-weight: 700; letter-spacing: -1.5px; line-height: 1.05; }
+  .v1 .hero .big small { font-size: 17px; color: #8e8e93; font-weight: 500; letter-spacing: 0; }
+  .v1 .bar { height: 8px; background: #e5e5ea; border-radius: 4px; overflow: hidden; margin: 12px 0 8px; display: flex; }
+  .v1 .sub { display: flex; justify-content: space-between; font-size: 13px; color: #8e8e93; }
+  .v1 .macros { display: grid; grid-template-columns: repeat(3, 1fr); border-top: .5px solid #e5e5ea; }
+  .v1 .macro { padding: 12px 16px; }
+  .v1 .macro + .macro { border-left: .5px solid #e5e5ea; }
+  .v1 .macro .n { font-size: 17px; font-weight: 600; }
+  .v1 .macro .n span { font-size: 12px; color: #8e8e93; font-weight: 400; }
+  .v1 .macro .l { font-size: 12px; color: #8e8e93; margin-bottom: 6px; }
+  .v1 .mini { height: 4px; border-radius: 2px; background: #e5e5ea; margin-top: 6px; overflow: hidden; }
+  .v1 .mini i { display: block; height: 100%; border-radius: 2px; }
+  .v1 .sec { padding: 0 32px 6px; font-size: 13px; color: #8e8e93; text-transform: uppercase; display: flex; justify-content: space-between; }
+  .v1 .row { display: flex; align-items: center; gap: 12px; padding: 11px 16px; position: relative; }
+  .v1 .row + .row::before { content: ""; position: absolute; top: 0; left: 16px; right: 0; border-top: .5px solid #e5e5ea; }
+  .v1 .row .t { flex: 1; min-width: 0; }
+  .v1 .row .t b { font-weight: 400; font-size: 16px; display: block; }
+  .v1 .row .t span { font-size: 13px; color: #8e8e93; }
+  .v1 .row .k { font-size: 15px; color: #8e8e93; }
+  .v1 .chips { display: flex; gap: 8px; padding: 0 16px 22px; overflow-x: auto; }
+  .v1 .chip { flex-shrink: 0; background: #fff; border-radius: 18px; padding: 8px 14px; font-size: 14px; }
+  .v1 .chip::before { content: "+ "; color: #007aff; font-weight: 600; }
+  .v1 .water { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+  .v1 .water .t { flex: 1; font-size: 16px; }
+  .v1 .water .t span { display: block; font-size: 13px; color: #8e8e93; }
+  .v1 .pill { background: #e9f2ff; color: #007aff; border-radius: 16px; padding: 6px 12px; font-size: 14px; font-weight: 600; }
+  .v1 .fab { position: absolute; right: 18px; bottom: 92px; width: 56px; height: 56px; border-radius: 28px; background: #007aff; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 30px; font-weight: 300; box-shadow: 0 6px 18px rgba(0,122,255,.4); }
+  .v1 .tabbar { background: rgba(249,249,249,.94); border-top: .5px solid #d1d1d6; color: #8e8e93; }
+  .v1 .tabbar .on { color: #007aff; }
+
+  /* ============ 2. Gauge hero (Yazio) ============ */
+  .v2 { background: #f4f5fa; color: #1d1d2c; }
+  .v2 .heroWrap { background: linear-gradient(160deg, #5b5bf0 0%, #8a5cf6 60%, #b65cf0 100%); color: #fff; padding-bottom: 26px; border-radius: 0 0 28px 28px; }
+  .v2 .tg-head { color: #fff; }
+  .v2 .days { display: flex; justify-content: space-between; padding: 4px 18px 10px; }
+  .v2 .day { width: 38px; text-align: center; font-size: 11px; opacity: .75; padding: 6px 0; border-radius: 12px; }
+  .v2 .day b { display: block; font-size: 15px; margin-top: 2px; }
+  .v2 .day.on { background: rgba(255,255,255,.22); opacity: 1; }
+  .v2 .gaugeRow { display: flex; align-items: center; justify-content: space-between; padding: 0 22px; }
+  .v2 .side { text-align: center; width: 70px; }
+  .v2 .side b { font-size: 20px; display: block; }
+  .v2 .side span { font-size: 12px; opacity: .8; }
+  .v2 .gauge { position: relative; width: 190px; height: 120px; }
+  .v2 .gauge .c { position: absolute; left: 0; right: 0; top: 46px; text-align: center; }
+  .v2 .gauge .c b { font-size: 38px; letter-spacing: -1px; display: block; line-height: 1; }
+  .v2 .gauge .c span { font-size: 12px; opacity: .85; }
+  .v2 .mrow { display: grid; grid-template-columns: repeat(3,1fr); gap: 18px; padding: 16px 24px 0; }
+  .v2 .m span { font-size: 12px; opacity: .85; }
+  .v2 .m .b { height: 5px; border-radius: 3px; background: rgba(255,255,255,.3); margin: 6px 0 4px; overflow: hidden; }
+  .v2 .m .b i { display: block; height: 100%; background: #fff; border-radius: 3px; }
+  .v2 .m small { font-size: 12px; }
+  .v2 h3 { font-size: 18px; padding: 22px 18px 10px; }
+  .v2 .meal { background: #fff; border-radius: 20px; margin: 0 16px 10px; padding: 14px; display: flex; align-items: center; gap: 12px; box-shadow: 0 2px 10px rgba(40,40,90,.05); }
+  .v2 .meal .em { width: 46px; height: 46px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+  .v2 .meal .t { flex: 1; min-width: 0; }
+  .v2 .meal .t b { font-size: 16px; display: block; }
+  .v2 .meal .t span { font-size: 13px; color: #8a8aa0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+  .v2 .meal .add { width: 36px; height: 36px; border-radius: 18px; background: #6c5cf3; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 22px; }
+  .v2 .meal .add.ghost { background: #efedff; color: #6c5cf3; }
+  .v2 .waterCard { background: #fff; border-radius: 20px; margin: 0 16px; padding: 14px; box-shadow: 0 2px 10px rgba(40,40,90,.05); }
+  .v2 .glasses { display: flex; justify-content: space-between; margin-top: 10px; }
+  .v2 .glass { width: 32px; height: 40px; border-radius: 4px 4px 10px 10px; border: 2px solid #c9d8ff; position: relative; overflow: hidden; }
+  .v2 .glass.f::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 75%; background: #6ea0ff; }
+  .v2 .glass.p { border-style: dashed; display: flex; align-items: center; justify-content: center; color: #6ea0ff; font-weight: 700; }
+  .v2 .tabbar { background: #fff; color: #a0a0b4; box-shadow: 0 -1px 0 #ececf3; }
+  .v2 .tabbar .on { color: #6c5cf3; }
+
+  /* ============ 3. Rings + bento (Apple Fitness) ============ */
+  .v3 { background: #000; color: #fff; }
+  .v3 .title { font-size: 30px; font-weight: 700; padding: 0 16px; letter-spacing: -.4px; }
+  .v3 .date { padding: 2px 16px 14px; color: #8d8d93; font-size: 14px; }
+  .v3 .tile { background: #1c1c1e; border-radius: 22px; padding: 16px; }
+  .v3 .hero { margin: 0 16px 12px; display: flex; align-items: center; gap: 18px; }
+  .v3 .legend div { margin-bottom: 10px; }
+  .v3 .legend span { font-size: 13px; font-weight: 600; }
+  .v3 .legend b { display: block; font-size: 22px; font-weight: 600; }
+  .v3 .legend b small { font-size: 14px; color: #8d8d93; font-weight: 500; }
+  .v3 .bento { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 16px 12px; }
+  .v3 .tile h4 { font-size: 13px; color: #8d8d93; font-weight: 600; display: flex; gap: 6px; align-items: center; }
+  .v3 .tile .v { font-size: 26px; font-weight: 600; margin-top: 8px; }
+  .v3 .tile .v small { font-size: 13px; color: #8d8d93; font-weight: 500; }
+  .v3 .wbtn { display: flex; gap: 6px; margin-top: 10px; }
+  .v3 .wbtn div { flex: 1; background: #0a3a5c; color: #5ac8fa; text-align: center; border-radius: 10px; padding: 7px 0; font-size: 13px; font-weight: 600; }
+  .v3 .spark { display: flex; align-items: flex-end; gap: 4px; height: 40px; margin-top: 10px; }
+  .v3 .spark i { flex: 1; background: #3a3a3c; border-radius: 3px; }
+  .v3 .spark i.on { background: #ff9f0a; }
+  .v3 .wide { margin: 0 16px 12px; }
+  .v3 .fav { display: flex; gap: 8px; overflow-x: auto; margin-top: 10px; }
+  .v3 .fav div { flex-shrink: 0; background: #2c2c2e; padding: 8px 12px; border-radius: 12px; font-size: 14px; }
+  .v3 .fav div small { display: block; color: #8d8d93; font-size: 11px; }
+  .v3 .mealHead { display: flex; justify-content: space-between; font-size: 15px; font-weight: 600; margin: 14px 0 6px; }
+  .v3 .mealHead:first-of-type { margin-top: 10px; }
+  .v3 .mealHead span { color: #8d8d93; font-weight: 500; font-size: 13px; }
+  .v3 .item { display: flex; justify-content: space-between; font-size: 14px; padding: 6px 0; color: #d1d1d6; }
+  .v3 .item span { color: #8d8d93; }
+  .v3 .addbar { position: absolute; left: 16px; right: 16px; bottom: 84px; background: #ff375f; color: #fff; text-align: center; padding: 15px; border-radius: 16px; font-size: 16px; font-weight: 600; }
+  .v3 .tabbar { background: rgba(22,22,22,.94); color: #8d8d93; border-top: .5px solid #2c2c2e; }
+  .v3 .tabbar .on { color: #ff375f; }
+  .v3 .scroll { padding-bottom: 150px; }
+
+  /* ============ 4. Data-dense (MacroFactor/Cronometer) ============ */
+  .v4 { background: #fbfbf9; color: #18181b; }
+  .v4 .top { display: flex; justify-content: space-between; align-items: baseline; padding: 4px 16px 12px; }
+  .v4 .top b { font-size: 22px; letter-spacing: -.3px; }
+  .v4 .top span { font-size: 13px; color: #71717a; }
+  .v4 .week { display: grid; grid-template-columns: repeat(7,1fr); gap: 6px; padding: 0 16px 14px; }
+  .v4 .wd { text-align: center; font-size: 11px; color: #71717a; }
+  .v4 .wd i { display: block; height: 44px; border-radius: 6px; background: #ececea; margin-bottom: 4px; position: relative; overflow: hidden; }
+  .v4 .wd i::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: var(--h); background: var(--c, #10b981); }
+  .v4 .wd.on { color: #18181b; font-weight: 700; }
+  .v4 .wd.on i { outline: 2px solid #18181b; outline-offset: 1px; }
+  .v4 .panel { border: 1px solid #e4e4e7; background: #fff; border-radius: 12px; margin: 0 16px 12px; padding: 14px; }
+  .v4 .kv { display: flex; justify-content: space-between; align-items: baseline; }
+  .v4 .kv .big { font-size: 34px; font-weight: 700; letter-spacing: -1px; }
+  .v4 .kv .big small { font-size: 14px; color: #71717a; font-weight: 500; letter-spacing: 0; }
+  .v4 .budget { font-size: 13px; color: #71717a; text-align: right; }
+  .v4 .budget b { display: block; font-size: 17px; color: #10b981; }
+  .v4 .stack { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: #ececea; margin: 12px 0 6px; }
+  .v4 .eq { font-size: 12px; color: #71717a; font-family: "SF Mono", ui-monospace, monospace; }
+  .v4 table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .v4 td { padding: 7px 0; }
+  .v4 td:first-child { width: 78px; color: #52525b; }
+  .v4 td.r { text-align: right; width: 92px; font-family: "SF Mono", ui-monospace, monospace; font-size: 13px; }
+  .v4 .hbar { height: 8px; border-radius: 4px; background: #ececea; position: relative; overflow: hidden; }
+  .v4 .hbar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; }
+  .v4 .flag { display: inline-block; font-size: 11px; font-weight: 700; background: #fef3c7; color: #b45309; padding: 2px 6px; border-radius: 4px; margin-left: 6px; }
+  .v4 .tl { margin: 0 16px; }
+  .v4 .tli { display: flex; gap: 10px; }
+  .v4 .tli .time { width: 40px; font-size: 12px; color: #a1a1aa; padding-top: 2px; font-family: "SF Mono", ui-monospace, monospace; }
+  .v4 .tli .dot { width: 10px; display: flex; flex-direction: column; align-items: center; }
+  .v4 .tli .dot::before { content: ""; width: 9px; height: 9px; border-radius: 5px; background: var(--c); margin-top: 4px; }
+  .v4 .tli .dot::after { content: ""; flex: 1; width: 1px; background: #e4e4e7; margin-top: 3px; }
+  .v4 .tli .body { flex: 1; padding-bottom: 14px; }
+  .v4 .tli .body b { font-size: 14px; font-weight: 600; display: flex; justify-content: space-between; }
+  .v4 .tli .body span { font-size: 12px; color: #71717a; display: block; margin-top: 2px; }
+  .v4 .cmd { position: absolute; left: 12px; right: 12px; bottom: 82px; background: #18181b; color: #a1a1aa; border-radius: 14px; padding: 13px 14px; font-size: 15px; display: flex; gap: 10px; align-items: center; }
+  .v4 .cmd .ic { margin-left: auto; display: flex; gap: 14px; color: #fafafa; }
+  .v4 .tabbar { background: #fbfbf9; border-top: 1px solid #e4e4e7; color: #a1a1aa; }
+  .v4 .tabbar .on { color: #18181b; }
+  .v4 .scroll { padding-bottom: 150px; }
+
+  /* ============ 5. Warm friendly (Lifesum) ============ */
+  .v5 { background: #fdf6ee; color: #3b2f2a; }
+  .v5 .tg-head { color: #3b2f2a; }
+  .v5 .greet { padding: 2px 20px 16px; }
+  .v5 .greet b { font-size: 26px; display: block; letter-spacing: -.3px; }
+  .v5 .greet span { color: #9a8478; font-size: 14px; }
+  .v5 .wtop { display: flex; justify-content: space-between; align-items: baseline; padding: 2px 20px 12px; }
+  .v5 .wtop b { font-size: 22px; letter-spacing: -.3px; }
+  .v5 .wtop span { font-size: 13px; color: #9a8478; }
+  .v5 .week { display: grid; grid-template-columns: repeat(7,1fr); gap: 6px; padding: 0 16px 16px; }
+  .v5 .wd { text-align: center; font-size: 11px; color: #9a8478; }
+  .v5 .wd i { display: block; height: 44px; border-radius: 10px; background: #f5e8dc; margin-bottom: 4px; position: relative; overflow: hidden; }
+  .v5 .wd i::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: var(--h); background: var(--c, #8cc79f); }
+  .v5 .wd.on { color: #3b2f2a; font-weight: 700; }
+  .v5 .wd.on i { outline: 2px solid #e0703a; outline-offset: 1px; }
+  .v5 .card { background: #fff; border-radius: 26px; margin: 0 16px 14px; padding: 18px; box-shadow: 0 4px 16px rgba(120,70,30,.07); }
+  .v5 .heroC { display: flex; align-items: center; gap: 16px; }
+  .v5 .heroC .t b { font-size: 30px; display: block; line-height: 1.1; }
+  .v5 .heroC .t span { color: #9a8478; font-size: 14px; }
+  .v5 .badge { display: inline-flex; align-items: center; gap: 5px; margin-top: 10px; background: #e7f6ec; color: #2f8a52; padding: 5px 10px; border-radius: 12px; font-size: 13px; font-weight: 600; }
+  .v5 .macroPills { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-top: 16px; }
+  .v5 .mp { border-radius: 18px; padding: 12px; }
+  .v5 .mp span { font-size: 12px; font-weight: 600; opacity: .75; }
+  .v5 .mp b { display: block; font-size: 19px; margin-top: 2px; }
+  .v5 .mp small { font-size: 12px; opacity: .7; }
+  .v5 .tip { background: #fff3d6; border-radius: 20px; margin: 0 16px 14px; padding: 14px 16px; font-size: 14px; display: flex; gap: 10px; line-height: 1.4; }
+  .v5 h3 { font-size: 19px; padding: 6px 20px 10px; }
+  .v5 .mealC { display: flex; gap: 12px; align-items: flex-start; }
+  .v5 .mealC + .mealC { margin-top: 16px; padding-top: 16px; border-top: 1px dashed #efe2d6; }
+  .v5 .plate { width: 52px; height: 52px; border-radius: 26px; display: flex; align-items: center; justify-content: center; font-size: 26px; flex-shrink: 0; }
+  .v5 .mealC .t { flex: 1; }
+  .v5 .mealC .t b { font-size: 16px; display: flex; justify-content: space-between; }
+  .v5 .mealC .t b span { font-weight: 600; color: #e0703a; }
+  .v5 .mealC .t p { font-size: 13px; color: #9a8478; margin-top: 3px; line-height: 1.35; }
+  .v5 .mealC .t .emptyAdd { display: inline-block; margin-top: 6px; color: #e0703a; font-weight: 600; font-size: 14px; }
+  .v5 .drops { display: flex; gap: 6px; margin-top: 12px; }
+  .v5 .drop { flex: 1; height: 34px; border-radius: 10px; background: #eaf3fb; }
+  .v5 .drop.f { background: #7cb8ec; }
+  .v5 .fab { position: absolute; left: 50%; transform: translateX(-50%); bottom: 28px; width: 62px; height: 62px; border-radius: 31px; background: #e0703a; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 32px; box-shadow: 0 8px 20px rgba(224,112,58,.45); z-index: 2; }
+  .v5 .tabbar { background: #fff; color: #b9a69b; border-radius: 26px 26px 0 0; box-shadow: 0 -4px 16px rgba(120,70,30,.06); }
+  .v5 .tabbar .on { color: #e0703a; }
+  .v5 .tabbar .gap { width: 60px; }
+
+  .notes { max-width: 1000px; margin-top: 40px; font-size: 14px; line-height: 1.55; color: #333; }
+  .notes h3 { margin: 18px 0 6px; }
+</style>
+</head>
+<body>
+<h1>Mini App — 5 макетов экрана «Сегодня»</h1>
+<p class="lead">Данные во всех макетах одни и те же: съедено 1340 из 2100 ккал, Б 82/140, Ж 48/70, У 150/230 г, вода 1250 мл, бег −320 ккал, три приёма пищи. Экраны прокручиваются. Цвета показаны в «родной» теме каждого макета; в проде фон и текст по-прежнему берутся из Telegram themeParams, а меняются акцентные цвета, типографика и компоновка.</p>
+
+<div class="grid">
+
+<!-- ===================== 1 ===================== -->
+<section class="variant">
+  <h2>1. Нативный минимализм</h2>
+  <div class="ref">Ориентир: Cal AI, настройки iOS, сам Telegram</div>
+  <ul>
+    <li>Главная цифра — «осталось», а не «съедено»: на неё и смотрят</li>
+    <li>Вместо колец — тонкие полосы, вдвое меньше высоты до списка еды</li>
+    <li>Inset-grouped списки как в Telegram, плавающая «+» под большим пальцем</li>
+  </ul>
+  <div class="phone v1"><div class="scroll">
+    <div class="tg-head"><span class="x">Закрыть</span><span>Food Analyzer</span><span class="x">···</span></div>
+    <div class="title">Сегодня</div>
+    <div class="date">Понедельник, 26 октября</div>
+    <div class="group">
+      <div class="hero">
+        <div class="label">Осталось</div>
+        <div class="big num">760 <small>ккал</small></div>
+        <div class="bar"><i style="width:64%;background:#007aff"></i></div>
+        <div class="sub num"><span>Съедено 1340</span><span>Цель 2100</span></div>
+      </div>
+      <div class="macros num">
+        <div class="macro"><div class="l">Белки</div><div class="n">82 <span>/ 140 г</span></div><div class="mini"><i style="width:59%;background:#34c759"></i></div></div>
+        <div class="macro"><div class="l">Жиры</div><div class="n">48 <span>/ 70 г</span></div><div class="mini"><i style="width:69%;background:#ff9500"></i></div></div>
+        <div class="macro"><div class="l">Углеводы</div><div class="n">150 <span>/ 230 г</span></div><div class="mini"><i style="width:65%;background:#af52de"></i></div></div>
+      </div>
+    </div>
+    <div class="sec"><span>Быстро добавить</span></div>
+    <div class="chips"><div class="chip">Овсянка</div><div class="chip">Латте</div><div class="chip">Протеиновый батончик</div></div>
+    <div class="group">
+      <div class="water"><svg class="ico" style="color:#007aff" viewBox="0 0 24 24"><path d="M12 2.7s-6 6.6-6 11a6 6 0 0 0 12 0c0-4.4-6-11-6-11z"/></svg><div class="t num">Вода<span>1250 из 2000 мл</span></div><div class="pill">+250</div><div class="pill">+500</div></div>
+      <div class="row"><svg class="ico" style="color:#ff3b30" viewBox="0 0 24 24"><path d="M13 4a1.5 1.5 0 1 0 0 .1M7 21l3-6 3 2v5M10 15l1-5 4 3 3-1M8 10l3-2"/></svg><div class="t"><b>Бег, 35 мин</b></div><div class="k num">−320</div></div>
+    </div>
+    <div class="sec"><span>Завтрак</span><span class="num">420 ккал</span></div>
+    <div class="group">
+      <div class="row"><div class="t"><b>Овсянка на молоке</b><span class="num">250 г · Б 11 · Ж 8 · У 52</span></div><div class="k num">310</div></div>
+      <div class="row"><div class="t"><b>Латте</b><span class="num">300 мл · Б 6 · Ж 6 · У 9</span></div><div class="k num">110</div></div>
+    </div>
+    <div class="sec"><span>Обед</span><span class="num">680 ккал</span></div>
+    <div class="group">
+      <div class="row"><div class="t"><b>Куриная грудка с рисом</b><span class="num">350 г · Б 48 · Ж 9 · У 62</span></div><div class="k num">520</div></div>
+      <div class="row"><div class="t"><b>Салат с оливковым маслом</b><span class="num">180 г · Б 3 · Ж 14 · У 8</span></div><div class="k num">160</div></div>
+    </div>
+    <div class="sec"><span>Перекус</span><span class="num">240 ккал</span></div>
+    <div class="group">
+      <div class="row"><div class="t"><b>Греческий йогурт с мёдом</b><span class="num">200 г · Б 14 · Ж 11 · У 19</span></div><div class="k num">240</div></div>
+    </div>
+  </div>
+    <div class="fab">+</div>
+    <nav class="tabbar">
+      <div class="on"><svg class="ico" viewBox="0 0 24 24"><path d="M3 10l9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Сегодня</div>
+      <div><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>История</div>
+      <div><svg class="ico" viewBox="0 0 24 24"><path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"/></svg>Избранное</div>
+      <div><svg class="ico" viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></svg>Тренды</div>
+      <div><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Профиль</div>
+    </nav>
+  </div>
+</section>
+
+<!-- ===================== 2 ===================== -->
+<section class="variant">
+  <h2>2. Цветная шапка с полукольцом</h2>
+  <div class="ref">Ориентир: Yazio, Lose It!</div>
+  <ul>
+    <li>Полукольцо по центру, по бокам «съедено» и «сожжено»: энергобаланс без отдельной карточки</li>
+    <li>Полоса дней недели прямо в шапке, переход в историю одним тапом</li>
+    <li>У каждого приёма пищи своя «+»: еда сразу пишется в нужный приём</li>
+  </ul>
+  <div class="phone v2"><div class="scroll">
+    <div class="heroWrap">
+      <div class="tg-head"><span class="x">Закрыть</span><span>Сегодня</span><span class="x">···</span></div>
+      <div class="days num">
+        <div class="day">Ср<b>21</b></div><div class="day">Чт<b>22</b></div><div class="day">Пт<b>23</b></div><div class="day">Сб<b>24</b></div><div class="day">Вс<b>25</b></div><div class="day on">Пн<b>26</b></div><div class="day" style="opacity:.4">Вт<b>27</b></div>
+      </div>
+      <div class="gaugeRow num">
+        <div class="side"><b>1340</b><span>съедено</span></div>
+        <div class="gauge">
+          <svg width="190" height="120" viewBox="0 0 190 120">
+            <path d="M 20 105 A 75 75 0 0 1 170 105" fill="none" stroke="rgba(255,255,255,.25)" stroke-width="14" stroke-linecap="round"/>
+            <path d="M 20 105 A 75 75 0 0 1 170 105" fill="none" stroke="#fff" stroke-width="14" stroke-linecap="round" stroke-dasharray="235.6" stroke-dashoffset="84.8"/>
+          </svg>
+          <div class="c"><b>760</b><span>ккал осталось</span></div>
+        </div>
+        <div class="side"><b>320</b><span>сожжено</span></div>
+      </div>
+      <div class="mrow num">
+        <div class="m"><span>Белки</span><div class="b"><i style="width:59%"></i></div><small>82 / 140 г</small></div>
+        <div class="m"><span>Жиры</span><div class="b"><i style="width:69%"></i></div><small>48 / 70 г</small></div>
+        <div class="m"><span>Углеводы</span><div class="b"><i style="width:65%"></i></div><small>150 / 230 г</small></div>
+      </div>
+    </div>
+    <h3>Питание</h3>
+    <div class="meal"><div class="em" style="background:#fff4dc">🥣</div><div class="t"><b>Завтрак</b><span class="num">420 ккал · Овсянка, латте</span></div><div class="add ghost">+</div></div>
+    <div class="meal"><div class="em" style="background:#e3f6ea">🍗</div><div class="t"><b>Обед</b><span class="num">680 ккал · Курица с рисом, салат</span></div><div class="add ghost">+</div></div>
+    <div class="meal"><div class="em" style="background:#ffe6ec">🍽️</div><div class="t"><b>Ужин</b><span>Рекомендуем 500–600 ккал</span></div><div class="add">+</div></div>
+    <div class="meal"><div class="em" style="background:#ece8ff">🍎</div><div class="t"><b>Перекус</b><span class="num">240 ккал · Греческий йогурт</span></div><div class="add ghost">+</div></div>
+    <h3>Вода <span style="font-weight:400;color:#8a8aa0;font-size:15px" class="num">1,25 из 2 л</span></h3>
+    <div class="waterCard">
+      <div class="glasses"><div class="glass f"></div><div class="glass f"></div><div class="glass f"></div><div class="glass f"></div><div class="glass f"></div><div class="glass p">+</div><div class="glass"></div><div class="glass"></div></div>
+    </div>
+  </div>
+    <nav class="tabbar">
+      <div class="on"><svg class="ico" viewBox="0 0 24 24"><path d="M3 10l9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Дневник</div>
+      <div><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>История</div>
+      <div><svg class="ico" viewBox="0 0 24 24"><path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"/></svg>Избранное</div>
+      <div><svg class="ico" viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></svg>Тренды</div>
+      <div><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Профиль</div>
+    </nav>
+  </div>
+</section>
+
+<!-- ===================== 3 ===================== -->
+<section class="variant">
+  <h2>3. Кольца активности и бенто</h2>
+  <div class="ref">Ориентир: Apple Fitness, Apple Health</div>
+  <ul>
+    <li>Три вложенных кольца: калории, белок, вода. Цель дня — закрыть все три</li>
+    <li>Плитки 2×N вместо стопки карточек, крупные цифры, тёмная тема</li>
+    <li>Широкая кнопка «Добавить еду» над таб-баром</li>
+  </ul>
+  <div class="phone v3"><div class="scroll">
+    <div class="tg-head"><span class="x">Закрыть</span><span></span><span class="x">···</span></div>
+    <div class="title">Сегодня</div>
+    <div class="date">Пн, 26 октября</div>
+    <div class="tile hero">
+      <svg width="150" height="150" viewBox="0 0 150 150" style="transform:rotate(-90deg);flex-shrink:0">
+        <circle cx="75" cy="75" r="64" fill="none" stroke="#3a0a14" stroke-width="16"/>
+        <circle cx="75" cy="75" r="64" fill="none" stroke="#ff375f" stroke-width="16" stroke-linecap="round" stroke-dasharray="402" stroke-dashoffset="145"/>
+        <circle cx="75" cy="75" r="46" fill="none" stroke="#1a3a10" stroke-width="16"/>
+        <circle cx="75" cy="75" r="46" fill="none" stroke="#a6ff00" stroke-width="16" stroke-linecap="round" stroke-dasharray="289" stroke-dashoffset="118"/>
+        <circle cx="75" cy="75" r="28" fill="none" stroke="#0a2a3a" stroke-width="16"/>
+        <circle cx="75" cy="75" r="28" fill="none" stroke="#2ed3ff" stroke-width="16" stroke-linecap="round" stroke-dasharray="176" stroke-dashoffset="66"/>
+      </svg>
+      <div class="legend num">
+        <div><span style="color:#ff375f">Калории</span><b>1340<small>/2100</small></b></div>
+        <div><span style="color:#a6ff00">Белок</span><b>82<small>/140 г</small></b></div>
+        <div style="margin:0"><span style="color:#2ed3ff">Вода</span><b>1,25<small>/2 л</small></b></div>
+      </div>
+    </div>
+    <div class="bento num">
+      <div class="tile"><h4>Жиры</h4><div class="v">48<small> / 70 г</small></div><div class="spark"><i style="height:30%"></i><i style="height:55%"></i><i style="height:40%"></i><i style="height:70%"></i><i style="height:45%"></i><i style="height:60%"></i><i class="on" style="height:69%"></i></div></div>
+      <div class="tile"><h4>Углеводы</h4><div class="v">150<small> / 230 г</small></div><div class="spark"><i style="height:50%"></i><i style="height:65%"></i><i style="height:80%"></i><i style="height:55%"></i><i style="height:70%"></i><i style="height:60%"></i><i class="on" style="height:65%;background:#bf5af2"></i></div></div>
+      <div class="tile"><h4 style="color:#2ed3ff">Вода</h4><div class="v">1250<small> мл</small></div><div class="wbtn"><div>+250</div><div>+500</div></div></div>
+      <div class="tile"><h4 style="color:#ff9f0a">Баланс</h4><div class="v" style="color:#30d158">−580</div><div style="font-size:12px;color:#8d8d93;margin-top:4px">дефицит · TDEE 2240<br>бег −320</div></div>
+    </div>
+    <div class="tile wide">
+      <h4>Повторить</h4>
+      <div class="fav num"><div>Овсянка<small>310 ккал</small></div><div>Латте<small>110 ккал</small></div><div>Батончик<small>210 ккал</small></div></div>
+    </div>
+    <div class="tile wide num">
+      <h4>Приёмы пищи</h4>
+      <div class="mealHead">Завтрак<span>420 ккал</span></div>
+      <div class="item">Овсянка на молоке<span>310</span></div>
+      <div class="item">Латте<span>110</span></div>
+      <div class="mealHead">Обед<span>680 ккал</span></div>
+      <div class="item">Куриная грудка с рисом<span>520</span></div>
+      <div class="item">Салат с оливковым маслом<span>160</span></div>
+      <div class="mealHead">Перекус<span>240 ккал</span></div>
+      <div class="item">Греческий йогурт с мёдом<span>240</span></div>
+    </div>
+  </div>
+    <div class="addbar">＋ Добавить еду</div>
+    <nav class="tabbar">
+      <div class="on"><svg class="ico" viewBox="0 0 24 24"><path d="M3 10l9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Сегодня</div>
+      <div><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>История</div>
+      <div><svg class="ico" viewBox="0 0 24 24"><path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"/></svg>Избранное</div>
+      <div><svg class="ico" viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></svg>Тренды</div>
+      <div><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Профиль</div>
+    </nav>
+  </div>
+</section>
+
+<!-- ===================== 4 ===================== -->
+<section class="variant">
+  <h2>4. Плотная аналитика и таймлайн</h2>
+  <div class="ref">Ориентир: MacroFactor, Cronometer</div>
+  <ul>
+    <li>Неделя столбиками сверху: виден тренд, а не один день</li>
+    <li>Бюджет одной строкой: цель − еда + тренировки = остаток</li>
+    <li>Еда на шкале времени, строка ввода внизу: «напиши или скажи, что съел» — как в боте</li>
+  </ul>
+  <div class="phone v4"><div class="scroll">
+    <div class="tg-head"><span class="x">Закрыть</span><span></span><span class="x">···</span></div>
+    <div class="top"><b>Пн, 26 окт</b><span class="num">ср. за неделю 1980 ккал</span></div>
+    <div class="week">
+      <div class="wd"><i style="--h:88%"></i>Вт</div>
+      <div class="wd"><i style="--h:97%;--c:#f59e0b"></i>Ср</div>
+      <div class="wd"><i style="--h:91%"></i>Чт</div>
+      <div class="wd"><i style="--h:104%;--c:#ef4444"></i>Пт</div>
+      <div class="wd"><i style="--h:110%;--c:#ef4444"></i>Сб</div>
+      <div class="wd"><i style="--h:85%"></i>Вс</div>
+      <div class="wd on"><i style="--h:64%;--c:#a1a1aa"></i>Пн</div>
+    </div>
+    <div class="panel">
+      <div class="kv">
+        <div class="big num">1340 <small>ккал</small></div>
+        <div class="budget num">осталось<b>760</b></div>
+      </div>
+      <div class="stack"><i style="width:15.6%;background:#10b981"></i><i style="width:20.5%;background:#f59e0b"></i><i style="width:28.6%;background:#8b5cf6"></i></div>
+      <div class="eq num">2100 − 1340 еда + 0 трен. = 760</div>
+    </div>
+    <div class="panel num">
+      <table>
+        <tr><td>Белки</td><td><div class="hbar"><i style="width:59%;background:#10b981"></i></div></td><td class="r">82/140 г</td></tr>
+        <tr><td>Жиры</td><td><div class="hbar"><i style="width:69%;background:#f59e0b"></i></div></td><td class="r">48/70 г</td></tr>
+        <tr><td>Углеводы</td><td><div class="hbar"><i style="width:65%;background:#8b5cf6"></i></div></td><td class="r">150/230 г</td></tr>
+        <tr><td>Вода</td><td><div class="hbar"><i style="width:62%;background:#0ea5e9"></i></div></td><td class="r">1,25/2 л</td></tr>
+      </table>
+      <div style="font-size:12px;color:#71717a;margin-top:8px">Белок отстаёт <span class="flag">−58 г</span> ≈ 250 г творога или куриной грудки</div>
+    </div>
+    <div class="tl num">
+      <div class="tli"><div class="time">08:40</div><div class="dot" style="--c:#f59e0b"></div><div class="body"><b>Завтрак <span>420</span></b><span>Овсянка на молоке 250 г · Латте 300 мл</span></div></div>
+      <div class="tli"><div class="time">11:00</div><div class="dot" style="--c:#0ea5e9"></div><div class="body"><b>Вода <span>+500 мл</span></b></div></div>
+      <div class="tli"><div class="time">13:15</div><div class="dot" style="--c:#10b981"></div><div class="body"><b>Обед <span>680</span></b><span>Куриная грудка с рисом 350 г · Салат 180 г</span></div></div>
+      <div class="tli"><div class="time">16:30</div><div class="dot" style="--c:#8b5cf6"></div><div class="body"><b>Перекус <span>240</span></b><span>Греческий йогурт с мёдом 200 г</span></div></div>
+      <div class="tli"><div class="time">18:00</div><div class="dot" style="--c:#ef4444"></div><div class="body"><b>Бег 35 мин <span>−320</span></b></div></div>
+    </div>
+  </div>
+    <div class="cmd">Что вы съели?<span class="ic"><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3.5"/><path d="M8 6l1.5-2h5L16 6"/></svg><svg class="ico" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v4"/></svg><svg class="ico" viewBox="0 0 24 24"><path d="M3 5v14M7 5v14M11 5v14M14 5v14M18 5v14M21 5v14"/></svg></span></div>
+    <nav class="tabbar">
+      <div class="on"><svg class="ico" viewBox="0 0 24 24"><path d="M3 10l9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Сегодня</div>
+      <div><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>История</div>
+      <div><svg class="ico" viewBox="0 0 24 24"><path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"/></svg>Избранное</div>
+      <div><svg class="ico" viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></svg>Тренды</div>
+      <div><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Профиль</div>
+    </nav>
+  </div>
+</section>
+
+<!-- ===================== 5 ===================== -->
+<section class="variant">
+  <h2>5. Тёплый и дружелюбный</h2>
+  <div class="ref">Ориентир: Lifesum, Noom</div>
+  <ul>
+    <li>Тёплая палитра, крупные скругления, иконки-тарелки у приёмов пищи</li>
+    <li>Сверху неделя столбиками из варианта 4, тап по дню открывает его</li>
+    <li>Карточка-подсказка на основе дня: что добрать к ужину</li>
+    <li>Центральная «+» в таб-баре, пустой приём пищи сам зовёт добавить еду</li>
+  </ul>
+  <div class="phone v5"><div class="scroll">
+    <div class="tg-head"><span class="x">Закрыть</span><span></span><span class="x">···</span></div>
+    <div class="wtop num"><b>Пн, 26 октября</b><span>ср. за неделю 1980 ккал</span></div>
+    <div class="week">
+      <div class="wd"><i style="--h:88%"></i>Вт</div>
+      <div class="wd"><i style="--h:97%;--c:#f0b25a"></i>Ср</div>
+      <div class="wd"><i style="--h:91%"></i>Чт</div>
+      <div class="wd"><i style="--h:100%;--c:#e0703a"></i>Пт</div>
+      <div class="wd"><i style="--h:100%;--c:#e0703a"></i>Сб</div>
+      <div class="wd"><i style="--h:85%"></i>Вс</div>
+      <div class="wd on"><i style="--h:64%;--c:#f3c9ad"></i>Пн</div>
+    </div>
+    <div class="card">
+      <div class="heroC">
+        <svg width="104" height="104" viewBox="0 0 104 104" style="transform:rotate(-90deg);flex-shrink:0">
+          <circle cx="52" cy="52" r="44" fill="none" stroke="#fbe9dc" stroke-width="12"/>
+          <circle cx="52" cy="52" r="44" fill="none" stroke="#e0703a" stroke-width="12" stroke-linecap="round" stroke-dasharray="276.5" stroke-dashoffset="100"/>
+        </svg>
+        <div class="t num"><b>760 ккал</b><span>можно съесть до цели</span><div class="badge">✓ В пределах нормы</div></div>
+      </div>
+      <div class="macroPills num">
+        <div class="mp" style="background:#e7f6ec;color:#226b3f"><span>Белки</span><b>82 г</b><small>из 140</small></div>
+        <div class="mp" style="background:#fff1dc;color:#9a5a10"><span>Жиры</span><b>48 г</b><small>из 70</small></div>
+        <div class="mp" style="background:#f1e9fb;color:#6a3d9e"><span>Углеводы</span><b>150 г</b><small>из 230</small></div>
+      </div>
+    </div>
+    <div class="tip"><span style="font-size:20px">💡</span><span>На ужин добавьте белка: не хватает 58 г. Подойдёт рыба с овощами или творог.</span></div>
+    <h3>Мой день</h3>
+    <div class="card num">
+      <div class="mealC"><div class="plate" style="background:#fff1dc">🥣</div><div class="t"><b>Завтрак <span>420</span></b><p>Овсянка на молоке, латте</p></div></div>
+      <div class="mealC"><div class="plate" style="background:#e7f6ec">🍗</div><div class="t"><b>Обед <span>680</span></b><p>Куриная грудка с рисом, салат с оливковым маслом</p></div></div>
+      <div class="mealC"><div class="plate" style="background:#f1e9fb">🍓</div><div class="t"><b>Перекус <span>240</span></b><p>Греческий йогурт с мёдом</p></div></div>
+      <div class="mealC"><div class="plate" style="background:#fde4e4">🍲</div><div class="t"><b>Ужин</b><span class="emptyAdd">+ Добавить ужин</span></div></div>
+    </div>
+    <div class="card num">
+      <b style="font-size:16px">💧 Вода</b> <span style="color:#9a8478;font-size:14px">1250 из 2000 мл</span>
+      <div class="drops"><div class="drop f"></div><div class="drop f"></div><div class="drop f"></div><div class="drop f"></div><div class="drop f"></div><div class="drop"></div><div class="drop"></div><div class="drop"></div></div>
+    </div>
+  </div>
+    <div class="fab">+</div>
+    <nav class="tabbar">
+      <div class="on"><svg class="ico" viewBox="0 0 24 24"><path d="M3 10l9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Сегодня</div>
+      <div><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>История</div>
+      <div class="gap"></div>
+      <div><svg class="ico" viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></svg>Тренды</div>
+      <div><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Профиль</div>
+    </nav>
+  </div>
+</section>
+
+</div>
+
+<div class="notes">
+  <h3>Что общего у всех вариантов и чего нет сейчас</h3>
+  <p>Главное число — остаток калорий. Список еды начинается выше: сейчас до него пять карточек. Энергобаланс встроен в основной блок, а не вынесен отдельно. Цифры набраны моноширинными (tabular-nums), чтобы не прыгали при обновлении.</p>
+</div>
+</body>
+</html>

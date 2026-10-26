@@ -4,7 +4,9 @@ import { config } from "./config";
 import ExcelJS from "exceljs";
 import { IStorage } from "./storage";
 import { analyzeFoodText, analyzeFoodImage, generateEveningReport, generatePeriodAnalysis, transcribeVoice, askCoach, detectBarcode, generateWeightAnalysis, classifyIntent, analyzeWorkout, groupFoodNames, FoodItem } from "./openai";
-import { decodeBarcodeFromImage, isValidEanChecksum, classifyHydratingProduct, barcodeCacheToFoodItem, foodItemToBarcodeCache } from "./barcode";
+import { decodeBarcodeFromImage, foodItemToBarcodeCache } from "./barcode";
+import { lookupBarcodeProduct } from "./lib/open-food-facts";
+import { findBarcode, resolveBarcodeProduct, visionHintForMiss } from "./lib/barcode-pipeline";
 import { secretsMatch } from "./lib/webhook-auth";
 import { generateMonthlyPDF, extractTopFoods } from "./pdf";
 import { User, FoodLog, VisibleFavorite, FavoriteItem } from "@shared/schema";
@@ -21,9 +23,9 @@ import { safeHandler, handlerNameForPattern } from "./lib/safe-handler";
 import { createInFlightGuard, takePending, restorePending } from "./lib/callback-guard";
 import { checkAdminTarget, type AdminAction } from "./lib/admin-target";
 import { roundFoodLogField } from "./lib/food-log-fields";
-import { createAiQuota, msUntilNextDay, buildQuotaExceededMessage, checkVoiceDuration, buildVoiceTooLongMessage, type AiActionKind } from "./lib/ai-quota";
+import { msUntilNextDay, buildQuotaExceededMessage, checkVoiceDuration, buildVoiceTooLongMessage, type AiActionKind } from "./lib/ai-quota";
+import { getSharedAiQuota, quotaTz } from "./lib/ai-quota-instance";
 import { tagVisionBarcode, markUserEdited, shouldCacheVisionBarcode } from "./lib/vision-barcode-cache";
-import { parseServingSize } from "./lib/serving-size";
 import { isScheduledDue, smartSnoozeClaimKind, createNonOverlapping, isNotificationRecipient, tickClock } from "./lib/scheduler";
 import { resolveTz, todayKey, isValidDayKey, dayBoundsUtc, rangeBoundsUtc, addDaysKey, weekdayOfKey, parseDmyKey, formatKeyDmy, formatDdMm, wallClockDate } from "./lib/tz";
 import { decideDialogInput, CANCEL_HINT } from "./lib/dialog-state";
@@ -111,75 +113,6 @@ function formatTotalsLine(cal: number, prot: number, fat: number, carbs: number,
     : `🔥 ${cal} ккал`;
   line += ` | 💪Б${prot} 🧈Ж${fat} 🍞У${carbs}`;
   return line;
-}
-
-// Result of an Open Food Facts lookup:
-//  - a full FoodItem when OFF has the product WITH nutrition data;
-//  - a name-only marker (foundInDb:false) when OFF knows the product name but
-//    has no nutrients — the name is then forwarded to vision as a hint;
-//  - null when OFF does not know the barcode at all.
-type BarcodeLookupResult =
-  | (FoodItem & { barcode: string; foundInDb: true })
-  | { foundInDb: false; productName: string };
-
-async function lookupBarcodeProduct(barcode: string): Promise<BarcodeLookupResult | null> {
-  try {
-    const res = await fetch(`https://world.openfoodfacts.org/api/v0/product/${barcode}.json`, {
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!res.ok) return null;
-    const data = await res.json() as any;
-    if (data.status !== 1 || !data.product) return null;
-
-    const p = data.product;
-    const name: string = p.product_name_ru || p.product_name || p.generic_name_ru || p.generic_name || "";
-    if (!name) return null;
-
-    const n = p.nutriments || {};
-    // OFF knows the product name but carries no nutrition facts → return the
-    // name only, so the caller can hint vision instead of guessing blindly.
-    const hasEnergy = n["energy-kcal_100g"] != null || n["energy_100g"] != null;
-    const hasMacros = n["proteins_100g"] != null || n["fat_100g"] != null || n["carbohydrates_100g"] != null;
-    if (!hasEnergy && !hasMacros) {
-      return { foundInDb: false, productName: name };
-    }
-
-    const cal100 = n["energy-kcal_100g"]
-      ? Math.round(n["energy-kcal_100g"])
-      : n["energy_100g"]
-        ? Math.round(n["energy_100g"] / 4.184)
-        : 0;
-    const protein100 = Math.round(n["proteins_100g"] ?? 0);
-    const fat100 = Math.round(n["fat_100g"] ?? 0);
-    const carbs100 = Math.round(n["carbohydrates_100g"] ?? 0);
-
-    // «0,5 l» → 500, «1 portion (40 g)» → 40; нераспознанное → 100 (lib/serving-size.ts).
-    const weight = parseServingSize(p.serving_size);
-    const ratio = weight / 100;
-
-    // Classify plain water / unsweetened tea-coffee → goes into water tracking.
-    const hydrating = classifyHydratingProduct({
-      categoriesTags: p.categories_tags,
-      energyKcal100g: n["energy-kcal_100g"] != null ? Number(n["energy-kcal_100g"]) : cal100,
-      sugars100g: n["sugars_100g"] != null ? Number(n["sugars_100g"]) : null,
-    });
-
-    return {
-      foodName: name,
-      calories: Math.round(cal100 * ratio),
-      protein: Math.round(protein100 * ratio),
-      fat: Math.round(fat100 * ratio),
-      carbs: Math.round(carbs100 * ratio),
-      weight,
-      mealType: "snack",
-      hydrating,
-      barcode,
-      foundInDb: true as const,
-    };
-  } catch (err) {
-    console.error("Open Food Facts lookup error:", describeError(err));
-    return null;
-  }
 }
 
 async function buildDailyProgress(storage: IStorage, userId: number, user: User): Promise<string> {
@@ -424,10 +357,11 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
 
   // Дневной лимит AI-действий (server/lib/ai-quota.ts). Вызывать один раз на
   // действие пользователя, до скачивания файлов и до вызова модели. Фоновые
-  // отчёты планировщика сюда не ходят.
-  const aiQuota = createAiQuota({ dailyRequests: config.aiDailyLimit, dailyPhotos: config.aiDailyPhotoLimit });
+  // отчёты планировщика сюда не ходят. Счётчик общий с Mini App
+  // (lib/ai-quota-instance.ts).
+  const aiQuota = getSharedAiQuota();
   function allowAiAction(chatId: number, user: User, kind: AiActionKind = "request", opts: { quiet?: boolean } = {}): boolean {
-    const tz = user.timezone ?? 'Europe/Moscow';
+    const tz = quotaTz(user);
     const check = aiQuota.tryConsume(String(user.id), tz, kind);
     if (check.allowed) return true;
     console.warn(`[ai-quota] limit reached: userId=${user.id} reason=${check.reason}`);
@@ -4070,14 +4004,14 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
         // First — deterministic zxing decode from image pixels (accurate).
         // Fallback — AI vision "reads" the digits, but only trust it if the
         // EAN checksum passes (rejects hallucinated codes).
+        // Сам поиск — в lib/barcode-pipeline.ts (общий с Mini App).
         const barcodeEnabled = user.barcodeScanEnabled ?? true;
         let barcode: string | null = null;
         if (barcodeEnabled) {
-          barcode = await decodeBarcodeFromImage(Buffer.from(arrayBuffer));
-          if (!barcode) {
-            const aiBarcode = await detectBarcode(base64);
-            if (aiBarcode && isValidEanChecksum(aiBarcode)) barcode = aiBarcode;
-          }
+          barcode = await findBarcode(Buffer.from(arrayBuffer), base64, { useAi: true }, {
+            decode: decodeBarcodeFromImage,
+            detectAi: detectBarcode,
+          });
         }
         let analysis: any = null;
         let barcodeSource = false;
@@ -4099,40 +4033,24 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
             message_id: statusMsg.message_id,
           });
 
-          // 1) Self-filling local cache (global for all users).
-          const cached = await storage.getBarcodeProduct(barcode).catch((e) => {
-            console.error("Barcode cache read error:", describeError(e));
-            return undefined;
+          // Кэш → Open Food Facts (попадание OFF пишется в кэш).
+          const product = await resolveBarcodeProduct(barcode, {
+            lookupOff: lookupBarcodeProduct,
+            getCached: (code) => storage.getBarcodeProduct(code),
+            upsertCached: (rec) => storage.upsertBarcodeProduct(rec),
           });
-          if (cached) {
-            console.log("Barcode product found in cache");
-            analysis = barcodeCacheToFoodItem(cached);
+          if (product.found) {
+            analysis = product.item;
             barcodeSource = true;
           } else {
-            // 2) Open Food Facts.
-            const off = await lookupBarcodeProduct(barcode);
-            if (off && off.foundInDb) {
-              console.log("Barcode product found in OFF");
-              analysis = off;
-              barcodeSource = true;
-              // Persist the OFF hit so we don't hit the network next time.
-              const rec = foodItemToBarcodeCache(off, barcode, "off");
-              if (rec) {
-                await storage.upsertBarcodeProduct(rec).catch((e) => console.error("Barcode cache write (off) error:", describeError(e)));
-              }
-            } else {
-              // 3) Miss — fall back to vision, remember the barcode to cache the
-              // confirmed result, and hint vision with the OFF name if we got one.
-              console.log("Barcode not found in cache/OFF, falling back to vision...");
-              cacheBarcode = barcode;
-              visionHint = off && off.foundInDb === false
-                ? { ...visionHint, productName: off.productName, barcode }
-                : { ...visionHint, barcode };
-              await bot.editMessageText("🔍 Штрихкод не найден в базе, анализирую визуально...", {
-                chat_id: chatId,
-                message_id: statusMsg.message_id
-              });
-            }
+            // Miss — fall back to vision, remember the barcode to cache the
+            // confirmed result, and hint vision with the OFF name if we got one.
+            cacheBarcode = barcode;
+            visionHint = { ...visionHint, ...visionHintForMiss(barcode, product) };
+            await bot.editMessageText("🔍 Штрихкод не найден в базе, анализирую визуально...", {
+              chat_id: chatId,
+              message_id: statusMsg.message_id
+            });
           }
         }
 

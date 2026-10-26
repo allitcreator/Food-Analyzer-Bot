@@ -3,7 +3,7 @@ import { db } from "./db";
 import { eq, and, or, sql, desc, gte, lte, lt, isNull } from "drizzle-orm";
 import { calcGoalsFromProfile } from "./lib/goals";
 import { dayBoundsUtc, todayKey, addDaysKey, rangeBoundsUtc } from "./lib/tz";
-import { lastNDayKeys, dayLabelRu, monthlyWeekDefs, bucketByDayKey } from "./lib/stats-days";
+import { lastNDayKeys, dayKeysEndingAt, dayLabelRu, monthlyWeekDefs, bucketByDayKey } from "./lib/stats-days";
 
 /** IANA-зона пользователя; пустая/неизвестная → Europe/Moscow (lib/tz). */
 type Tz = string | null | undefined;
@@ -32,7 +32,8 @@ export interface IStorage {
   /** Дневные методы: `dayKey` — "YYYY-MM-DD", границы суток — в зоне `tz`. */
   getDailyStats(userId: number, dayKey: string, tz: Tz): Promise<{ calories: number; protein: number; fat: number; carbs: number; fiber: number; sugar: number; sodium: number; saturatedFat: number }>;
   getWeeklyStats(userId: number, tz: Tz): Promise<{ date: string; calories: number }[]>;
-  getWeeklyFullStats(userId: number, tz: Tz): Promise<{ date: string; dayLabel: string; calories: number; protein: number; fat: number; carbs: number }[]>;
+  /** 7 дней, кончающихся `endKey` ("YYYY-MM-DD"), по умолчанию — сегодня в `tz`. */
+  getWeeklyFullStats(userId: number, tz: Tz, endKey?: string): Promise<{ date: string; dayLabel: string; calories: number; protein: number; fat: number; carbs: number }[]>;
   getMonthlyStats(userId: number, tz: Tz): Promise<{ weekLabel: string; calories: number; protein: number; fat: number; carbs: number; days: number }[]>;
   getStreak(userId: number, tz: Tz): Promise<number>;
 
@@ -249,8 +250,8 @@ export class DatabaseStorage implements IStorage {
     return days.map((date, idx) => ({ date, calories: macros[idx].calories }));
   }
 
-  async getWeeklyFullStats(userId: number, tz: Tz) {
-    const days = lastNDayKeys(new Date(), tz, 7);
+  async getWeeklyFullStats(userId: number, tz: Tz, endKey?: string) {
+    const days = endKey ? dayKeysEndingAt(endKey, 7) : lastNDayKeys(new Date(), tz, 7);
     const macros = await this.getFoodMacrosByDay(userId, days, tz);
     return days.map((date, idx) => {
       const s = macros[idx];

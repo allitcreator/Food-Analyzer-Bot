@@ -2,7 +2,8 @@ import { Route, Router, Switch } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { MeResponse } from "@/lib/types";
-import { TabBar } from "@/components/TabBar";
+import { TabBar, AddFoodFab } from "@/components/TabBar";
+import { AddFoodProvider } from "@/components/AddFoodProvider";
 import { Toaster } from "@/components/ui/Toast";
 import { FullscreenSpinner } from "@/components/ui/Spinner";
 import { ErrorScreen } from "@/components/StateScreens";
@@ -22,19 +23,23 @@ export default function App() {
 
   return (
     <Router base="/app">
-      <div className="mx-auto min-h-full max-w-xl pb-20">
-        <Switch>
-          <Route path="/" component={Today} />
-          <Route path="/history" component={History} />
-          <Route path="/favorites" component={Favorites} />
-          <Route path="/trends" component={Trends} />
-          <Route path="/profile" component={Profile} />
-          <Route>
-            <div className="p-8 text-center text-muted-foreground">Страница не найдена</div>
-          </Route>
-        </Switch>
-      </div>
-      <TabBar />
+      <AddFoodProvider>
+        {/* Снизу место под таб-бар и FAB «+», чтобы они не закрывали контент. */}
+        <div className="mx-auto min-h-full max-w-xl pb-[calc(140px+env(safe-area-inset-bottom))]">
+          <Switch>
+            <Route path="/" component={Today} />
+            <Route path="/history" component={History} />
+            <Route path="/favorites" component={Favorites} />
+            <Route path="/trends" component={Trends} />
+            <Route path="/profile" component={Profile} />
+            <Route>
+              <div className="p-8 text-center text-muted-foreground">Страница не найдена</div>
+            </Route>
+          </Switch>
+        </div>
+        <AddFoodFab />
+        <TabBar />
+      </AddFoodProvider>
       <Toaster />
     </Router>
   );

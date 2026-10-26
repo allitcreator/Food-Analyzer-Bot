@@ -1,24 +1,35 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Search, Star, Users, Share2, Trash2, Plus } from "lucide-react";
+import { MoreHorizontal, Plus, Search, Share2, Star, Trash2 } from "lucide-react";
 import { filterFavorites } from "@shared/favorites-filter";
 import { api } from "@/lib/api";
 import type { Favorite } from "@/lib/types";
 import { round } from "@/lib/format";
-import { hapticImpact, hapticNotification } from "@/lib/telegram";
+import { foodEmoji } from "@/lib/food-emoji";
+import { invalidateDiary } from "@/lib/invalidate";
+import { hapticImpact, hapticNotification, hapticSelection } from "@/lib/telegram";
 import { PageHeader } from "@/components/PageHeader";
-import { Card, CardContent } from "@/components/ui/Card";
+import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Switch } from "@/components/ui/Switch";
-import { Button } from "@/components/ui/Button";
-import { Modal } from "@/components/ui/Modal";
+import { Button, IconButton } from "@/components/ui/Button";
+import { Modal, SheetAction } from "@/components/ui/Modal";
+import { Segmented } from "@/components/ui/Segmented";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorScreen } from "@/components/StateScreens";
+import { favoriteCalories } from "@/components/FavoriteChips";
 import { toast } from "@/components/ui/Toast";
+
+type Tab = "mine" | "shared";
+
+/** Цвет круга под эмодзи — по кругу из палитры макета. */
+const PLATES = ["bg-fat-bg", "bg-prot-bg", "bg-carb-bg", "bg-accent-soft", "bg-bad-soft"];
 
 export default function Favorites() {
   const qc = useQueryClient();
   const [query, setQuery] = useState("");
+  const [tab, setTab] = useState<Tab>("mine");
+  const [menuFor, setMenuFor] = useState<Favorite | null>(null);
   const [deleting, setDeleting] = useState<Favorite | null>(null);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
@@ -26,19 +37,12 @@ export default function Favorites() {
     queryFn: api.favorites,
   });
 
-  const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ["favorites"] });
-    // Today неактивен на этом экране — refetchType:"all", иначе останется stale.
-    qc.invalidateQueries({ queryKey: ["day"], refetchType: "all" });
-  };
-
   const logMutation = useMutation({
     mutationFn: (fav: Favorite) => api.logFavorite(fav.id),
     onSuccess: (_res, fav) => {
       hapticNotification("success");
       toast(`Записано: ${fav.title}`);
-      // Today неактивен на этом экране — refetchType:"all", иначе останется stale.
-      qc.invalidateQueries({ queryKey: ["day"], refetchType: "all" });
+      invalidateDiary(qc);
     },
     onError: () => {
       hapticNotification("error");
@@ -77,7 +81,8 @@ export default function Favorites() {
     onSuccess: () => {
       hapticNotification("success");
       setDeleting(null);
-      invalidate();
+      qc.invalidateQueries({ queryKey: ["favorites"] });
+      invalidateDiary(qc);
     },
     onError: () => {
       hapticNotification("error");
@@ -89,70 +94,114 @@ export default function Favorites() {
   const filtered = useMemo(() => filterFavorites(favorites, query), [favorites, query]);
   const mine = filtered.filter((f) => f.isOwner);
   const shared = filtered.filter((f) => !f.isOwner);
+  const visible = tab === "mine" ? mine : shared;
+  // Шторка «···» читает актуальный isShared из кэша, а не из снимка при открытии.
+  const menuFav = menuFor ? favorites.find((f) => f.id === menuFor.id) ?? menuFor : null;
 
   if (isError) return <ErrorScreen error={error} onRetry={() => refetch()} />;
 
   return (
     <div>
-      <PageHeader title="Избранное" />
-      <div className="space-y-4 px-4">
+      <PageHeader title="Избранное" subtitle={data ? dishesCount(favorites.length) : undefined} />
+      <div className="px-4">
         {isLoading || !data ? (
-          <>
-            <Skeleton className="h-11 w-full rounded-xl" />
-            <Skeleton className="h-28 w-full rounded-2xl" />
-            <Skeleton className="h-28 w-full rounded-2xl" />
-          </>
+          <div className="space-y-3.5">
+            <Skeleton className="h-[46px] w-full rounded-[14px]" />
+            <Skeleton className="h-28 w-full" />
+            <Skeleton className="h-28 w-full" />
+          </div>
         ) : favorites.length === 0 ? (
           <EmptyState />
         ) : (
           <>
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <div className="relative mb-3">
+              <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Поиск по названию или блюду"
-                className="pl-9"
+                className="pl-10"
               />
             </div>
+            <Segmented<Tab>
+              value={tab}
+              onChange={setTab}
+              className="mb-4"
+              options={[
+                { value: "mine", label: `Мои · ${mine.length}` },
+                { value: "shared", label: `Общие · ${shared.length}` },
+              ]}
+            />
 
-            {filtered.length === 0 ? (
+            {visible.length === 0 ? (
               <p className="py-10 text-center text-sm text-muted-foreground">
-                Ничего не найдено по запросу «{query.trim()}».
+                {query.trim()
+                  ? `Ничего не найдено по запросу «${query.trim()}».`
+                  : tab === "mine"
+                    ? "Своих блюд пока нет."
+                    : "Общих блюд пока нет."}
               </p>
             ) : (
-              <>
-                {mine.length > 0 && (
-                  <Section icon={<Star className="h-4 w-4 text-chart-3" />} title="Мои">
-                    {mine.map((fav) => (
-                      <FavoriteCard
-                        key={fav.id}
-                        fav={fav}
-                        onLog={() => logMutation.mutate(fav)}
-                        logging={logMutation.isPending && logMutation.variables?.id === fav.id}
-                        onToggleShare={(v) => shareMutation.mutate({ id: fav.id, isShared: v })}
-                        onDelete={() => setDeleting(fav)}
-                      />
-                    ))}
-                  </Section>
-                )}
-                {shared.length > 0 && (
-                  <Section icon={<Users className="h-4 w-4 text-chart-1" />} title="Общие">
-                    {shared.map((fav) => (
-                      <FavoriteCard
-                        key={fav.id}
-                        fav={fav}
-                        onLog={() => logMutation.mutate(fav)}
-                        logging={logMutation.isPending && logMutation.variables?.id === fav.id}
-                      />
-                    ))}
-                  </Section>
-                )}
-              </>
+              <div className="space-y-3.5">
+                {visible.map((fav) => (
+                  <FavoriteCard
+                    key={fav.id}
+                    fav={fav}
+                    onLog={() => logMutation.mutate(fav)}
+                    logging={logMutation.isPending && logMutation.variables?.id === fav.id}
+                    onMenu={() => {
+                      hapticSelection();
+                      setMenuFor(fav);
+                    }}
+                  />
+                ))}
+              </div>
             )}
           </>
         )}
       </div>
+
+      <Modal open={!!menuFav} onOpenChange={(o) => !o && setMenuFor(null)} title={menuFav?.title}>
+        {menuFav && (
+          <Card className="divide-y divide-border">
+            {menuFav.isOwner ? (
+              <>
+                <label className="flex items-center gap-3 px-[18px] py-[13px] text-[15px] font-medium">
+                  <Share2 className="h-4 w-4" />
+                  <span className="flex-1">
+                    Доступно всем
+                    <span className="block text-xs font-normal text-muted-foreground">
+                      Блюдо увидят другие участники в «Общих»
+                    </span>
+                  </span>
+                  <Switch
+                    checked={menuFav.isShared}
+                    onCheckedChange={(v) => shareMutation.mutate({ id: menuFav.id, isShared: v })}
+                  />
+                </label>
+                <SheetAction
+                  icon={<Trash2 className="h-4 w-4" />}
+                  label="Удалить"
+                  destructive
+                  onClick={() => {
+                    setDeleting(menuFav);
+                    setMenuFor(null);
+                  }}
+                />
+              </>
+            ) : (
+              <SheetAction
+                icon={<Plus className="h-4 w-4" />}
+                label="Записать"
+                onClick={() => {
+                  logMutation.mutate(menuFav);
+                  setMenuFor(null);
+                }}
+              />
+            )}
+          </Card>
+        )}
+      </Modal>
 
       <Modal open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)} title="Удалить из избранного?">
         <p className="mb-5 text-sm text-muted-foreground">
@@ -177,83 +226,72 @@ export default function Favorites() {
   );
 }
 
-function Section({
-  icon,
-  title,
-  children,
-}: {
-  icon: ReactNode;
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="space-y-2">
-      <h2 className="flex items-center gap-1.5 px-1 text-sm font-semibold text-muted-foreground">
-        {icon} {title}
-      </h2>
-      {children}
-    </section>
-  );
+/** «7 блюд» с русским склонением. */
+function dishesCount(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  const noun =
+    mod10 === 1 && mod100 !== 11
+      ? "блюдо"
+      : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)
+        ? "блюда"
+        : "блюд";
+  return `${n} ${noun}`;
 }
 
-/** Summary line: item count + total calories across a favorite's items. */
-function summarize(fav: Favorite): string {
-  const count = fav.items.length;
-  const kcal = round(fav.items.reduce((s, it) => s + (it.calories ?? 0), 0));
-  const noun = count % 10 === 1 && count % 100 !== 11 ? "позиция" : "позиций";
-  return `${count} ${noun} · ~${kcal} ккал`;
+/** Состав: «Овсянка на молоке 250 г, латте 300 г». */
+function composition(fav: Favorite): string {
+  return fav.items
+    .map((it) => (it.weight ? `${it.foodName} ${round(it.weight)} г` : it.foodName))
+    .join(", ");
 }
 
 function FavoriteCard({
   fav,
   onLog,
   logging,
-  onToggleShare,
-  onDelete,
+  onMenu,
 }: {
   fav: Favorite;
   onLog: () => void;
   logging: boolean;
-  onToggleShare?: (v: boolean) => void;
-  onDelete?: () => void;
+  onMenu: () => void;
 }) {
   return (
-    <Card>
-      <CardContent className="pt-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="truncate text-[15px] font-semibold">{fav.title}</div>
-            <div className="mt-0.5 text-xs text-muted-foreground">{summarize(fav)}</div>
-            {!fav.isOwner && (
-              <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                <Users className="h-3 w-3" />
-                от {fav.ownerName ? `@${fav.ownerName}` : "участника"}
-              </div>
-            )}
-          </div>
-          {onDelete && (
-            <button
-              onClick={onDelete}
-              className="shrink-0 rounded-full p-1.5 text-muted-foreground hover:bg-secondary"
-              aria-label={`Удалить ${fav.title}`}
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
-          )}
+    <Card className="p-[18px]">
+      <div className="flex items-start gap-3">
+        <div
+          className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-2xl ${PLATES[fav.id % PLATES.length]}`}
+          aria-hidden
+        >
+          {foodEmoji(fav.title)}
         </div>
-
-        <div className="mt-3 flex items-center gap-3">
-          <Button size="sm" className="flex-1" disabled={logging} onClick={onLog}>
-            <Plus className="h-4 w-4" /> Записать
-          </Button>
-          {onToggleShare && (
-            <label className="flex shrink-0 items-center gap-2 text-xs font-medium text-muted-foreground">
-              <Share2 className="h-4 w-4" />
-              <Switch checked={fav.isShared} onCheckedChange={onToggleShare} />
-            </label>
-          )}
+        <div className="min-w-0 flex-1">
+          <b className="flex justify-between gap-2 text-base">
+            <span className="min-w-0 truncate">{fav.title}</span>
+            <span className="shrink-0 font-semibold text-primary">{favoriteCalories(fav)}</span>
+          </b>
+          <p className="mt-[3px] text-[13px] leading-snug text-muted-foreground">{composition(fav)}</p>
         </div>
-      </CardContent>
+        <IconButton onClick={onMenu} aria-label={`Ещё: ${fav.title}`}>
+          <MoreHorizontal className="h-4 w-4" />
+        </IconButton>
+      </div>
+      <div className="mt-3 flex items-center gap-2">
+        <Button size="sm" className="flex-1" disabled={logging} onClick={onLog}>
+          <Plus className="h-4 w-4" /> Записать
+        </Button>
+        {fav.isOwner && fav.isShared && (
+          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+            <Share2 className="h-4 w-4" /> общее
+          </span>
+        )}
+        {!fav.isOwner && (
+          <span className="text-xs text-muted-foreground">
+            от {fav.ownerName ? `@${fav.ownerName}` : "участника"}
+          </span>
+        )}
+      </div>
     </Card>
   );
 }

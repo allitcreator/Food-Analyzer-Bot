@@ -1,67 +1,97 @@
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Droplet, Flame, Dumbbell, Star, Pencil, Check, X, Plus } from "lucide-react";
 import { api } from "@/lib/api";
-import type { DayResponse, Favorite } from "@/lib/types";
-import { round } from "@/lib/format";
-import { hapticImpact, hapticNotification } from "@/lib/telegram";
+import type { DayResponse, Favorite, FoodLog, MealType, MeResponse, WeekStatsResponse } from "@/lib/types";
+import { formatDayTitle, MEAL_LABELS, MEAL_ORDER, round } from "@/lib/format";
+import { todayInTimeZone } from "@/lib/date-tz";
+import { averageCalories, withoutDay } from "@/lib/stats-summary";
+import { proteinTip } from "@/lib/protein-tip";
+import { invalidateDiary } from "@/lib/invalidate";
+import { hapticImpact, hapticNotification, hapticSelection } from "@/lib/telegram";
+import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/PageHeader";
-import { Card, CardContent } from "@/components/ui/Card";
-import { Ring, MacroRing } from "@/components/Ring";
+import { Card, SectionHeading } from "@/components/ui/Card";
+import { Ring } from "@/components/Ring";
+import { WeekBars } from "@/components/WeekBars";
+import { MacroPills } from "@/components/MacroPills";
+import { FavoriteChips } from "@/components/FavoriteChips";
+import { useAddFood } from "@/components/AddFoodProvider";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { MealGroups } from "@/components/MealGroups";
-import { AddFoodModal } from "@/components/AddFoodModal";
 import { ErrorScreen } from "@/components/StateScreens";
 import { toast, toastError } from "@/components/ui/Toast";
-import { Modal } from "@/components/ui/Modal";
-import { Button } from "@/components/ui/Button";
+
+/** Эмодзи и цвет круга приёма в «Мой день». */
+const MEAL_PLATES: Record<MealType, { emoji: string; className: string }> = {
+  breakfast: { emoji: "🥣", className: "bg-fat-bg" },
+  lunch: { emoji: "🍗", className: "bg-prot-bg" },
+  dinner: { emoji: "🍲", className: "bg-bad-soft" },
+  snack: { emoji: "🍓", className: "bg-carb-bg" },
+};
+
+/** Вода: 8 капель по 250 мл. */
+const WATER_DROPS = 8;
+const WATER_DROP_ML = 250;
 
 export default function Today() {
   const qc = useQueryClient();
-  const [addOpen, setAddOpen] = useState(false);
+  const [, navigate] = useLocation();
+  const me = useQuery<MeResponse>({ queryKey: ["me"], queryFn: api.me });
   const { data, isLoading, isError, error, refetch } = useQuery<DayResponse>({
     queryKey: ["day", "today"],
     queryFn: () => api.day(),
+  });
+  const week = useQuery({
+    queryKey: ["stats", "week"],
+    queryFn: () => api.stats("week") as Promise<WeekStatsResponse>,
   });
 
   const addWater = useMutation({
     mutationFn: (amount: number) => api.addWater(amount),
     onSuccess: () => {
       hapticNotification("success");
-      qc.invalidateQueries({ queryKey: ["day", "today"] });
+      invalidateDiary(qc);
     },
     onError: (err) => toastError(err, "Не удалось добавить воду"),
   });
 
   if (isError) return <ErrorScreen error={error} onRetry={() => refetch()} />;
 
+  const today = data?.date ?? todayInTimeZone(me.data?.timezone);
+  const days = week.data?.days ?? [];
+  const weekAvg = averageCalories(withoutDay(days, today));
+
   return (
     <div>
       <PageHeader
-        title="Сегодня"
-        right={
-          <button
-            onClick={() => {
-              hapticImpact("light");
-              setAddOpen(true);
-            }}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm active:scale-95"
-            aria-label="Добавить еду"
-          >
-            <Plus className="h-5 w-5" />
-          </button>
-        }
+        title={formatDayTitle(today)}
+        subtitle={weekAvg !== null ? `ср. за неделю ${weekAvg}` : undefined}
       />
-      <AddFoodModal open={addOpen} onOpenChange={setAddOpen} />
-      <div className="space-y-5 px-4">
+      <div className="px-4">
+        {days.length > 0 ? (
+          <WeekBars
+            days={days}
+            goal={data?.goals.calories ?? me.data?.goals.calories ?? null}
+            today={today}
+            selected={today}
+            onSelect={(date) => navigate(`/history?date=${date}`)}
+            className="pb-4"
+          />
+        ) : week.isLoading ? (
+          <Skeleton className="mb-4 h-[60px] w-full rounded-[10px]" />
+        ) : null}
+
         {isLoading || !data ? (
           <TodaySkeleton />
         ) : (
-          <>
-            <CaloriesCard data={data} />
-            <MacrosCard data={data} />
-            <FavoritesCard />
-            {data.energyBalance && <EnergyCard eb={data.energyBalance} />}
+          <div className="space-y-3.5">
+            <HeroCard data={data} />
+            <TipCard data={data} me={me.data} />
+            <QuickAdd />
+            <div>
+              <SectionHeading title="Мой день" />
+              <DayCard data={data} />
+            </div>
             <WaterCard
               total={data.waterTotal}
               onAdd={(a) => {
@@ -70,212 +100,237 @@ export default function Today() {
               }}
               pending={addWater.isPending}
             />
-            {data.workouts.length > 0 && <WorkoutsCard workouts={data.workouts} />}
-            <MealGroups
-              logs={data.foodLogs}
-              emptyHint="Нажмите «+» вверху, чтобы добавить еду"
-            />
-          </>
+          </div>
         )}
       </div>
     </div>
   );
 }
 
-function CaloriesCard({ data }: { data: DayResponse }) {
+/** Кольцо остатка, бейдж нормы, плашки БЖУ и строка энергобаланса. */
+function HeroCard({ data }: { data: DayResponse }) {
   const eaten = round(data.totals.calories);
   const goal = data.goals.calories;
-  const burned = data.workouts.reduce((s, w) => s + w.caloriesBurned, 0);
   const remaining = goal ? goal - eaten : null;
-  const progress = goal ? eaten / goal : 0;
+  const eb = data.energyBalance;
 
   return (
-    <Card>
-      <CardContent className="flex flex-col items-center pt-6">
-        <Ring progress={progress} size={210} stroke={18} colorVar="--chart-1">
-          <span className="text-4xl font-bold leading-none">{eaten}</span>
-          <span className="mt-1 text-sm text-muted-foreground">
-            {goal ? `из ${goal} ккал` : "ккал"}
-          </span>
-          {remaining !== null && (
-            <span
-              className={`mt-1 text-xs font-medium ${
-                remaining < 0 ? "text-destructive" : "text-muted-foreground"
-              }`}
-            >
-              {remaining >= 0 ? `осталось ${remaining}` : `превышение ${-remaining}`}
-            </span>
+    <Card className="p-[18px]">
+      <div className="flex items-center gap-4">
+        <Ring progress={goal ? eaten / goal : 0} size={104} stroke={12} />
+        <div className="min-w-0">
+          {remaining !== null ? (
+            <>
+              <b className="block text-[30px] leading-tight">{Math.max(0, remaining)} ккал</b>
+              <span className="text-sm text-muted-foreground">
+                осталось · съедено {eaten} из {goal}
+              </span>
+              {remaining >= 0 ? (
+                <div className="mt-2.5 flex w-fit items-center gap-1 rounded-xl bg-ok-soft px-2.5 py-[5px] text-[13px] font-semibold text-ok">
+                  ✓ В пределах нормы
+                </div>
+              ) : (
+                <div className="mt-2.5 flex w-fit items-center gap-1 rounded-xl bg-bad-soft px-2.5 py-[5px] text-[13px] font-semibold text-destructive">
+                  Превышение {-remaining}
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <b className="block text-[30px] leading-tight">{eaten} ккал</b>
+              <span className="text-sm text-muted-foreground">съедено сегодня</span>
+            </>
           )}
-        </Ring>
-        {burned > 0 && (
-          <div className="mt-4 flex items-center gap-1.5 text-sm text-muted-foreground">
-            <Flame className="h-4 w-4 text-chart-3" />
-            Сожжено тренировками: {round(burned)} ккал
+        </div>
+      </div>
+
+      <MacroPills
+        className="mt-4"
+        values={data.totals}
+        goals={{ protein: data.goals.protein, fat: data.goals.fat, carbs: data.goals.carbs }}
+        bars
+      />
+
+      {eb && (
+        <div className="mt-3.5 flex justify-between border-t border-dashed border-border pt-3.5 text-[13px] text-muted-foreground">
+          <div>
+            Расход (TDEE)
+            <b className="block text-[15px] text-foreground">{round(eb.tdee)}</b>
           </div>
-        )}
-      </CardContent>
+          <div>
+            Тренировки
+            <b className="block text-[15px] text-foreground">
+              {eb.burnedFromActivity > 0 ? `−${round(eb.burnedFromActivity)}` : 0}
+            </b>
+          </div>
+          <div className="text-right">
+            {eb.isDeficit ? "Дефицит" : "Профицит"}
+            <b className={cn("block text-[15px]", eb.isDeficit ? "text-ok" : "text-destructive")}>
+              {Math.abs(round(eb.balance))}
+            </b>
+          </div>
+        </div>
+      )}
     </Card>
   );
 }
 
-function MacrosCard({ data }: { data: DayResponse }) {
-  return (
-    <Card>
-      <CardContent className="flex justify-around pt-4">
-        <MacroRing label="Белки" value={round(data.totals.protein)} goal={data.goals.protein} colorVar="--chart-2" />
-        <MacroRing label="Жиры" value={round(data.totals.fat)} goal={data.goals.fat} colorVar="--chart-3" />
-        <MacroRing label="Углеводы" value={round(data.totals.carbs)} goal={data.goals.carbs} colorVar="--chart-4" />
-      </CardContent>
-    </Card>
-  );
-}
-
-/** Horizontal row of saved-favorite chips: tap to log, edit mode to delete. */
-function FavoritesCard() {
-  const qc = useQueryClient();
-  const [editMode, setEditMode] = useState(false);
-  const [deleting, setDeleting] = useState<Favorite | null>(null);
-
-  const { data } = useQuery({
-    queryKey: ["favorites"],
-    queryFn: api.favorites,
+function TipCard({ data, me }: { data: DayResponse; me: MeResponse | undefined }) {
+  const tip = proteinTip({
+    protein: data.totals.protein,
+    proteinGoal: data.goals.protein,
+    calories: data.totals.calories,
+    caloriesGoal: data.goals.calories,
+    timezone: me?.timezone,
+    mealLunchEnd: me?.mealLunchEnd,
   });
+  if (!tip) return null;
+  return (
+    <div className="flex gap-2.5 rounded-[20px] bg-fat-bg px-4 py-3.5 text-sm leading-snug text-foreground">
+      <span className="text-xl leading-none" aria-hidden>
+        💡
+      </span>
+      <span>{tip}</span>
+    </div>
+  );
+}
+
+/** «Быстро добавить»: чипы избранного, тап — запись на сегодня. */
+function QuickAdd() {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ["favorites"], queryFn: api.favorites });
 
   const logMutation = useMutation({
     mutationFn: (fav: Favorite) => api.logFavorite(fav.id),
     onSuccess: (_res, fav) => {
       hapticNotification("success");
       toast(`Записано: ${fav.title}`);
-      qc.invalidateQueries({ queryKey: ["day"] });
+      invalidateDiary(qc);
     },
-    onError: () => {
-      hapticNotification("error");
-      toast("Не удалось записать");
-    },
-  });
-
-  const delMutation = useMutation({
-    mutationFn: (id: number) => api.deleteFavorite(id),
-    onSuccess: () => {
-      hapticNotification("success");
-      setDeleting(null);
-      qc.invalidateQueries({ queryKey: ["favorites"], refetchType: "all" });
-    },
-    onError: (err) => toastError(err, "Не удалось удалить"),
+    onError: (err) => toastError(err, "Не удалось записать"),
   });
 
   const favorites = data?.favorites ?? [];
   if (favorites.length === 0) return null;
-  const hasOwn = favorites.some((f) => f.isOwner);
 
   return (
-    <Card>
-      <CardContent className="pt-4">
-        <div className="mb-3 flex items-center justify-between">
-          <span className="flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
-            <Star className="h-4 w-4 text-chart-3" /> Избранное
-          </span>
-          {hasOwn && (
-            <button
-              onClick={() => {
-                hapticImpact("light");
-                setEditMode((v) => !v);
-              }}
-              className="rounded-full p-1.5 text-muted-foreground hover:bg-secondary"
-              aria-label={editMode ? "Готово" : "Править"}
-            >
-              {editMode ? <Check className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
-            </button>
-          )}
-        </div>
-        <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
-          {favorites.map((fav) => (
-            <div key={fav.id} className="relative shrink-0">
-              <button
-                disabled={logMutation.isPending || editMode}
-                onClick={() => {
-                  hapticImpact("medium");
-                  logMutation.mutate(fav);
-                }}
-                className="max-w-[160px] truncate rounded-full bg-secondary px-4 py-2 text-sm font-medium text-secondary-foreground active:scale-[0.97] disabled:opacity-60"
-                title={fav.title}
-              >
-                {fav.title}
-              </button>
-              {editMode && fav.isOwner && (
+    <div>
+      <SectionHeading title="Быстро добавить" />
+      <FavoriteChips
+        favorites={favorites}
+        disabled={logMutation.isPending}
+        onPick={(fav) => {
+          hapticImpact("medium");
+          logMutation.mutate(fav);
+        }}
+        className="pb-1.5"
+      />
+    </div>
+  );
+}
+
+/** «Мой день»: все четыре приёма, тап по непустому раскрывает позиции. */
+function DayCard({ data }: { data: DayResponse }) {
+  const addFood = useAddFood();
+  const [expanded, setExpanded] = useState<MealType | null>(null);
+
+  return (
+    <Card className="p-[18px]">
+      {MEAL_ORDER.map((meal) => {
+        const logs = data.foodLogs.filter((l) => l.mealType === meal);
+        const plate = MEAL_PLATES[meal];
+        const total = round(logs.reduce((s, l) => s + l.calories, 0));
+        const open = expanded === meal;
+        return (
+          <MealRow key={meal} emoji={plate.emoji} plateClassName={plate.className}>
+            {logs.length === 0 ? (
+              <>
+                <b className="block text-base">{MEAL_LABELS[meal]}</b>
                 <button
-                  onClick={() => setDeleting(fav)}
-                  className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow"
-                  aria-label={`Удалить ${fav.title}`}
+                  type="button"
+                  onClick={() => {
+                    hapticImpact("light");
+                    addFood.open({ mealType: meal });
+                  }}
+                  className="mt-1.5 text-sm font-semibold text-primary"
                 >
-                  <X className="h-3 w-3" />
+                  + Добавить {MEAL_LABELS[meal].toLowerCase()}
                 </button>
-              )}
-            </div>
-          ))}
-        </div>
-      </CardContent>
-
-      {/* Как на экране «Избранное»: удаление только после подтверждения. */}
-      <Modal open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)} title="Удалить из избранного?">
-        <p className="mb-5 text-sm text-muted-foreground">
-          «{deleting?.title}» будет удалено безвозвратно.
-          {deleting?.isShared && " Оно также пропадёт у других участников."}
-        </p>
-        <div className="flex gap-2">
-          <Button variant="secondary" className="flex-1" onClick={() => setDeleting(null)}>
-            Отмена
-          </Button>
-          <Button
-            variant="destructive"
-            className="flex-1"
-            disabled={delMutation.isPending}
-            onClick={() => deleting && delMutation.mutate(deleting.id)}
-          >
-            Удалить
-          </Button>
-        </div>
-      </Modal>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    hapticSelection();
+                    setExpanded(open ? null : meal);
+                  }}
+                  aria-expanded={open}
+                  className="block w-full text-left"
+                >
+                  <b className="flex justify-between text-base">
+                    {MEAL_LABELS[meal]} <span className="font-semibold text-primary">{total}</span>
+                  </b>
+                  {!open && (
+                    <p className="mt-[3px] text-[13px] leading-snug text-muted-foreground">
+                      {logs.map((l) => l.foodName).join(", ")}
+                    </p>
+                  )}
+                </button>
+                {open && <MealItems logs={logs} />}
+              </>
+            )}
+          </MealRow>
+        );
+      })}
+      {data.workouts.map((w) => (
+        <MealRow key={`w${w.id}`} emoji="🏃" plateClassName="bg-accent-soft">
+          <b className="flex justify-between gap-2 text-base">
+            <span className="min-w-0 font-bold">{w.description}</span>
+            <span className="shrink-0 font-semibold text-ok">−{round(w.caloriesBurned)}</span>
+          </b>
+        </MealRow>
+      ))}
     </Card>
   );
 }
 
-function EnergyCard({ eb }: { eb: NonNullable<DayResponse["energyBalance"]> }) {
+function MealRow({
+  emoji,
+  plateClassName,
+  children,
+}: {
+  emoji: string;
+  plateClassName: string;
+  children: React.ReactNode;
+}) {
   return (
-    <Card>
-      <CardContent className="pt-4">
-        <div className="mb-3 flex items-center justify-between">
-          <span className="text-sm font-semibold text-muted-foreground">Энергобаланс</span>
-          <span
-            className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-              eb.isDeficit
-                ? "bg-chart-2/15 text-chart-2"
-                : "bg-destructive/15 text-destructive"
-            }`}
-          >
-            {eb.isDeficit ? "Дефицит" : "Профицит"} {Math.abs(round(eb.balance))} ккал
-          </span>
-        </div>
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <Stat label="BMR" value={round(eb.bmr)} />
-          <Stat label="TDEE" value={round(eb.tdee)} />
-          <Stat label="Съедено" value={round(eb.eaten)} />
-        </div>
-        {eb.burnedFromActivity > 0 && (
-          <p className="mt-3 text-center text-xs text-muted-foreground">
-            Сожжено на тренировках: {round(eb.burnedFromActivity)} ккал
-          </p>
-        )}
-      </CardContent>
-    </Card>
+    <div className="flex items-start gap-3 [&:not(:first-child)]:mt-4 [&:not(:first-child)]:border-t [&:not(:first-child)]:border-dashed [&:not(:first-child)]:border-border [&:not(:first-child)]:pt-4">
+      <div
+        className={cn("flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-2xl", plateClassName)}
+        aria-hidden
+      >
+        {emoji}
+      </div>
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
   );
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+function MealItems({ logs }: { logs: FoodLog[] }) {
   return (
-    <div className="rounded-xl bg-muted/50 py-2">
-      <div className="text-lg font-semibold leading-none">{value}</div>
-      <div className="mt-1 text-[11px] text-muted-foreground">{label}</div>
+    <div className="mt-1">
+      {logs.map((log) => (
+        <div key={log.id} className="flex items-center gap-2 border-border py-2 [&:not(:first-child)]:border-t">
+          <div className="min-w-0 flex-1">
+            <b className="block truncate text-[15px] font-medium">{log.foodName}</b>
+            <span className="text-xs text-muted-foreground">
+              {log.weight} г · Б {round(log.protein)} · Ж {round(log.fat)} · У {round(log.carbs)}
+            </span>
+          </div>
+          <div className="text-sm font-semibold">{round(log.calories)}</div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -289,72 +344,41 @@ function WaterCard({
   onAdd: (amount: number) => void;
   pending: boolean;
 }) {
-  const glasses = Math.min(8, Math.round(total / 250));
+  const filled = Math.min(WATER_DROPS, Math.round(total / WATER_DROP_ML));
   return (
-    <Card>
-      <CardContent className="pt-4">
-        <div className="mb-3 flex items-center justify-between">
-          <span className="flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
-            <Droplet className="h-4 w-4 text-chart-1" /> Вода
-          </span>
-          <span className="text-sm font-semibold">{total} мл</span>
-        </div>
-        <div className="mb-3 flex gap-1">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <div
-              key={i}
-              className={`h-2 flex-1 rounded-full ${i < glasses ? "bg-chart-1" : "bg-muted"}`}
-            />
-          ))}
-        </div>
-        <div className="flex gap-2">
+    <Card className="p-[18px]">
+      <b className="text-base">💧 Вода</b>{" "}
+      <span className="text-sm text-muted-foreground">
+        {total} из {WATER_DROPS * WATER_DROP_ML} мл
+      </span>
+      <div className="mt-3 flex gap-1.5" aria-hidden>
+        {Array.from({ length: WATER_DROPS }).map((_, i) => (
+          <div key={i} className={cn("h-[34px] flex-1 rounded-[10px]", i < filled ? "bg-water" : "bg-water-soft")} />
+        ))}
+      </div>
+      <div className="mt-3 flex gap-2">
+        {[250, 500].map((amount) => (
           <button
+            key={amount}
             disabled={pending}
-            onClick={() => onAdd(250)}
-            className="flex-1 rounded-xl bg-secondary py-2.5 text-sm font-medium text-secondary-foreground active:scale-[0.98] disabled:opacity-50"
+            onClick={() => onAdd(amount)}
+            className="flex-1 rounded-[14px] bg-water-soft py-2.5 text-sm font-semibold text-water active:scale-[0.98] disabled:opacity-50"
           >
-            +250 мл
+            +{amount} мл
           </button>
-          <button
-            disabled={pending}
-            onClick={() => onAdd(500)}
-            className="flex-1 rounded-xl bg-secondary py-2.5 text-sm font-medium text-secondary-foreground active:scale-[0.98] disabled:opacity-50"
-          >
-            +500 мл
-          </button>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function WorkoutsCard({ workouts }: { workouts: DayResponse["workouts"] }) {
-  return (
-    <Card>
-      <CardContent className="pt-4">
-        <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
-          <Dumbbell className="h-4 w-4 text-chart-5" /> Тренировки
-        </div>
-        <div className="divide-y divide-card-border">
-          {workouts.map((w) => (
-            <div key={w.id} className="flex items-center justify-between py-2">
-              <span className="text-[15px]">{w.description}</span>
-              <span className="text-sm text-muted-foreground">−{round(w.caloriesBurned)} ккал</span>
-            </div>
-          ))}
-        </div>
-      </CardContent>
+        ))}
+      </div>
     </Card>
   );
 }
 
 function TodaySkeleton() {
   return (
-    <>
-      <Skeleton className="h-64 w-full rounded-2xl" />
-      <Skeleton className="h-32 w-full rounded-2xl" />
-      <Skeleton className="h-28 w-full rounded-2xl" />
-      <Skeleton className="h-24 w-full rounded-2xl" />
-    </>
+    <div className="space-y-3.5">
+      <Skeleton className="h-64 w-full" />
+      <Skeleton className="h-14 w-full" />
+      <Skeleton className="h-56 w-full" />
+      <Skeleton className="h-32 w-full" />
+    </div>
   );
 }

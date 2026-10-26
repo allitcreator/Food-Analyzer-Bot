@@ -7,12 +7,16 @@ import { addDaysKey, formatKeyDm, todayKey, weekdayOfKey } from "./tz";
 
 const DAY_RU = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
 
+/** `n` дней по возрастанию, последний — `endKey` ("YYYY-MM-DD"). */
+export function dayKeysEndingAt(endKey: string, n: number): string[] {
+  const keys: string[] = [];
+  for (let i = n - 1; i >= 0; i--) keys.push(addDaysKey(endKey, -i));
+  return keys;
+}
+
 /** Последние `n` дней по возрастанию, последний — «сегодня» в зоне `tz`. */
 export function lastNDayKeys(now: Date, tz: string | null | undefined, n: number): string[] {
-  const today = todayKey(now, tz);
-  const keys: string[] = [];
-  for (let i = n - 1; i >= 0; i--) keys.push(addDaysKey(today, -i));
-  return keys;
+  return dayKeysEndingAt(todayKey(now, tz), n);
 }
 
 /** "Пн 26.10" для календарного дня. */

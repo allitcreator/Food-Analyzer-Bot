@@ -15,28 +15,8 @@ export const FAVORITE_SUGGEST_DAYS = 30;
 // Max length of an auto-generated meal title (Telegram-friendly, not clipped mid-word).
 export const MEAL_TITLE_MAX_LEN = 60;
 
-export type MealBoundaries = { breakfastEnd: string; lunchEnd: string };
-
-/**
- * Default mealType from the wall-clock time, mirroring the AI prompt logic in
- * server/openai.ts (breakfast 05:00–bfEnd, lunch bfEnd–lnEnd, otherwise dinner).
- * Used for "repeat" / favorites, where mealType is assigned by the CURRENT time
- * of the user instead of being copied from the source record.
- */
-export function mealTypeByTime(now: Date, boundaries?: MealBoundaries): "breakfast" | "lunch" | "dinner" {
-  const totalMin = now.getHours() * 60 + now.getMinutes();
-
-  const bfEnd = boundaries?.breakfastEnd ?? "12:30";
-  const lnEnd = boundaries?.lunchEnd ?? "16:30";
-  const [bfH, bfM] = bfEnd.split(":").map(Number);
-  const [lnH, lnM] = lnEnd.split(":").map(Number);
-  const bfEndMin = bfH * 60 + bfM;
-  const lnEndMin = lnH * 60 + lnM;
-
-  if (totalMin >= 300 && totalMin <= bfEndMin) return "breakfast";
-  if (totalMin > bfEndMin && totalMin <= lnEndMin) return "lunch";
-  return "dinner";
-}
+// Перенесено в shared/meal-time.ts — Mini App выбирает по нему приём по умолчанию.
+export { mealTypeByTime, type MealBoundaries } from "@shared/meal-time";
 
 /**
  * Build a favorite title from item names: "Название1 + Название2 …",

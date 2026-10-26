@@ -61,6 +61,13 @@ export type DayQuery = z.infer<typeof dayQuerySchema>;
 
 export const statsQuerySchema = z.object({
   range: z.enum(["week", "month"]).default("week"),
+  /**
+   * Последний день недели (только для range=week): неделя — 7 дней,
+   * кончающихся `end`. По умолчанию — сегодня. Позже сегодняшнего дня
+   * пользователя нельзя (сервер отвечает 400). Для month проверяется так же,
+   * но не используется.
+   */
+  end: isoDate.optional(),
 });
 export type StatsQuery = z.infer<typeof statsQuerySchema>;
 
@@ -147,6 +154,14 @@ export type UpdateFavoriteBody = z.infer<typeof updateFavoriteSchema>;
  * POST /api/app/analyze — AI-распознавание еды из Mini App. Ровно одно из полей:
  * `text` (описание) ИЛИ `imageBase64` (сжатое на клиенте фото, base64 БЕЗ
  * data:-префикса). Ничего не пишет в БД — только возвращает распознанные позиции.
+ *
+ * `mode` — только вместе с `imageBase64`:
+ *  - "photo" (по умолчанию): фото еды; если у пользователя включён поиск
+ *    штрихкодов, сервер пробует найти его zxing'ом (без AI);
+ *  - "barcode": пользователь снимает штрихкод; ищем zxing'ом и AI, нет
+ *    штрихкода — 422 `{ error: "no_barcode" }`.
+ *
+ * Ответ: `{ items: AnalyzedItemInput[], source: "barcode" | "vision" }`.
  */
 export const analyzeSchema = z
   .object({
@@ -157,13 +172,42 @@ export const analyzeSchema = z
       .max(1_400_000)
       .regex(/^[A-Za-z0-9+/]+={0,2}$/, "expected base64")
       .optional(),
+    mode: z.enum(["photo", "barcode"]).optional(),
   })
   .strict()
   .refine(
     (o) => (o.text ? 1 : 0) + (o.imageBase64 ? 1 : 0) === 1,
     "provide exactly one of text or imageBase64",
-  );
+  )
+  .refine((o) => !o.mode || Boolean(o.imageBase64), "mode requires imageBase64");
 export type AnalyzeBody = z.infer<typeof analyzeSchema>;
+export type AnalyzeSource = "barcode" | "vision";
+
+/**
+ * POST /api/app/transcribe — голос из Mini App → текст. Ничего не пишет в БД.
+ * `audioBase64` — запись MediaRecorder без data:-префикса; 700k символов
+ * (~520 КБ) держат тело под лимитом nginx в 1 МБ. `mimeType` — то, что отдал
+ * MediaRecorder (`audio/webm;codecs=opus`, `audio/mp4` …).
+ *
+ * Ответ: 200 `{ text }`; 422 `{ error: "unrecognized" }` — пустая расшифровка;
+ * 422 `{ error: "too_long" }` — запись длиннее 60 с; 429 `{ error:
+ * "quota_exceeded" }` — дневная AI-квота исчерпана; 503 `{ error: "busy" }` —
+ * сервер занят перекодированием других записей.
+ */
+export const transcribeSchema = z
+  .object({
+    audioBase64: z
+      .string()
+      .min(1)
+      .max(700_000)
+      .regex(/^[A-Za-z0-9+/]+={0,2}$/, "expected base64"),
+    mimeType: z
+      .string()
+      .max(100)
+      .regex(/^audio\/[a-z0-9.+-]+(;[^\n]*)?$/i, "expected audio/* MIME type"),
+  })
+  .strict();
+export type TranscribeBody = z.infer<typeof transcribeSchema>;
 
 /**
  * Быстрая запись с телефона: `POST /api/quick` (см. QUICK-ENTRY.md).

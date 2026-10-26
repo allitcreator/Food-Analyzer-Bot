@@ -1,18 +1,22 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type {
+  DayResponse,
   MeResponse,
   ProfilePatchBody,
   SettingsPatchBody,
 } from "@/lib/types";
+import { GOAL_LABELS, round } from "@/lib/format";
 import { hapticNotification } from "@/lib/telegram";
+import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/PageHeader";
-import { Card, CardContent } from "@/components/ui/Card";
+import { Card, SectionCaps } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Button } from "@/components/ui/Button";
 import { Input, Field, Select } from "@/components/ui/Input";
+import { Segmented } from "@/components/ui/Segmented";
 import { Switch } from "@/components/ui/Switch";
 import { ErrorScreen } from "@/components/StateScreens";
 import { toastError } from "@/components/ui/Toast";
@@ -57,15 +61,16 @@ export default function Profile() {
   return (
     <div>
       <PageHeader title="Профиль" />
-      <div className="space-y-4 px-4">
+      <div className="px-4">
         {me.isLoading || !me.data ? (
-          <>
-            <Skeleton className="h-64 w-full rounded-2xl" />
-            <Skeleton className="h-40 w-full rounded-2xl" />
-            <Skeleton className="h-72 w-full rounded-2xl" />
-          </>
+          <div className="space-y-3.5">
+            <Skeleton className="h-44 w-full" />
+            <Skeleton className="h-64 w-full" />
+            <Skeleton className="h-72 w-full" />
+          </div>
         ) : (
           <>
+            <SummaryCard user={me.data} />
             <ProfileSection user={me.data} onSaved={applyUser} />
             {/* key: после «Пересчитать нормы» форма целей пересоздаётся с новыми
                 числами, иначе «Сохранить цели» перезапишет их старыми. */}
@@ -84,8 +89,54 @@ function goalsKey(u: MeResponse): string {
   return [g.calories, g.protein, g.fat, g.carbs].join("/");
 }
 
-function SectionTitle({ children }: { children: ReactNode }) {
-  return <h2 className="mb-2 px-1 text-sm font-semibold text-muted-foreground">{children}</h2>;
+const yearsWord = (n: number) => {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return "год";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "года";
+  return "лет";
+};
+
+// ─── Summary ──────────────────────────────────────────────────────────────
+
+/** Сводка сверху: цель, вес · рост · возраст, норма ккал, BMR и TDEE. */
+function SummaryCard({ user }: { user: MeResponse }) {
+  // BMR/TDEE считает сервер в /day — тот же кэш, что у экрана «Сегодня».
+  const day = useQuery<DayResponse>({ queryKey: ["day", "today"], queryFn: () => api.day() });
+  const eb = day.data?.energyBalance;
+  const body = [
+    user.weight ? `${user.weight.toLocaleString("ru-RU", { maximumFractionDigits: 1 })} кг` : null,
+    user.height ? `${user.height} см` : null,
+    user.age ? `${user.age} ${yearsWord(user.age)}` : null,
+  ].filter(Boolean);
+
+  return (
+    <Card className="mb-1 bg-accent-soft p-[18px]">
+      <div className="flex items-center gap-3.5">
+        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-card text-[28px]" aria-hidden>
+          🎯
+        </div>
+        <div className="min-w-0">
+          <b className="text-[19px]">{GOAL_LABELS[user.goal ?? ""] ?? "Цель не задана"}</b>
+          {body.length > 0 && <div className="text-[13px] text-muted-foreground">{body.join(" · ")}</div>}
+        </div>
+      </div>
+      <div className="mt-3.5 grid grid-cols-3 gap-2">
+        <SummaryStat value={user.goals.calories} label="ккал в день" />
+        <SummaryStat value={eb ? round(eb.bmr) : null} label="BMR" />
+        <SummaryStat value={eb ? round(eb.tdee) : null} label="TDEE" />
+      </div>
+    </Card>
+  );
+}
+
+function SummaryStat({ value, label }: { value: number | null; label: string }) {
+  return (
+    <div className="rounded-[14px] bg-card p-2.5 text-center text-[11px] text-muted-foreground">
+      <b className="mb-0.5 block text-[17px] text-foreground">{value ?? "—"}</b>
+      {label}
+    </div>
+  );
 }
 
 // ─── Profile ──────────────────────────────────────────────────────────────
@@ -124,10 +175,10 @@ function ProfileSection({
 
   return (
     <div>
-      <SectionTitle>Данные тела</SectionTitle>
+      <SectionCaps>Данные тела</SectionCaps>
       <Card>
-        <CardContent className="space-y-3 pt-4">
-          <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-2.5 p-[18px]">
+          <div className="grid grid-cols-2 gap-2.5">
             <Field label="Пол">
               <Select value={gender} onChange={(e) => setGender(e.target.value)}>
                 <option value="male">Мужской</option>
@@ -153,13 +204,18 @@ function ProfileSection({
               <option value="very_active">Очень активный</option>
             </Select>
           </Field>
-          <Field label="Цель">
-            <Select value={goal} onChange={(e) => setGoal(e.target.value)}>
-              <option value="lose">Похудение</option>
-              <option value="maintain">Поддержание</option>
-              <option value="gain">Набор массы</option>
-            </Select>
-          </Field>
+          <div>
+            <span className="mb-[5px] ml-1 block text-xs font-semibold text-muted-foreground">Цель</span>
+            <Segmented
+              value={goal}
+              onChange={setGoal}
+              options={[
+                { value: "lose", label: "Похудение" },
+                { value: "maintain", label: "Поддержание" },
+                { value: "gain", label: "Набор" },
+              ]}
+            />
+          </div>
           <div className="flex gap-2 pt-1">
             <Button
               variant="secondary"
@@ -177,7 +233,7 @@ function ProfileSection({
               Пересчитать нормы
             </Button>
           </div>
-        </CardContent>
+        </div>
       </Card>
     </div>
   );
@@ -217,27 +273,27 @@ function GoalsSection({
 
   return (
     <div>
-      <SectionTitle>Цели КБЖУ</SectionTitle>
+      <SectionCaps>Цели КБЖУ</SectionCaps>
       <Card>
-        <CardContent className="space-y-3 pt-4">
-          <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-3 p-[18px]">
+          <div className="grid grid-cols-2 gap-2.5">
             <Field label="Калории">
               <Input type="number" inputMode="numeric" value={cal} onChange={(e) => setCal(e.target.value)} />
             </Field>
-            <Field label="Белки, г">
+            <Field label="Белки, г" labelClassName="text-prot-fg">
               <Input type="number" inputMode="numeric" value={prot} onChange={(e) => setProt(e.target.value)} />
             </Field>
-            <Field label="Жиры, г">
+            <Field label="Жиры, г" labelClassName="text-fat-fg">
               <Input type="number" inputMode="numeric" value={fat} onChange={(e) => setFat(e.target.value)} />
             </Field>
-            <Field label="Углеводы, г">
+            <Field label="Углеводы, г" labelClassName="text-carb-fg">
               <Input type="number" inputMode="numeric" value={carbs} onChange={(e) => setCarbs(e.target.value)} />
             </Field>
           </div>
           <Button className="w-full" disabled={mutation.isPending} onClick={save}>
             Сохранить цели
           </Button>
-        </CardContent>
+        </div>
       </Card>
     </div>
   );
@@ -263,105 +319,113 @@ function SettingsSection({
 
   return (
     <div>
-      <SectionTitle>Настройки</SectionTitle>
-      <Card>
-        <CardContent className="divide-y divide-card-border pt-1">
-          <Toggle
-            label="Микронутриенты"
-            hint="Показывать клетчатку, сахар, натрий и т.п. в разборе блюда, а не только КБЖУ."
-            checked={!!user.showMicronutrients}
-            onChange={(v) => patch({ showMicronutrients: v })}
-          />
-          <Toggle
-            label="AI-анализ недели"
-            hint="ИИ пишет вывод по неделе: тренды и что подтянуть."
-            checked={!!user.aiWeekAnalysis}
-            onChange={(v) => patch({ aiWeekAnalysis: v })}
-          />
-          <Toggle
-            label="AI-анализ месяца"
-            hint="ИИ разбирает месяц и даёт рекомендации."
-            checked={!!user.aiMonthAnalysis}
-            onChange={(v) => patch({ aiMonthAnalysis: v })}
-          />
-          <Toggle
-            label="AI в вечернем отчёте"
-            hint="Добавляет к вечернему отчёту короткий совет от ИИ по итогам дня."
-            checked={!!user.aiEveningReport}
-            onChange={(v) => patch({ aiEveningReport: v })}
-          />
-          <Toggle
-            label="Умная группировка в Excel"
-            hint="При выгрузке в Excel ИИ объединяет одинаковые блюда в строки — файл чище."
-            checked={!!user.smartFoodGrouping}
-            onChange={(v) => patch({ smartFoodGrouping: v })}
-          />
-          <Toggle
-            label="Распознавание штрихкодов"
-            hint="Искать штрихкод на фото и подтягивать продукт из базы."
-            checked={!!user.barcodeScanEnabled}
-            onChange={(v) => patch({ barcodeScanEnabled: v })}
-          />
-          <Toggle
-            label="Умные напоминания"
-            hint="Обычное время приёмов бот выводит из истории и пингует, только если приём не записан к этому времени. Заменяют напоминания о еде по расписанию."
-            checked={!!user.smartReminders}
-            onChange={(v) => patch({ smartReminders: v })}
-          />
-        </CardContent>
+      <SectionCaps>Настройки</SectionCaps>
+      <Card className="divide-y divide-border px-[18px] py-1.5">
+        <Toggle
+          icon="🧪"
+          iconClassName="bg-prot-bg"
+          label="Микронутриенты"
+          hint="Показывать клетчатку, сахар, натрий и т.п. в разборе блюда, а не только КБЖУ."
+          checked={!!user.showMicronutrients}
+          onChange={(v) => patch({ showMicronutrients: v })}
+        />
+        <Toggle
+          icon="✨"
+          iconClassName="bg-carb-bg"
+          label="AI-анализ недели"
+          hint="ИИ пишет вывод по неделе: тренды и что подтянуть."
+          checked={!!user.aiWeekAnalysis}
+          onChange={(v) => patch({ aiWeekAnalysis: v })}
+        />
+        <Toggle
+          icon="✨"
+          iconClassName="bg-carb-bg"
+          label="AI-анализ месяца"
+          hint="ИИ разбирает месяц и даёт рекомендации."
+          checked={!!user.aiMonthAnalysis}
+          onChange={(v) => patch({ aiMonthAnalysis: v })}
+        />
+        <Toggle
+          icon="🌙"
+          iconClassName="bg-fat-bg"
+          label="AI в вечернем отчёте"
+          hint="Добавляет к вечернему отчёту короткий совет от ИИ по итогам дня."
+          checked={!!user.aiEveningReport}
+          onChange={(v) => patch({ aiEveningReport: v })}
+        />
+        <Toggle
+          icon="📊"
+          iconClassName="bg-water-soft"
+          label="Умная группировка в Excel"
+          hint="При выгрузке в Excel ИИ объединяет одинаковые блюда в строки — файл чище."
+          checked={!!user.smartFoodGrouping}
+          onChange={(v) => patch({ smartFoodGrouping: v })}
+        />
+        <Toggle
+          icon="🔎"
+          iconClassName="bg-fill"
+          label="Распознавание штрихкодов"
+          hint="Искать штрихкод на фото и подтягивать продукт из базы."
+          checked={!!user.barcodeScanEnabled}
+          onChange={(v) => patch({ barcodeScanEnabled: v })}
+        />
+        <Toggle
+          icon="🔔"
+          iconClassName="bg-accent-soft"
+          label="Умные напоминания"
+          hint="Обычное время приёмов бот выводит из истории и пингует, только если приём не записан к этому времени. Заменяют напоминания о еде по расписанию."
+          checked={!!user.smartReminders}
+          onChange={(v) => patch({ smartReminders: v })}
+        />
       </Card>
 
-      <SectionTitle>Время и напоминания</SectionTitle>
-      <Card>
-        <CardContent className="divide-y divide-card-border pt-1">
-          <TimeRow label="Вечерний отчёт" hint="Во сколько бот сам присылает отчёт за день." value={user.reportTime} onChange={(v) => patch({ reportTime: v })} />
-          <TimeRow label="Напоминание: завтрак" hint="Напоминание записать завтрак." value={user.breakfastReminder} onChange={(v) => patch({ breakfastReminder: v })} />
-          <TimeRow label="Напоминание: обед" hint="Напоминание записать обед." value={user.lunchReminder} onChange={(v) => patch({ lunchReminder: v })} />
-          <TimeRow label="Напоминание: ужин" hint="Напоминание записать ужин." value={user.dinnerReminder} onChange={(v) => patch({ dinnerReminder: v })} />
-          <TimeRow label="«Нет записей»" hint="Напоминание, если за день ничего не залогировано." value={user.noLogReminderTime} onChange={(v) => patch({ noLogReminderTime: v })} />
-          <TimeRow label="Взвешивание" hint="Во сколько напоминать взвеситься (дни — ниже)." value={user.weightReminderTime} onChange={(v) => patch({ weightReminderTime: v })} />
-          <WeekdayRow
-            value={user.weightReminderDays ?? ""}
-            onChange={(v) => patch({ weightReminderDays: v })}
-          />
-        </CardContent>
+      <SectionCaps>Время и напоминания</SectionCaps>
+      <Card className="divide-y divide-border px-[18px] py-1.5">
+        <TimeRow label="Вечерний отчёт" hint="Во сколько бот сам присылает отчёт за день." value={user.reportTime} onChange={(v) => patch({ reportTime: v })} />
+        <TimeRow label="Напоминание: завтрак" hint="Напоминание записать завтрак." value={user.breakfastReminder} onChange={(v) => patch({ breakfastReminder: v })} />
+        <TimeRow label="Напоминание: обед" hint="Напоминание записать обед." value={user.lunchReminder} onChange={(v) => patch({ lunchReminder: v })} />
+        <TimeRow label="Напоминание: ужин" hint="Напоминание записать ужин." value={user.dinnerReminder} onChange={(v) => patch({ dinnerReminder: v })} />
+        <TimeRow label="«Нет записей»" hint="Напоминание, если за день ничего не залогировано." value={user.noLogReminderTime} onChange={(v) => patch({ noLogReminderTime: v })} />
+        <TimeRow label="Взвешивание" hint="Во сколько напоминать взвеситься (дни — ниже)." value={user.weightReminderTime} onChange={(v) => patch({ weightReminderTime: v })} />
+        <WeekdayRow
+          value={user.weightReminderDays ?? ""}
+          onChange={(v) => patch({ weightReminderDays: v })}
+        />
       </Card>
 
-      <SectionTitle>Приёмы пищи и часовой пояс</SectionTitle>
-      <Card>
-        <CardContent className="divide-y divide-card-border pt-1">
-          <TimeRow
-            label="Завтрак до"
-            hint="Записи до этого времени бот относит к завтраку."
-            value={user.mealBreakfastEnd ?? "12:30"}
-            allowOff={false}
-            onChange={(v) => patch({ mealBreakfastEnd: v })}
-          />
-          <TimeRow
-            label="Обед до"
-            hint="До этого времени — обед, позже — ужин."
-            value={user.mealLunchEnd ?? "16:30"}
-            allowOff={false}
-            onChange={(v) => patch({ mealLunchEnd: v })}
-          />
-          <div className="flex items-center justify-between gap-3 py-3">
-            <div className="min-w-0 pr-2">
-              <div className="text-[15px]">Часовой пояс</div>
-              <div className="text-xs text-muted-foreground">По нему считаются «сегодня», время отчётов и напоминаний.</div>
-            </div>
-            <Select
-              className="h-9 w-44"
-              value={user.timezone ?? "Europe/Moscow"}
-              onChange={(e) => patch({ timezone: e.target.value })}
-            >
-              {TIMEZONES.map((tz) => (
-                <option key={tz} value={tz}>
-                  {tz}
-                </option>
-              ))}
-            </Select>
+      <SectionCaps>Приёмы пищи и часовой пояс</SectionCaps>
+      <Card className="divide-y divide-border px-[18px] py-1.5">
+        <TimeRow
+          label="Завтрак до"
+          hint="Записи до этого времени бот относит к завтраку."
+          value={user.mealBreakfastEnd ?? "12:30"}
+          allowOff={false}
+          onChange={(v) => patch({ mealBreakfastEnd: v })}
+        />
+        <TimeRow
+          label="Обед до"
+          hint="До этого времени — обед, позже — ужин."
+          value={user.mealLunchEnd ?? "16:30"}
+          allowOff={false}
+          onChange={(v) => patch({ mealLunchEnd: v })}
+        />
+        <div className="flex items-center justify-between gap-3 py-[13px]">
+          <div className="min-w-0 pr-2">
+            <div className="text-[15px]">Часовой пояс</div>
+            <div className="mt-0.5 text-xs leading-snug text-muted-foreground">По нему считаются «сегодня», время отчётов и напоминаний.</div>
           </div>
-        </CardContent>
+          <Select
+            className="h-9 w-44 rounded-[10px] text-sm"
+            value={user.timezone ?? "Europe/Moscow"}
+            onChange={(e) => patch({ timezone: e.target.value })}
+          >
+            {TIMEZONES.map((tz) => (
+              <option key={tz} value={tz}>
+                {tz}
+              </option>
+            ))}
+          </Select>
+        </div>
       </Card>
     </div>
   );
@@ -371,7 +435,7 @@ function SettingsSection({
 
 const GLOSSARY: { term: string; desc: string }[] = [
   { term: "Норма калорий", desc: "Ваша дневная цель по калориям. На «Сегодня» показывает, сколько съедено из нормы и сколько осталось." },
-  { term: "БЖУ", desc: "Белки, жиры и углеводы за день относительно ваших целей — три кольца на экране «Сегодня»." },
+  { term: "БЖУ", desc: "Белки, жиры и углеводы за день относительно ваших целей — три цветные плашки на экране «Сегодня»." },
   { term: "BMR", desc: "Базовый обмен: сколько калорий тело тратит в полном покое, только на поддержание жизни." },
   { term: "TDEE", desc: "Полный расход за день: BMR, умноженный на коэффициент вашего уровня активности." },
   { term: "Энергобаланс", desc: "Разница «съедено минус расход». Дефицит — тратите больше, чем едите (для похудения); профицит — наоборот." },
@@ -383,53 +447,71 @@ function GlossarySection() {
   const [open, setOpen] = useState(false);
   return (
     <div>
-      <SectionTitle>Справка</SectionTitle>
-      <Card>
+      <SectionCaps>Справка</SectionCaps>
+      <Card className="px-[18px] py-1.5">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="flex w-full items-center justify-between px-4 py-4 text-left"
+          className="flex w-full items-center gap-3 py-[13px] text-left"
           aria-expanded={open}
         >
-          <span className="text-[15px] font-medium">Что означают показатели</span>
+          <SettingIcon emoji="❓" className="bg-fill" />
+          <span className="flex-1 text-[15px]">Что означают показатели</span>
           <ChevronDown
-            className={`h-5 w-5 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
+            className={`h-4 w-4 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
           />
         </button>
         {open && (
-          <CardContent className="space-y-3 pt-0">
+          <div className="space-y-3 border-t border-border pb-3 pt-3">
             {GLOSSARY.map((g) => (
               <div key={g.term}>
                 <div className="text-sm font-semibold">{g.term}</div>
                 <div className="text-[13px] leading-snug text-muted-foreground">{g.desc}</div>
               </div>
             ))}
-          </CardContent>
+          </div>
         )}
       </Card>
     </div>
   );
 }
 
+/** Цветная иконка-эмодзи строки настроек, как в настройках iOS. */
+function SettingIcon({ emoji, className }: { emoji: string; className: string }) {
+  return (
+    <div
+      className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] text-[17px]", className)}
+      aria-hidden
+    >
+      {emoji}
+    </div>
+  );
+}
+
 function Toggle({
+  icon,
+  iconClassName,
   label,
   hint,
   checked,
   onChange,
 }: {
+  icon: string;
+  iconClassName: string;
   label: string;
   hint?: string;
   checked: boolean;
   onChange: (v: boolean) => void;
 }) {
   return (
-    <div className="flex items-center justify-between py-3">
-      <div className="pr-3">
+    <label className="flex items-center gap-3 py-[13px]">
+      <SettingIcon emoji={icon} className={iconClassName} />
+      <div className="min-w-0 flex-1">
         <div className="text-[15px]">{label}</div>
-        {hint && <div className="text-xs text-muted-foreground">{hint}</div>}
+        {hint && <div className="mt-0.5 text-xs leading-snug text-muted-foreground">{hint}</div>}
       </div>
       <Switch checked={checked} onCheckedChange={onChange} />
-    </div>
+    </label>
   );
 }
 
@@ -452,10 +534,10 @@ function TimeRow({
   const timeValue = isOff ? "" : current;
 
   return (
-    <div className="flex items-center justify-between gap-3 py-3">
+    <div className="flex items-center justify-between gap-3 py-[13px]">
       <div className="min-w-0 pr-2">
         <div className="text-[15px]">{label}</div>
-        {hint && <div className="text-xs text-muted-foreground">{hint}</div>}
+        {hint && <div className="mt-0.5 text-xs leading-snug text-muted-foreground">{hint}</div>}
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <input
@@ -467,7 +549,10 @@ function TimeRow({
             if (e.target.value) onChange(e.target.value);
           }}
           aria-label={label}
-          className="h-9 rounded-lg border border-input bg-background px-2 text-sm outline-none disabled:opacity-40"
+          className={cn(
+            "h-9 rounded-[10px] bg-fill px-2 text-[15px] outline-none disabled:opacity-40",
+            !isOff && "font-semibold text-primary",
+          )}
         />
         {allowOff && (
           <Switch
@@ -490,9 +575,9 @@ function WeekdayRow({ value, onChange }: { value: string; onChange: (v: string) 
     onChange(ordered.join(","));
   };
   return (
-    <div className="py-3">
+    <div className="py-[13px]">
       <div className="text-[15px]">Дни взвешивания</div>
-      <div className="mb-2 text-xs text-muted-foreground">По каким дням недели напоминать взвеситься.</div>
+      <div className="mb-2 mt-0.5 text-xs text-muted-foreground">По каким дням недели напоминать взвеситься.</div>
       <div className="flex gap-1.5">
         {WEEKDAYS.map((w) => {
           const active = selected.includes(w.v);
@@ -502,9 +587,10 @@ function WeekdayRow({ value, onChange }: { value: string; onChange: (v: string) 
               type="button"
               aria-pressed={active}
               onClick={() => toggle(w.v)}
-              className={`h-9 flex-1 rounded-lg text-xs font-medium ${
-                active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
-              }`}
+              className={cn(
+                "h-9 flex-1 rounded-[10px] text-xs font-semibold",
+                active ? "bg-accent-soft text-primary" : "bg-fill text-muted-foreground",
+              )}
             >
               {w.l}
             </button>

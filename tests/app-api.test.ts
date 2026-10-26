@@ -27,7 +27,13 @@ const { createAppApiRouter } = await import("../server/app-api");
 type AppApiDeps = import("../server/app-api").AppApiDeps;
 type AppApiStorage = import("../server/app-api").AppApiStorage;
 const { createTelegramAuth } = await import("../server/lib/telegram-auth");
-const { todayKey } = await import("../server/lib/tz");
+const { todayKey, addDaysKey } = await import("../server/lib/tz");
+const { lastNDayKeys, dayKeysEndingAt } = await import("../server/lib/stats-days");
+const { analyzedItemSchema } = await import("../shared/routes");
+const { createAiQuota } = await import("../server/lib/ai-quota");
+const { getSharedAiQuota } = await import("../server/lib/ai-quota-instance");
+type BarcodeProduct = import("../shared/schema").BarcodeProduct;
+type InsertBarcodeProduct = import("../shared/schema").InsertBarcodeProduct;
 
 // ─── Fake storage ────────────────────────────────────────────────────────────
 
@@ -81,6 +87,7 @@ class FakeStorage implements AppApiStorage {
   foodLogs: FoodLog[] = [];
   waterLogs: WaterLog[] = [];
   favorites: Favorite[] = [];
+  barcodeProducts = new Map<string, BarcodeProduct>();
   private seq = 1000;
   /** Если задано — каждый вызов getFoodLogsInRange бросает это исключение. */
   failRange: Error | null = null;
@@ -153,8 +160,10 @@ class FakeStorage implements AppApiStorage {
   async getMonthlyStats() {
     return [];
   }
-  async getWeeklyFullStats() {
-    return [];
+  /** Дни — как в DatabaseStorage (тот же хелпер), макросы нулевые. */
+  async getWeeklyFullStats(_userId: number, tz: string, endKey?: string) {
+    const days = endKey ? dayKeysEndingAt(endKey, 7) : lastNDayKeys(new Date(), tz, 7);
+    return days.map((date) => ({ date, dayLabel: date, calories: 0, protein: 0, fat: 0, carbs: 0 }));
   }
   async getStreak() {
     return 0;
@@ -214,6 +223,14 @@ class FakeStorage implements AppApiStorage {
   async calculateAndSetGoals(userId: number) {
     return this.users.get(userId)!;
   }
+  async getBarcodeProduct(barcode: string) {
+    return this.barcodeProducts.get(barcode);
+  }
+  async upsertBarcodeProduct(p: InsertBarcodeProduct) {
+    const row: BarcodeProduct = { ...p, hydrating: p.hydrating ?? false, createdAt: new Date() };
+    this.barcodeProducts.set(p.barcode, row);
+    return row;
+  }
 }
 
 // ─── Harness ─────────────────────────────────────────────────────────────────
@@ -253,6 +270,14 @@ async function startHarness(storage = seed(), analyzer?: Partial<AppApiDeps>): P
       auth: createTelegramAuth(() => ({ botToken: TEST_TOKEN, storage })),
       analyzeFoodText: fakeAnalyze,
       analyzeFoodImage: fakeAnalyze,
+      // Без zxing, LLM и сети: по умолчанию штрихкода нет, OFF не знает ничего.
+      decodeBarcode: async () => null,
+      detectBarcodeAi: async () => null,
+      lookupBarcodeOff: async () => null,
+      transcribeAudio: async () => ({ text: "гречка 200 грамм" }),
+      // Своя квота на каждый сервер, с запасом: общий экземпляр процесса тесты
+      // не трогают (кроме теста, который проверяет именно его).
+      aiQuota: createAiQuota({ dailyRequests: 1_000_000, dailyPhotos: 1_000_000 }),
       ...analyzer,
     }),
   );
@@ -731,6 +756,440 @@ describe("POST /analyze", () => {
       assert.equal(day.status, 200);
     } finally {
       await local.close();
+    }
+  });
+});
+
+// ─── /analyze: штрихкод ──────────────────────────────────────────────────────
+
+describe("POST /analyze: штрихкод", () => {
+  const EAN = "4600682000037";
+  const IMG = "QUJD";
+  const cached: InsertBarcodeProduct = {
+    barcode: EAN,
+    foodName: "Кефир 2,5%",
+    caloriesPer100: 50,
+    proteinPer100: 3,
+    fatPer100: 2.5,
+    carbsPer100: 4,
+    defaultWeight: 200,
+    hydrating: false,
+    source: "off",
+  };
+
+  /** Счётчики вызовов фейков и подсказка, с которой позвали vision. */
+  function spies() {
+    return { decode: 0, detectAi: 0, off: 0, vision: 0, hint: undefined as unknown };
+  }
+  function barcodeDeps(sp: ReturnType<typeof spies>, opts: { decoded?: string | null; ai?: string | null; off?: any } = {}): Partial<AppApiDeps> {
+    return {
+      decodeBarcode: async () => {
+        sp.decode++;
+        return opts.decoded ?? null;
+      },
+      detectBarcodeAi: async () => {
+        sp.detectAi++;
+        return opts.ai ?? null;
+      },
+      lookupBarcodeOff: async () => {
+        sp.off++;
+        return opts.off ?? null;
+      },
+      analyzeFoodImage: async (_img, _now, _bounds, hint) => {
+        sp.vision++;
+        sp.hint = hint;
+        return [{ foodName: "Тарелка", calories: 400, protein: 20, fat: 10, carbs: 50, weight: 300, mealType: "lunch" }];
+      },
+    };
+  }
+
+  test("photo + штрихкод в кэше → source barcode, vision не вызван, items проходят analyzedItemSchema", async () => {
+    const s = seed();
+    await s.upsertBarcodeProduct(cached);
+    const sp = spies();
+    const local = await startHarness(s, barcodeDeps(sp, { decoded: EAN }));
+    try {
+      const r = await local.call("POST", "/analyze", { body: { imageBase64: IMG } });
+      assert.equal(r.status, 200);
+      assert.equal(r.json.source, "barcode");
+      assert.equal(sp.vision, 0);
+      assert.equal(sp.detectAi, 0, "в режиме photo AI-поиск штрихкода не нужен");
+      assert.equal(r.json.items.length, 1);
+      const item = r.json.items[0];
+      assert.equal(item.foodName, "Кефир 2,5%");
+      assert.equal(item.calories, 100);
+      assert.notEqual(item.mealType, "snack", "mealType должен считаться по времени");
+      for (const it of r.json.items) analyzedItemSchema.parse(it);
+      // Ответ можно сразу отправить в POST /logs.
+      const saved = await local.call("POST", "/logs", { body: { items: r.json.items } });
+      assert.equal(saved.status, 201);
+    } finally {
+      await local.close();
+    }
+  });
+
+  test("photo + штрихкод из OFF → source barcode, запись в кэш, items без лишних полей", async () => {
+    const s = seed();
+    const sp = spies();
+    const off = {
+      foodName: "Сок яблочный", calories: 92, protein: 0, fat: 0, carbs: 22, weight: 200,
+      mealType: "snack", hydrating: false, barcode: EAN, foundInDb: true,
+    };
+    const local = await startHarness(s, barcodeDeps(sp, { decoded: EAN, off }));
+    try {
+      const r = await local.call("POST", "/analyze", { body: { imageBase64: IMG } });
+      assert.equal(r.status, 200);
+      assert.equal(r.json.source, "barcode");
+      assert.equal(sp.vision, 0);
+      const item = r.json.items[0];
+      assert.ok(!("barcode" in item) && !("foundInDb" in item), JSON.stringify(item));
+      analyzedItemSchema.parse(item);
+      assert.equal(s.barcodeProducts.get(EAN)?.source, "off");
+    } finally {
+      await local.close();
+    }
+  });
+
+  test("photo без штрихкода → обычный vision без подсказки, source vision", async () => {
+    const sp = spies();
+    const local = await startHarness(seed(), barcodeDeps(sp));
+    try {
+      const r = await local.call("POST", "/analyze", { body: { imageBase64: IMG } });
+      assert.equal(r.status, 200);
+      assert.equal(r.json.source, "vision");
+      assert.equal(sp.decode, 1);
+      assert.equal(sp.detectAi, 0);
+      assert.equal(sp.vision, 1);
+      assert.equal(sp.hint, undefined);
+      for (const it of r.json.items) analyzedItemSchema.parse(it);
+    } finally {
+      await local.close();
+    }
+  });
+
+  test("vision с дробной оценкой и длинным советом → items всё равно проходят analyzedItemSchema", async () => {
+    const sp = spies();
+    const deps = barcodeDeps(sp);
+    deps.analyzeFoodImage = async () => [
+      {
+        foodName: "Пицца", calories: 800, protein: 30, fat: 35, carbs: 90, weight: 300, mealType: "dinner",
+        foodScore: 3.6, nutritionAdvice: "а".repeat(700),
+      },
+    ];
+    const local = await startHarness(seed(), deps);
+    try {
+      const r = await local.call("POST", "/analyze", { body: { imageBase64: IMG } });
+      assert.equal(r.status, 200);
+      const item = analyzedItemSchema.parse(r.json.items[0]);
+      assert.equal(item.foodScore, 4);
+      assert.equal(item.nutritionAdvice?.length, 500);
+    } finally {
+      await local.close();
+    }
+  });
+
+  test("photo при barcodeScanEnabled=false → decode не вызывается", async () => {
+    const s = seed();
+    s.users.get(1)!.barcodeScanEnabled = false;
+    const sp = spies();
+    const local = await startHarness(s, barcodeDeps(sp, { decoded: EAN }));
+    try {
+      const r = await local.call("POST", "/analyze", { body: { imageBase64: IMG, mode: "photo" } });
+      assert.equal(r.status, 200);
+      assert.equal(r.json.source, "vision");
+      assert.equal(sp.decode, 0);
+      assert.equal(sp.vision, 1);
+    } finally {
+      await local.close();
+    }
+  });
+
+  test("photo + штрихкод не в базе → vision с подсказкой", async () => {
+    const sp = spies();
+    const local = await startHarness(seed(), barcodeDeps(sp, { decoded: EAN }));
+    try {
+      const r = await local.call("POST", "/analyze", { body: { imageBase64: IMG } });
+      assert.equal(r.status, 200);
+      assert.equal(r.json.source, "vision");
+      assert.deepEqual(sp.hint, { barcode: EAN });
+    } finally {
+      await local.close();
+    }
+  });
+
+  test("barcode без штрихкода → 422 no_barcode, vision не вызван", async () => {
+    const sp = spies();
+    const local = await startHarness(seed(), barcodeDeps(sp, { ai: "1234567890123" /* битая контрольная сумма */ }));
+    try {
+      const r = await local.call("POST", "/analyze", { body: { imageBase64: IMG, mode: "barcode" } });
+      assert.equal(r.status, 422);
+      assert.equal(r.json.error, "no_barcode");
+      assert.equal(sp.decode, 1);
+      assert.equal(sp.detectAi, 1);
+      assert.equal(sp.vision, 0);
+    } finally {
+      await local.close();
+    }
+  });
+
+  test("barcode + OFF промах → vision получил подсказку с barcode и названием из OFF", async () => {
+    const s = seed();
+    s.users.get(1)!.barcodeScanEnabled = false; // режим barcode настройку не смотрит
+    const sp = spies();
+    const local = await startHarness(s, barcodeDeps(sp, { ai: EAN, off: { foundInDb: false, productName: "Кефир" } }));
+    try {
+      const r = await local.call("POST", "/analyze", { body: { imageBase64: IMG, mode: "barcode" } });
+      assert.equal(r.status, 200);
+      assert.equal(r.json.source, "vision");
+      assert.equal(sp.off, 1);
+      assert.deepEqual(sp.hint, { productName: "Кефир", barcode: EAN });
+      assert.equal(s.barcodeProducts.size, 0, "vision-результат Mini App в кэш не пишется");
+    } finally {
+      await local.close();
+    }
+  });
+
+  test("mode без картинки или с неизвестным значением → 400", async () => {
+    const sp = spies();
+    const local = await startHarness(seed(), barcodeDeps(sp));
+    try {
+      for (const body of [{ text: "яблоко", mode: "photo" }, { text: "яблоко", mode: "barcode" }, { imageBase64: IMG, mode: "qr" }]) {
+        const r = await local.call("POST", "/analyze", { body });
+        assert.equal(r.status, 400, JSON.stringify(body));
+      }
+      assert.equal(sp.decode + sp.vision, 0);
+    } finally {
+      await local.close();
+    }
+  });
+
+  test("текст → source vision, items проходят analyzedItemSchema", async () => {
+    const r = await h.call("POST", "/analyze", { body: { text: "яблоко" } });
+    assert.equal(r.status, 200);
+    assert.equal(r.json.source, "vision");
+    for (const it of r.json.items) analyzedItemSchema.parse(it);
+  });
+});
+
+// ─── /transcribe ─────────────────────────────────────────────────────────────
+
+describe("POST /transcribe", () => {
+  const AUDIO = Buffer.from("fake-ogg-bytes").toString("base64");
+
+  test("200 { text }, расшифровщик получил байты и mimeType", async () => {
+    let got: { buf: Buffer; mime: string } | null = null;
+    const local = await startHarness(seed(), {
+      transcribeAudio: async (buf, mime) => {
+        got = { buf, mime };
+        return { text: "овсянка" };
+      },
+    });
+    try {
+      const r = await local.call("POST", "/transcribe", { body: { audioBase64: AUDIO, mimeType: "audio/webm;codecs=opus" } });
+      assert.equal(r.status, 200);
+      assert.deepEqual(r.json, { text: "овсянка" });
+      assert.equal(got!.buf.toString(), "fake-ogg-bytes");
+      assert.equal(got!.mime, "audio/webm;codecs=opus");
+    } finally {
+      await local.close();
+    }
+  });
+
+  test("пустая расшифровка → 422 unrecognized", async () => {
+    for (const text of [null, "", "   "]) {
+      const local = await startHarness(seed(), { transcribeAudio: async () => ({ text }) });
+      try {
+        const r = await local.call("POST", "/transcribe", { body: { audioBase64: AUDIO, mimeType: "audio/ogg" } });
+        assert.equal(r.status, 422, String(text));
+        assert.equal(r.json.error, "unrecognized");
+      } finally {
+        await local.close();
+      }
+    }
+  });
+
+  test("длиннее 60 с → 422 too_long", async () => {
+    const local = await startHarness(seed(), { transcribeAudio: async () => ({ tooLong: true }) });
+    try {
+      const r = await local.call("POST", "/transcribe", { body: { audioBase64: AUDIO, mimeType: "audio/mp4" } });
+      assert.equal(r.status, 422);
+      assert.equal(r.json.error, "too_long");
+    } finally {
+      await local.close();
+    }
+  });
+
+  test("невалидное тело → 400, расшифровщик не вызывается", async () => {
+    let calls = 0;
+    const local = await startHarness(seed(), {
+      transcribeAudio: async () => {
+        calls++;
+        return { text: "x" };
+      },
+    });
+    try {
+      const bodies: unknown[] = [
+        {},
+        { audioBase64: AUDIO },
+        { mimeType: "audio/ogg" },
+        { audioBase64: "", mimeType: "audio/ogg" },
+        { audioBase64: "не base64!", mimeType: "audio/ogg" },
+        { audioBase64: "A".repeat(700_004), mimeType: "audio/ogg" },
+        { audioBase64: AUDIO, mimeType: "video/mp4" },
+        { audioBase64: AUDIO, mimeType: "audio/ogg\nx" },
+        { audioBase64: AUDIO, mimeType: "audio/" + "a".repeat(100) },
+        { audioBase64: AUDIO, mimeType: "audio/ogg", extra: 1 },
+      ];
+      for (const body of bodies) {
+        const r = await local.call("POST", "/transcribe", { body });
+        assert.equal(r.status, 400, JSON.stringify(body).slice(0, 80));
+      }
+      assert.equal(calls, 0);
+    } finally {
+      await local.close();
+    }
+  });
+
+  test("общий лимит с /analyze: после 10 анализов → 429", async () => {
+    const local = await startHarness();
+    try {
+      for (let i = 0; i < 10; i++) {
+        const r = await local.call("POST", "/analyze", { body: { text: "яблоко" } });
+        assert.equal(r.status, 200);
+      }
+      const r = await local.call("POST", "/transcribe", { body: { audioBase64: AUDIO, mimeType: "audio/ogg" } });
+      assert.equal(r.status, 429);
+    } finally {
+      await local.close();
+    }
+  });
+});
+
+// ─── Дневная AI-квота ────────────────────────────────────────────────────────
+
+describe("дневная AI-квота", () => {
+  const AUDIO = Buffer.from("fake-ogg-bytes").toString("base64");
+  const IMG = "QUJD";
+  const TZ = "Europe/Moscow";
+
+  test("исчерпана → 429 quota_exceeded на /analyze и /transcribe, AI не вызывается", async () => {
+    let transcribeCalls = 0;
+    const quota = createAiQuota({ dailyRequests: 1, dailyPhotos: 1 });
+    assert.equal(quota.tryConsume("1", TZ, "request").allowed, true);
+    const local = await startHarness(seed(), {
+      aiQuota: quota,
+      transcribeAudio: async () => {
+        transcribeCalls++;
+        return { text: "x" };
+      },
+    });
+    try {
+      for (const body of [{ text: "яблоко" }, { imageBase64: IMG }, { imageBase64: IMG, mode: "barcode" }]) {
+        const r = await local.call("POST", "/analyze", { body });
+        assert.equal(r.status, 429, JSON.stringify(body));
+        assert.deepEqual(r.json, { error: "quota_exceeded" });
+      }
+      const t = await local.call("POST", "/transcribe", { body: { audioBase64: AUDIO, mimeType: "audio/ogg" } });
+      assert.equal(t.status, 429);
+      assert.deepEqual(t.json, { error: "quota_exceeded" });
+      assert.equal(local.analyzeCalls, 0);
+      assert.equal(transcribeCalls, 0);
+
+      // У другого пользователя своя квота.
+      const bob = await local.call("POST", "/analyze", { tg: BOB_TG, body: { text: "яблоко" } });
+      assert.equal(bob.status, 200);
+    } finally {
+      await local.close();
+    }
+  });
+
+  test("фото списывается из photo, текст и голос — только из requests", async () => {
+    const quota = createAiQuota({ dailyRequests: 10, dailyPhotos: 1 });
+    const local = await startHarness(seed(), { aiQuota: quota });
+    try {
+      assert.equal((await local.call("POST", "/analyze", { body: { imageBase64: IMG } })).status, 200);
+      assert.deepEqual(quota.usage("1", TZ), { requests: 1, photos: 1 });
+
+      const second = await local.call("POST", "/analyze", { body: { imageBase64: IMG } });
+      assert.equal(second.status, 429);
+      assert.deepEqual(second.json, { error: "quota_exceeded" });
+
+      assert.equal((await local.call("POST", "/analyze", { body: { text: "яблоко" } })).status, 200);
+      assert.equal((await local.call("POST", "/transcribe", { body: { audioBase64: AUDIO, mimeType: "audio/ogg" } })).status, 200);
+      assert.deepEqual(quota.usage("1", TZ), { requests: 3, photos: 1 });
+    } finally {
+      await local.close();
+    }
+  });
+
+  test("невалидное тело квоту не списывает", async () => {
+    const quota = createAiQuota({ dailyRequests: 10, dailyPhotos: 10 });
+    const local = await startHarness(seed(), { aiQuota: quota });
+    try {
+      assert.equal((await local.call("POST", "/analyze", { body: { text: "   " } })).status, 400);
+      assert.equal((await local.call("POST", "/transcribe", { body: { audioBase64: AUDIO, mimeType: "video/mp4" } })).status, 400);
+      assert.deepEqual(quota.usage("1", TZ), { requests: 0, photos: 0 });
+    } finally {
+      await local.close();
+    }
+  });
+
+  test("по умолчанию роутер списывает из общего экземпляра процесса (тот же, что у бота)", async () => {
+    const shared = getSharedAiQuota();
+    assert.equal(getSharedAiQuota(), shared, "экземпляр один на процесс");
+    const before = shared.usage("1", TZ).requests;
+    const local = await startHarness(seed(), { aiQuota: undefined });
+    try {
+      assert.equal((await local.call("POST", "/analyze", { body: { text: "яблоко" } })).status, 200);
+      assert.equal(shared.usage("1", TZ).requests, before + 1);
+    } finally {
+      await local.close();
+    }
+  });
+});
+
+describe("POST /transcribe: занято", () => {
+  test("все слоты перекодирования заняты → 503 busy", async () => {
+    const local = await startHarness(seed(), { transcribeAudio: async () => ({ busy: true }) });
+    try {
+      const r = await local.call("POST", "/transcribe", {
+        body: { audioBase64: Buffer.from("x").toString("base64"), mimeType: "audio/ogg" },
+      });
+      assert.equal(r.status, 503);
+      assert.deepEqual(r.json, { error: "busy" });
+    } finally {
+      await local.close();
+    }
+  });
+});
+
+// ─── /stats ──────────────────────────────────────────────────────────────────
+
+describe("GET /stats", () => {
+  test("week без end — 7 дней, последний сегодня", async () => {
+    const r = await h.call("GET", "/stats?range=week");
+    assert.equal(r.status, 200);
+    assert.equal(r.json.days.length, 7);
+    assert.equal(r.json.days[6].date, todayKey(new Date(), "Europe/Moscow"));
+  });
+
+  test("week с end — 7 дней, кончаются end", async () => {
+    const r = await h.call("GET", "/stats?range=week&end=2026-03-01");
+    assert.equal(r.status, 200);
+    assert.deepEqual(
+      r.json.days.map((d: { date: string }) => d.date),
+      ["2026-02-23", "2026-02-24", "2026-02-25", "2026-02-26", "2026-02-27", "2026-02-28", "2026-03-01"],
+    );
+  });
+
+  test("end = сегодня допустим, завтра и кривые даты → 400", async () => {
+    const today = todayKey(new Date(), "Europe/Moscow");
+    const ok = await h.call("GET", `/stats?range=week&end=${today}`);
+    assert.equal(ok.status, 200);
+    assert.equal(ok.json.days[6].date, today);
+    for (const end of [addDaysKey(today, 1), "2026-02-30", "01.03.2026", ""]) {
+      const r = await h.call("GET", `/stats?range=week&end=${end}`);
+      assert.equal(r.status, 400, end);
     }
   });
 });

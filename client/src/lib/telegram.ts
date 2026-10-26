@@ -64,6 +64,8 @@ export interface TelegramWebApp {
   disableVerticalSwipes?(): void;
   setHeaderColor?(color: string): void;
   setBackgroundColor?(color: string): void;
+  /** Bot API 7.10+: цвет нижней панели. */
+  setBottomBarColor?(color: string): void;
 }
 
 declare global {

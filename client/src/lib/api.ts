@@ -17,7 +17,10 @@ import type {
   CreateFavoriteBody,
   LogApplyResponse,
   AnalyzedItem,
+  AnalyzeBody,
   AnalyzeResponse,
+  TranscribeBody,
+  TranscribeResponse,
 } from "./types";
 
 const BASE = "/api/app";
@@ -89,8 +92,9 @@ export const api = {
   me: () => request<MeResponse>("GET", "/me"),
   day: (date?: string) =>
     request<DayResponse>("GET", date ? `/day?date=${date}` : "/day"),
-  stats: (range: "week" | "month") =>
-    request<StatsResponse>("GET", `/stats?range=${range}`),
+  /** `end` (YYYY-MM-DD, не позже сегодня) — неделя, кончающаяся этим днём. */
+  stats: (range: "week" | "month", end?: string) =>
+    request<StatsResponse>("GET", `/stats?range=${range}${end ? `&end=${end}` : ""}`),
   weight: (limit = 90) =>
     request<WeightResponse>("GET", `/weight?limit=${limit}`),
   updateLog: (id: number, body: UpdateLogBody) =>
@@ -120,9 +124,12 @@ export const api = {
   repeatLog: (id: number) =>
     request<LogApplyResponse>("POST", `/logs/${id}/repeat`),
 
-  // Ручной ввод еды: AI-анализ фото/текста → подтверждение → запись.
-  analyzeFood: (payload: { text?: string; imageBase64?: string }) =>
+  // Ручной ввод еды: AI-анализ фото/штрихкода/текста → подтверждение → запись.
+  analyzeFood: (payload: AnalyzeBody) =>
     request<AnalyzeResponse>("POST", "/analyze", payload, ANALYZE_TIMEOUT_MS),
+  // Голосовой ввод: запись → текст в поле описания (пользователь правит сам).
+  transcribe: (payload: TranscribeBody) =>
+    request<TranscribeResponse>("POST", "/transcribe", payload, ANALYZE_TIMEOUT_MS),
   createLogs: (items: AnalyzedItem[]) =>
     request<LogApplyResponse>("POST", "/logs", { items }),
 };

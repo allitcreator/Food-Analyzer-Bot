@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mini App — все экраны в тёплом стиле</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif; background: #e9e4de; color: #222; padding: 32px 24px 64px; -webkit-font-smoothing: antialiased; }
+  h1 { font-size: 26px; margin-bottom: 6px; }
+  .lead { color: #555; max-width: 960px; margin-bottom: 28px; font-size: 15px; line-height: 1.5; }
+  .grid { display: flex; flex-wrap: wrap; gap: 40px 32px; }
+  .variant { width: 375px; }
+  .variant h2 { font-size: 18px; margin-bottom: 4px; }
+  .variant ul { font-size: 13px; color: #333; margin: 6px 0 14px 18px; line-height: 1.45; min-height: 58px; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* ---------- палитра ---------- */
+  .phone {
+    --bg: #fdf6ee; --card: #fff; --fg: #3b2f2a; --muted: #9a8478; --line: #efe2d6; --fill: #f7ede4;
+    --accent: #e0703a; --accent-soft: #fbe9dc; --ok: #2f8a52; --ok-soft: #e7f6ec; --bad: #d1493f; --bad-soft: #fde4e1;
+    --p-bg: #e7f6ec; --p-fg: #226b3f; --f-bg: #fff1dc; --f-fg: #9a5a10; --c-bg: #f1e9fb; --c-fg: #6a3d9e;
+    --water: #7cb8ec; --water-soft: #eaf3fb; --shadow: 0 4px 16px rgba(120,70,30,.07);
+    --wk-ok: #8cc79f; --wk-near: #f0b25a; --wk-over: #e0703a; --wk-today: #f3c9ad;
+    width: 375px; height: 780px; border-radius: 44px; overflow: hidden; position: relative;
+    background: var(--bg); color: var(--fg);
+    box-shadow: 0 0 0 10px #1b1b1d, 0 20px 50px rgba(0,0,0,.25);
+  }
+  .phone.dark {
+    --bg: #1b1613; --card: #28201b; --fg: #f5ebe3; --muted: #a8958a; --line: #3a302a; --fill: #332a24;
+    --accent: #f08a52; --accent-soft: #4a2f20; --ok: #7fd09c; --ok-soft: #1f3a2a; --bad: #ff8a7f; --bad-soft: #4a2420;
+    --p-bg: #1f3a2a; --p-fg: #9adbb1; --f-bg: #3d2e17; --f-fg: #f0bf73; --c-bg: #33283f; --c-fg: #cdb0f0;
+    --water: #5aa3e0; --water-soft: #1f2d3a; --shadow: none;
+    --wk-ok: #4f9a6a; --wk-near: #c08a3a; --wk-over: #f08a52; --wk-today: #6a4a36;
+  }
+  .scroll { height: 100%; overflow-y: auto; padding-bottom: 110px; scrollbar-width: none; }
+  .scroll::-webkit-scrollbar { display: none; }
+  .tg-head { height: 50px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; font-size: 15px; }
+  .tg-head span { opacity: .55; }
+  svg.ico { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+  svg.ico.s { width: 16px; height: 16px; }
+
+  .ptitle { display: flex; justify-content: space-between; align-items: baseline; padding: 2px 20px 12px; }
+  .ptitle b { font-size: 26px; letter-spacing: -.4px; }
+  .ptitle span { font-size: 13px; color: var(--muted); }
+  .card { background: var(--card); border-radius: 26px; margin: 0 16px 14px; padding: 18px; box-shadow: var(--shadow); }
+  .card.tight { padding: 6px 18px; }
+  h3 { font-size: 19px; padding: 6px 20px 10px; display: flex; justify-content: space-between; align-items: baseline; }
+  h3 small { font-size: 14px; color: var(--muted); font-weight: 500; }
+  .muted { color: var(--muted); }
+
+  /* неделя */
+  .week { display: grid; grid-template-columns: repeat(7,1fr); gap: 6px; padding: 0 16px 16px; }
+  .wd { text-align: center; font-size: 11px; color: var(--muted); }
+  .wd i { display: block; height: 44px; border-radius: 10px; background: var(--fill); margin-bottom: 4px; position: relative; overflow: hidden; }
+  .wd i::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: var(--h); background: var(--c, var(--wk-ok)); }
+  .wd.near i { --c: var(--wk-near); } .wd.over i { --c: var(--wk-over); } .wd.today i { --c: var(--wk-today); }
+  .wd.on { color: var(--fg); font-weight: 700; }
+  .wd.on i { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  /* hero */
+  .heroC { display: flex; align-items: center; gap: 16px; }
+  .heroC .t b { font-size: 30px; display: block; line-height: 1.1; }
+  .heroC .t span { color: var(--muted); font-size: 14px; }
+  .badge { display: inline-flex; align-items: center; gap: 5px; margin-top: 10px; background: var(--ok-soft); color: var(--ok); padding: 5px 10px; border-radius: 12px; font-size: 13px; font-weight: 600; }
+  .badge.warn { background: var(--bad-soft); color: var(--bad); }
+  .ring-track { stroke: var(--accent-soft); } .ring-val { stroke: var(--accent); }
+  .macroPills { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-top: 16px; }
+  .mp { border-radius: 18px; padding: 12px; }
+  .mp span { font-size: 12px; font-weight: 600; opacity: .8; }
+  .mp b { display: block; font-size: 19px; margin-top: 2px; }
+  .mp small { font-size: 12px; opacity: .75; }
+  .mp .bar { height: 4px; border-radius: 2px; background: currentColor; opacity: .18; margin-top: 8px; position: relative; }
+  .mp .bar + .fillb { height: 4px; border-radius: 2px; background: currentColor; margin-top: -4px; }
+  .mp.p { background: var(--p-bg); color: var(--p-fg); } .mp.f { background: var(--f-bg); color: var(--f-fg); } .mp.c { background: var(--c-bg); color: var(--c-fg); }
+  .energy { display: flex; justify-content: space-between; margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--line); font-size: 13px; color: var(--muted); }
+  .energy b { color: var(--fg); font-size: 15px; display: block; }
+
+  .tip { background: var(--f-bg); color: var(--fg); border-radius: 20px; margin: 0 16px 14px; padding: 14px 16px; font-size: 14px; display: flex; gap: 10px; line-height: 1.4; }
+
+  /* чипы избранного */
+  .chips { display: flex; gap: 8px; padding: 0 16px 16px; overflow-x: auto; scrollbar-width: none; }
+  .chip { flex-shrink: 0; background: var(--card); border-radius: 16px; padding: 9px 14px; font-size: 14px; box-shadow: var(--shadow); }
+  .chip small { color: var(--muted); margin-left: 4px; }
+  .chip::before { content: "+ "; color: var(--accent); font-weight: 700; }
+
+  /* приёмы пищи */
+  .mealC { display: flex; gap: 12px; align-items: flex-start; }
+  .mealC + .mealC { margin-top: 16px; padding-top: 16px; border-top: 1px dashed var(--line); }
+  .plate { width: 48px; height: 48px; border-radius: 24px; display: flex; align-items: center; justify-content: center; font-size: 24px; flex-shrink: 0; }
+  .plate.b { background: var(--f-bg); } .plate.l { background: var(--p-bg); } .plate.s { background: var(--c-bg); } .plate.d { background: var(--bad-soft); } .plate.w { background: var(--accent-soft); }
+  .mealC .t { flex: 1; min-width: 0; }
+  .mealC .t > b { font-size: 16px; display: flex; justify-content: space-between; }
+  .mealC .t > b span { font-weight: 600; color: var(--accent); }
+  .mealC .t p { font-size: 13px; color: var(--muted); margin-top: 3px; line-height: 1.35; }
+  .emptyAdd { display: inline-block; margin-top: 6px; color: var(--accent); font-weight: 600; font-size: 14px; }
+  .food { display: flex; align-items: center; gap: 8px; padding: 8px 0; }
+  .food + .food { border-top: 1px solid var(--line); }
+  .food .n { flex: 1; min-width: 0; }
+  .food .n b { font-weight: 500; font-size: 15px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .food .n span { font-size: 12px; color: var(--muted); }
+  .food .k { font-size: 14px; font-weight: 600; }
+  .act { width: 32px; height: 32px; border-radius: 16px; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+  .act.on { color: var(--accent); }
+  .act.on svg { fill: currentColor; }
+
+  /* вода */
+  .drops { display: flex; gap: 6px; margin-top: 12px; }
+  .drop { flex: 1; height: 34px; border-radius: 10px; background: var(--water-soft); }
+  .drop.f { background: var(--water); }
+  .wbtns { display: flex; gap: 8px; margin-top: 12px; }
+  .wbtn { flex: 1; text-align: center; border-radius: 14px; padding: 10px 0; font-size: 14px; font-weight: 600; background: var(--water-soft); color: var(--water); }
+
+  /* кнопки и поля */
+  .btn { display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 16px; padding: 13px; font-size: 15px; font-weight: 600; background: var(--accent); color: #fff; }
+  .btn.sec { background: var(--fill); color: var(--fg); }
+  .btn.sm { padding: 9px 14px; font-size: 14px; border-radius: 14px; }
+  .input { background: var(--fill); border-radius: 14px; padding: 12px 14px; font-size: 15px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  .input.val { color: var(--fg); }
+  .seg { display: flex; background: var(--fill); border-radius: 14px; padding: 3px; font-size: 13px; font-weight: 600; }
+  .seg div { flex: 1; text-align: center; padding: 7px 12px; border-radius: 11px; color: var(--muted); }
+  .seg .on { background: var(--card); color: var(--fg); box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+  .switch { width: 46px; height: 28px; border-radius: 14px; background: var(--line); position: relative; flex-shrink: 0; }
+  .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 11px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+  .switch.on { background: var(--accent); } .switch.on::after { left: 21px; }
+
+  /* списки настроек */
+  .row { display: flex; align-items: center; gap: 12px; padding: 13px 0; }
+  .row + .row { border-top: 1px solid var(--line); }
+  .row .l { flex: 1; min-width: 0; font-size: 15px; }
+  .row .l span { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.35; }
+  .row .v { font-size: 15px; color: var(--muted); }
+  .row .v.acc { color: var(--accent); font-weight: 600; }
+  .sicon { width: 32px; height: 32px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 17px; flex-shrink: 0; }
+  .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin: 0 0 5px 4px; font-weight: 600; }
+  .sect { font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; padding: 10px 24px 8px; }
+
+  /* таб-бар и FAB */
+  .tabbar { position: absolute; left: 0; right: 0; bottom: 0; display: flex; justify-content: space-around; padding: 10px 0 24px; font-size: 10px; font-weight: 600; background: var(--card); color: var(--muted); border-radius: 26px 26px 0 0; box-shadow: 0 -4px 16px rgba(120,70,30,.06); z-index: 3; }
+  .tabbar div { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 75px; }
+  .tabbar .on { color: var(--accent); }
+  .tabbar svg { width: 23px; height: 23px; }
+  .fab { position: absolute; right: 10px; bottom: 86px; width: 56px; height: 56px; border-radius: 28px; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 20px rgba(224,112,58,.45); z-index: 4; }
+  .fab svg { width: 28px; height: 28px; stroke-width: 2.5; }
+
+  /* bottom sheet */
+  .dim { position: absolute; inset: 0; background: rgba(40,25,15,.45); z-index: 5; }
+  .sheet { position: absolute; left: 0; right: 0; bottom: 0; background: var(--bg); border-radius: 28px 28px 0 0; padding: 10px 16px 30px; z-index: 6; }
+  .grab { width: 40px; height: 5px; border-radius: 3px; background: var(--line); margin: 0 auto 14px; }
+  .sheet h4 { font-size: 20px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  .sheet h4 .x { width: 30px; height: 30px; border-radius: 15px; background: var(--fill); display: flex; align-items: center; justify-content: center; color: var(--muted); }
+  .textarea { background: var(--card); border-radius: 18px; padding: 14px; min-height: 104px; font-size: 15px; color: var(--muted); line-height: 1.4; box-shadow: var(--shadow); }
+  .modes { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin: 12px 0; }
+  .mode { background: var(--card); border-radius: 18px; padding: 14px 6px; text-align: center; font-size: 13px; font-weight: 600; box-shadow: var(--shadow); }
+  .mode .e { font-size: 24px; display: block; margin-bottom: 4px; }
+  .mealPick { display: flex; gap: 6px; margin-bottom: 14px; }
+  .mealPick div { flex: 1; text-align: center; font-size: 13px; font-weight: 600; padding: 8px 0; border-radius: 12px; background: var(--fill); color: var(--muted); }
+  .mealPick .on { background: var(--accent-soft); color: var(--accent); }
+  .res { background: var(--card); border-radius: 18px; padding: 14px; margin-bottom: 10px; box-shadow: var(--shadow); }
+  .res .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+  .res .top b { font-size: 15px; font-weight: 600; }
+  .res .w { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .stepper { display: flex; align-items: center; background: var(--fill); border-radius: 12px; }
+  .stepper div { padding: 7px 12px; font-size: 15px; font-weight: 600; }
+  .stepper .pm { color: var(--accent); font-size: 18px; padding: 4px 12px; }
+  .res .kb { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .water-note { font-size: 12px; color: var(--water); margin-top: 8px; font-weight: 600; }
+
+  /* графики */
+  .chart { display: flex; align-items: flex-end; gap: 10px; height: 150px; margin-top: 16px; position: relative; padding-top: 6px; }
+  .chart .goal { position: absolute; left: 0; right: 0; border-top: 2px dashed var(--accent); opacity: .6; }
+  .chart .goal span { position: absolute; right: 0; top: -18px; font-size: 11px; color: var(--accent); font-weight: 700; }
+  .chart .col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; justify-content: flex-end; font-size: 11px; color: var(--muted); }
+  .chart .col i { width: 100%; border-radius: 10px 10px 6px 6px; background: var(--wk-ok); }
+  .chart .col.near i { background: var(--wk-near); } .chart .col.over i { background: var(--wk-over); } .chart .col.today i { background: var(--wk-today); }
+  .chart .col.on { color: var(--fg); font-weight: 700; }
+  .stat3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 14px; }
+  .stat3 div { background: var(--fill); border-radius: 14px; padding: 10px; text-align: center; font-size: 11px; color: var(--muted); }
+  .stat3 b { display: block; font-size: 17px; color: var(--fg); margin-bottom: 2px; }
+
+  .notes { max-width: 1000px; margin-top: 44px; font-size: 14px; line-height: 1.55; color: #333; }
+  .notes h3 { padding: 0; margin: 18px 0 6px; display: block; font-size: 17px; }
+  .notes ul { margin-left: 20px; }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10l9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></symbol>
+    <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"/></symbol>
+    <symbol id="i-trend" viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></symbol>
+    <symbol id="i-dots" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></symbol>
+    <symbol id="i-share" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></symbol>
+    <symbol id="i-right" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></symbol>
+  </defs>
+</svg>
+
+<h1>Mini App — все экраны в тёплом стиле</h1>
+<p class="lead">База — вариант 5: тёплая палитра, крупные скругления, плашки БЖУ. Сверху на «Сегодня» и «Истории» неделя столбиками. Пять вкладок, оранжевая «+» висит справа над «Профилем» и открывает «Добавить еду» с любого экрана. Палитра своя, от Telegram берём только светлую или тёмную схему. Данные во всех экранах одни и те же.</p>
+
+<div class="grid">
+
+<!-- ======================= СЕГОДНЯ ======================= -->
+<section class="variant">
+  <h2>1. Сегодня</h2>
+  <ul>
+    <li>Неделя столбиками: зелёный — в норме, жёлтый — около цели, оранжевый — перебор. Тап открывает день в «Истории»</li>
+    <li>Энергобаланс встроен в нижнюю строку главной карточки</li>
+  </ul>
+  <div class="phone"><div class="scroll num">
+    <div class="tg-head"><span>Закрыть</span><span>···</span></div>
+    <div class="ptitle"><b>Пн, 26 октября</b><span>ср. за неделю 1980</span></div>
+    <div class="week">
+      <div class="wd"><i style="--h:88%"></i>Вт</div><div class="wd near"><i style="--h:97%"></i>Ср</div><div class="wd"><i style="--h:91%"></i>Чт</div><div class="wd over"><i style="--h:100%"></i>Пт</div><div class="wd over"><i style="--h:100%"></i>Сб</div><div class="wd"><i style="--h:85%"></i>Вс</div><div class="wd today on"><i style="--h:64%"></i>Пн</div>
+    </div>
+    <div class="card">
+      <div class="heroC">
+        <svg width="104" height="104" viewBox="0 0 104 104" style="transform:rotate(-90deg);flex-shrink:0"><circle class="ring-track" cx="52" cy="52" r="44" fill="none" stroke-width="12"/><circle class="ring-val" cx="52" cy="52" r="44" fill="none" stroke-width="12" stroke-linecap="round" stroke-dasharray="276.5" stroke-dashoffset="100"/></svg>
+        <div class="t"><b>760 ккал</b><span>осталось · съедено 1340 из 2100</span><div class="badge">✓ В пределах нормы</div></div>
+      </div>
+      <div class="macroPills">
+        <div class="mp p"><span>Белки</span><b>82 г</b><small>из 140</small><div class="bar"></div><div class="fillb" style="width:59%"></div></div>
+        <div class="mp f"><span>Жиры</span><b>48 г</b><small>из 70</small><div class="bar"></div><div class="fillb" style="width:69%"></div></div>
+        <div class="mp c"><span>Углеводы</span><b>150 г</b><small>из 230</small><div class="bar"></div><div class="fillb" style="width:65%"></div></div>
+      </div>
+      <div class="energy"><div>Расход (TDEE)<b>2240</b></div><div>Тренировки<b>−320</b></div><div style="text-align:right">Дефицит<b style="color:var(--ok)">580</b></div></div>
+    </div>
+    <div class="tip"><span style="font-size:20px">💡</span><span>На ужин добавьте белка: не хватает 58 г. Подойдёт рыба с овощами или творог.</span></div>
+    <h3>Быстро добавить</h3>
+    <div class="chips"><div class="chip">Овсянка<small>310</small></div><div class="chip">Латте<small>110</small></div><div class="chip">Батончик<small>210</small></div></div>
+    <h3>Мой день</h3>
+    <div class="card">
+      <div class="mealC"><div class="plate b">🥣</div><div class="t"><b>Завтрак <span>420</span></b><p>Овсянка на молоке, латте</p></div></div>
+      <div class="mealC"><div class="plate l">🍗</div><div class="t"><b>Обед <span>680</span></b><p>Куриная грудка с рисом, салат с оливковым маслом</p></div></div>
+      <div class="mealC"><div class="plate s">🍓</div><div class="t"><b>Перекус <span>240</span></b><p>Греческий йогурт с мёдом</p></div></div>
+      <div class="mealC"><div class="plate d">🍲</div><div class="t"><b>Ужин</b><span class="emptyAdd">+ Добавить ужин</span></div></div>
+      <div class="mealC"><div class="plate w">🏃</div><div class="t"><b>Бег, 35 мин <span style="color:var(--ok)">−320</span></b></div></div>
+    </div>
+    <div class="card">
+      <b style="font-size:16px">💧 Вода</b> <span class="muted" style="font-size:14px">1250 из 2000 мл</span>
+      <div class="drops"><div class="drop f"></div><div class="drop f"></div><div class="drop f"></div><div class="drop f"></div><div class="drop f"></div><div class="drop"></div><div class="drop"></div><div class="drop"></div></div>
+      <div class="wbtns"><div class="wbtn">+250 мл</div><div class="wbtn">+500 мл</div></div>
+    </div>
+  </div>
+    <div class="fab"><svg class="ico"><use href="#i-plus"/></svg></div>
+    <nav class="tabbar"><div class="on"><svg class="ico"><use href="#i-home"/></svg>Сегодня</div><div><svg class="ico"><use href="#i-cal"/></svg>История</div><div><svg class="ico"><use href="#i-star"/></svg>Избранное</div><div><svg class="ico"><use href="#i-trend"/></svg>Тренды</div><div><svg class="ico"><use href="#i-user"/></svg>Профиль</div></nav>
+  </div>
+</section>
+
+<!-- ======================= СЕГОДНЯ ТЁМНАЯ ======================= -->
+<section class="variant">
+  <h2>1a. Сегодня, тёмная тема</h2>
+  <ul>
+    <li>Включается, когда в Telegram тёмная тема. Тёплый тёмно-коричневый фон, акцент светлее</li>
+    <li>Без теней, карточки отделены цветом</li>
+  </ul>
+  <div class="phone dark"><div class="scroll num">
+    <div class="tg-head"><span>Закрыть</span><span>···</span></div>
+    <div class="ptitle"><b>Пн, 26 октября</b><span>ср. за неделю 1980</span></div>
+    <div class="week">
+      <div class="wd"><i style="--h:88%"></i>Вт</div><div class="wd near"><i style="--h:97%"></i>Ср</div><div class="wd"><i style="--h:91%"></i>Чт</div><div class="wd over"><i style="--h:100%"></i>Пт</div><div class="wd over"><i style="--h:100%"></i>Сб</div><div class="wd"><i style="--h:85%"></i>Вс</div><div class="wd today on"><i style="--h:64%"></i>Пн</div>
+    </div>
+    <div class="card">
+      <div class="heroC">
+        <svg width="104" height="104" viewBox="0 0 104 104" style="transform:rotate(-90deg);flex-shrink:0"><circle class="ring-track" cx="52" cy="52" r="44" fill="none" stroke-width="12"/><circle class="ring-val" cx="52" cy="52" r="44" fill="none" stroke-width="12" stroke-linecap="round" stroke-dasharray="276.5" stroke-dashoffset="100"/></svg>
+        <div class="t"><b>760 ккал</b><span>осталось · съедено 1340 из 2100</span><div class="badge">✓ В пределах нормы</div></div>
+      </div>
+      <div class="macroPills">
+        <div class="mp p"><span>Белки</span><b>82 г</b><small>из 140</small><div class="bar"></div><div class="fillb" style="width:59%"></div></div>
+        <div class="mp f"><span>Жиры</span><b>48 г</b><small>из 70</small><div class="bar"></div><div class="fillb" style="width:69%"></div></div>
+        <div class="mp c"><span>Углеводы</span><b>150 г</b><small>из 230</small><div class="bar"></div><div class="fillb" style="width:65%"></div></div>
+      </div>
+      <div class="energy"><div>Расход (TDEE)<b>2240</b></div><div>Тренировки<b>−320</b></div><div style="text-align:right">Дефицит<b style="color:var(--ok)">580</b></div></div>
+    </div>
+    <div class="tip"><span style="font-size:20px">💡</span><span>На ужин добавьте белка: не хватает 58 г. Подойдёт рыба с овощами или творог.</span></div>
+    <h3>Мой день</h3>
+    <div class="card">
+      <div class="mealC"><div class="plate b">🥣</div><div class="t"><b>Завтрак <span>420</span></b><p>Овсянка на молоке, латте</p></div></div>
+      <div class="mealC"><div class="plate l">🍗</div><div class="t"><b>Обед <span>680</span></b><p>Куриная грудка с рисом, салат с оливковым маслом</p></div></div>
+      <div class="mealC"><div class="plate d">🍲</div><div class="t"><b>Ужин</b><span class="emptyAdd">+ Добавить ужин</span></div></div>
+    </div>
+  </div>
+    <div class="fab"><svg class="ico"><use href="#i-plus"/></svg></div>
+    <nav class="tabbar"><div class="on"><svg class="ico"><use href="#i-home"/></svg>Сегодня</div><div><svg class="ico"><use href="#i-cal"/></svg>История</div><div><svg class="ico"><use href="#i-star"/></svg>Избранное</div><div><svg class="ico"><use href="#i-trend"/></svg>Тренды</div><div><svg class="ico"><use href="#i-user"/></svg>Профиль</div></nav>
+  </div>
+</section>
+
+<!-- ======================= ИСТОРИЯ ======================= -->
+<section class="variant">
+  <h2>2. История</h2>
+  <ul>
+    <li>Сверху та же неделя: стрелками листаются недели, тапом выбирается день</li>
+    <li>Итоги дня — плашками, у каждой записи «повторить» и «в избранное», правка и удаление в меню «···»</li>
+  </ul>
+  <div class="phone"><div class="scroll num">
+    <div class="tg-head"><span>Закрыть</span><span>···</span></div>
+    <div class="ptitle"><b>История</b><span>20–26 октября</span></div>
+    <div style="display:flex;align-items:center;gap:4px;padding:0 6px 0 6px">
+      <div class="act"><svg class="ico"><use href="#i-left"/></svg></div>
+      <div class="week" style="flex:1;padding:0 0 16px">
+        <div class="wd"><i style="--h:88%"></i>Вт</div><div class="wd near"><i style="--h:97%"></i>Ср</div><div class="wd"><i style="--h:91%"></i>Чт</div><div class="wd over"><i style="--h:100%"></i>Пт</div><div class="wd over on"><i style="--h:100%"></i>Сб</div><div class="wd"><i style="--h:85%"></i>Вс</div><div class="wd today"><i style="--h:64%"></i>Пн</div>
+      </div>
+      <div class="act" style="opacity:.35"><svg class="ico"><use href="#i-right"/></svg></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:baseline"><b style="font-size:18px">Суббота, 24 октября</b></div>
+      <div style="display:flex;align-items:baseline;gap:8px;margin-top:8px"><b style="font-size:28px">2310</b><span class="muted">из 2100 ккал</span><span class="badge warn" style="margin:0 0 0 auto">+210</span></div>
+      <div class="macroPills" style="margin-top:12px">
+        <div class="mp p"><span>Белки</span><b>118 г</b></div><div class="mp f"><span>Жиры</span><b>86 г</b></div><div class="mp c"><span>Углеводы</span><b>246 г</b></div>
+      </div>
+    </div>
+    <h3>Завтрак <small>540 ккал</small></h3>
+    <div class="card tight">
+      <div class="food"><div class="n"><b>Сырники со сметаной</b><span>220 г · Б 28 · Ж 22 · У 38</span></div><div class="k">460</div><div class="act"><svg class="ico s"><use href="#i-repeat"/></svg></div><div class="act on"><svg class="ico s"><use href="#i-star"/></svg></div><div class="act"><svg class="ico s"><use href="#i-dots"/></svg></div></div>
+      <div class="food"><div class="n"><b>Капучино</b><span>250 мл · Б 4 · Ж 4 · У 6</span></div><div class="k">80</div><div class="act"><svg class="ico s"><use href="#i-repeat"/></svg></div><div class="act"><svg class="ico s"><use href="#i-star"/></svg></div><div class="act"><svg class="ico s"><use href="#i-dots"/></svg></div></div>
+    </div>
+    <h3>Обед <small>890 ккал</small></h3>
+    <div class="card tight">
+      <div class="food"><div class="n"><b>Паста карбонара</b><span>350 г · Б 34 · Ж 38 · У 92</span></div><div class="k">820</div><div class="act"><svg class="ico s"><use href="#i-repeat"/></svg></div><div class="act"><svg class="ico s"><use href="#i-star"/></svg></div><div class="act"><svg class="ico s"><use href="#i-dots"/></svg></div></div>
+      <div class="food"><div class="n"><b>Морс клюквенный</b><span>300 мл · У 17</span></div><div class="k">70</div><div class="act"><svg class="ico s"><use href="#i-repeat"/></svg></div><div class="act"><svg class="ico s"><use href="#i-star"/></svg></div><div class="act"><svg class="ico s"><use href="#i-dots"/></svg></div></div>
+    </div>
+    <h3>Ужин <small>880 ккал</small></h3>
+    <div class="card tight">
+      <div class="food"><div class="n"><b>Стейк из лосося</b><span>200 г · Б 40 · Ж 24 · У 0</span></div><div class="k">400</div><div class="act"><svg class="ico s"><use href="#i-repeat"/></svg></div><div class="act"><svg class="ico s"><use href="#i-star"/></svg></div><div class="act"><svg class="ico s"><use href="#i-dots"/></svg></div></div>
+    </div>
+  </div>
+    <div class="fab"><svg class="ico"><use href="#i-plus"/></svg></div>
+    <nav class="tabbar"><div><svg class="ico"><use href="#i-home"/></svg>Сегодня</div><div class="on"><svg class="ico"><use href="#i-cal"/></svg>История</div><div><svg class="ico"><use href="#i-star"/></svg>Избранное</div><div><svg class="ico"><use href="#i-trend"/></svg>Тренды</div><div><svg class="ico"><use href="#i-user"/></svg>Профиль</div></nav>
+  </div>
+</section>
+
+<!-- ======================= ИЗБРАННОЕ ======================= -->
+<section class="variant">
+  <h2>3. Избранное</h2>
+  <ul>
+    <li>Поиск и переключатель «Мои / Общие» вместо двух секций подряд</li>
+    <li>Карточка: эмодзи, состав, ккал и одна кнопка «Записать». Доступ и удаление — в «···»</li>
+  </ul>
+  <div class="phone"><div class="scroll num">
+    <div class="tg-head"><span>Закрыть</span><span>···</span></div>
+    <div class="ptitle"><b>Избранное</b><span>7 блюд</span></div>
+    <div style="padding:0 16px 12px"><div class="input"><svg class="ico s"><use href="#i-search"/></svg>Поиск по названию или блюду</div></div>
+    <div style="padding:0 16px 16px"><div class="seg"><div class="on">Мои · 5</div><div>Общие · 2</div></div></div>
+    <div class="card">
+      <div class="mealC"><div class="plate b">🥣</div><div class="t"><b>Мой завтрак <span>420</span></b><p>Овсянка на молоке 250 г, латте 300 мл</p></div><div class="act"><svg class="ico s"><use href="#i-dots"/></svg></div></div>
+      <div style="display:flex;gap:8px;margin-top:12px;align-items:center"><div class="btn sm" style="flex:1"><svg class="ico s"><use href="#i-plus"/></svg>Записать</div><span class="muted" style="font-size:12px;display:flex;gap:4px;align-items:center"><svg class="ico s"><use href="#i-share"/></svg>общее</span></div>
+    </div>
+    <div class="card">
+      <div class="mealC"><div class="plate l">🍗</div><div class="t"><b>Курица с рисом <span>520</span></b><p>Куриная грудка 150 г, рис 200 г</p></div><div class="act"><svg class="ico s"><use href="#i-dots"/></svg></div></div>
+      <div style="display:flex;gap:8px;margin-top:12px"><div class="btn sm" style="flex:1"><svg class="ico s"><use href="#i-plus"/></svg>Записать</div></div>
+    </div>
+    <div class="card">
+      <div class="mealC"><div class="plate s">🍫</div><div class="t"><b>Протеиновый батончик <span>210</span></b><p>1 шт., 60 г</p></div><div class="act"><svg class="ico s"><use href="#i-dots"/></svg></div></div>
+      <div style="display:flex;gap:8px;margin-top:12px"><div class="btn sm" style="flex:1"><svg class="ico s"><use href="#i-plus"/></svg>Записать</div></div>
+    </div>
+    <div class="card">
+      <div class="mealC"><div class="plate w">☕</div><div class="t"><b>Латте <span>110</span></b><p>300 мл</p></div><div class="act"><svg class="ico s"><use href="#i-dots"/></svg></div></div>
+      <div style="display:flex;gap:8px;margin-top:12px"><div class="btn sm" style="flex:1"><svg class="ico s"><use href="#i-plus"/></svg>Записать</div></div>
+    </div>
+  </div>
+    <div class="fab"><svg class="ico"><use href="#i-plus"/></svg></div>
+    <nav class="tabbar"><div><svg class="ico"><use href="#i-home"/></svg>Сегодня</div><div><svg class="ico"><use href="#i-cal"/></svg>История</div><div class="on"><svg class="ico"><use href="#i-star"/></svg>Избранное</div><div><svg class="ico"><use href="#i-trend"/></svg>Тренды</div><div><svg class="ico"><use href="#i-user"/></svg>Профиль</div></nav>
+  </div>
+</section>
+
+<!-- ======================= ТРЕНДЫ ======================= -->
+<section class="variant">
+  <h2>4. Тренды</h2>
+  <ul>
+    <li>Серия дней — крупной плашкой с огнём наверху</li>
+    <li>Столбики калорий в цветах недели и пунктир цели, под графиком среднее, лучший и худший день. Ниже вес</li>
+  </ul>
+  <div class="phone"><div class="scroll num">
+    <div class="tg-head"><span>Закрыть</span><span>···</span></div>
+    <div class="ptitle"><b>Тренды</b></div>
+    <div class="card" style="display:flex;align-items:center;gap:14px;background:var(--accent-soft)">
+      <div style="font-size:40px">🔥</div>
+      <div><b style="font-size:26px">12 дней</b><div class="muted" style="font-size:13px">подряд ведёте дневник</div></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:17px">Калории</b><div class="seg" style="width:160px"><div class="on">Неделя</div><div>Месяц</div></div></div>
+      <div class="chart">
+        <div class="goal" style="bottom:calc(20px + 100px)"><span>2100</span></div>
+        <div class="col"><i style="height:88px"></i>Вт</div>
+        <div class="col near"><i style="height:97px"></i>Ср</div>
+        <div class="col"><i style="height:91px"></i>Чт</div>
+        <div class="col over"><i style="height:110px"></i>Пт</div>
+        <div class="col over"><i style="height:110px"></i>Сб</div>
+        <div class="col"><i style="height:85px"></i>Вс</div>
+        <div class="col today on"><i style="height:64px"></i>Пн</div>
+      </div>
+      <div class="stat3"><div><b>1980</b>в среднем</div><div><b>1785</b>мин., вс</div><div><b>2310</b>макс., сб</div></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:baseline"><b style="font-size:17px">Вес</b><span class="badge" style="margin:0">−1,4 кг за месяц</span></div>
+      <div style="display:flex;align-items:baseline;gap:6px;margin-top:8px"><b style="font-size:28px">78,6</b><span class="muted">кг</span></div>
+      <svg viewBox="0 0 310 90" width="100%" height="90" style="margin-top:6px">
+        <defs><linearGradient id="wg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#e0703a" stop-opacity=".25"/><stop offset="1" stop-color="#e0703a" stop-opacity="0"/></linearGradient></defs>
+        <path d="M0 20 L40 26 L80 22 L120 38 L160 44 L200 40 L240 56 L280 62 L310 66 L310 90 L0 90Z" fill="url(#wg)"/>
+        <path d="M0 20 L40 26 L80 22 L120 38 L160 44 L200 40 L240 56 L280 62 L310 66" fill="none" stroke="#e0703a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="310" cy="66" r="5" fill="#e0703a"/>
+      </svg>
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:4px"><span>28 сен</span><span>12 окт</span><span>26 окт</span></div>
+    </div>
+    <div class="card">
+      <b style="font-size:17px">БЖУ в среднем за неделю</b>
+      <div class="macroPills"><div class="mp p"><span>Белки</span><b>104 г</b><small>74% цели</small></div><div class="mp f"><span>Жиры</span><b>72 г</b><small>103%</small></div><div class="mp c"><span>Углеводы</span><b>221 г</b><small>96%</small></div></div>
+    </div>
+  </div>
+    <div class="fab"><svg class="ico"><use href="#i-plus"/></svg></div>
+    <nav class="tabbar"><div><svg class="ico"><use href="#i-home"/></svg>Сегодня</div><div><svg class="ico"><use href="#i-cal"/></svg>История</div><div><svg class="ico"><use href="#i-star"/></svg>Избранное</div><div class="on"><svg class="ico"><use href="#i-trend"/></svg>Тренды</div><div><svg class="ico"><use href="#i-user"/></svg>Профиль</div></nav>
+  </div>
+</section>
+
+<!-- ======================= ПРОФИЛЬ ======================= -->
+<section class="variant">
+  <h2>5. Профиль</h2>
+  <ul>
+    <li>Сверху сводка: цель, вес, норма. Данные тела и цели КБЖУ — полями в карточках</li>
+    <li>Настройки и напоминания — списками с цветными иконками, как в настройках iOS</li>
+  </ul>
+  <div class="phone"><div class="scroll num">
+    <div class="tg-head"><span>Закрыть</span><span>···</span></div>
+    <div class="ptitle"><b>Профиль</b></div>
+    <div class="card" style="background:var(--accent-soft)">
+      <div style="display:flex;align-items:center;gap:14px">
+        <div class="plate" style="background:var(--card);width:56px;height:56px;font-size:28px">🎯</div>
+        <div><b style="font-size:19px">Похудение</b><div class="muted" style="font-size:13px">78,6 кг · 182 см · 34 года</div></div>
+      </div>
+      <div class="stat3" style="margin-top:14px"><div style="background:var(--card)"><b>2100</b>ккал в день</div><div style="background:var(--card)"><b>1720</b>BMR</div><div style="background:var(--card)"><b>2240</b>TDEE</div></div>
+    </div>
+    <div class="sect">Данные тела</div>
+    <div class="card">
+      <div class="fields">
+        <div class="field"><label>Пол</label><div class="input val">Мужской</div></div>
+        <div class="field"><label>Возраст</label><div class="input val">34</div></div>
+        <div class="field"><label>Рост, см</label><div class="input val">182</div></div>
+        <div class="field"><label>Вес, кг</label><div class="input val">78,6</div></div>
+      </div>
+      <div class="field" style="margin-top:10px"><label>Активность</label><div class="input val">Умеренная</div></div>
+      <div class="field" style="margin-top:10px"><label>Цель</label><div class="seg"><div class="on">Похудение</div><div>Поддержание</div><div>Набор</div></div></div>
+    </div>
+    <div class="sect">Цели КБЖУ</div>
+    <div class="card">
+      <div class="fields">
+        <div class="field"><label>Калории</label><div class="input val">2100</div></div>
+        <div class="field"><label style="color:var(--p-fg)">Белки, г</label><div class="input val">140</div></div>
+        <div class="field"><label style="color:var(--f-fg)">Жиры, г</label><div class="input val">70</div></div>
+        <div class="field"><label style="color:var(--c-fg)">Углеводы, г</label><div class="input val">230</div></div>
+      </div>
+    </div>
+    <div class="sect">Настройки</div>
+    <div class="card tight">
+      <div class="row"><div class="sicon" style="background:var(--p-bg)">🧪</div><div class="l">Микронутриенты<span>Клетчатка, сахар, натрий в разборе блюда</span></div><div class="switch"></div></div>
+      <div class="row"><div class="sicon" style="background:var(--c-bg)">✨</div><div class="l">AI-анализ недели</div><div class="switch on"></div></div>
+      <div class="row"><div class="sicon" style="background:var(--c-bg)">✨</div><div class="l">AI-анализ месяца</div><div class="switch on"></div></div>
+      <div class="row"><div class="sicon" style="background:var(--f-bg)">🌙</div><div class="l">AI в вечернем отчёте</div><div class="switch on"></div></div>
+      <div class="row"><div class="sicon" style="background:var(--water-soft)">📊</div><div class="l">Умная группировка в Excel</div><div class="switch"></div></div>
+      <div class="row"><div class="sicon" style="background:var(--fill)">🔎</div><div class="l">Распознавание штрихкодов</div><div class="switch on"></div></div>
+      <div class="row"><div class="sicon" style="background:var(--accent-soft)">🔔</div><div class="l">Умные напоминания<span>Пингует, только если приём не записан</span></div><div class="switch on"></div></div>
+    </div>
+    <div class="sect">Время и напоминания</div>
+    <div class="card tight">
+      <div class="row"><div class="l">Вечерний отчёт</div><div class="v acc">21:00</div></div>
+      <div class="row"><div class="l">Напоминание: завтрак</div><div class="v">выкл.</div></div>
+      <div class="row"><div class="l">Взвешивание</div><div class="v acc">08:00 · пн, чт</div></div>
+      <div class="row"><div class="l">Часовой пояс</div><div class="v">Москва <svg class="ico s" style="vertical-align:-3px"><use href="#i-chev"/></svg></div></div>
+    </div>
+    <div class="sect">Справка</div>
+    <div class="card tight">
+      <div class="row"><div class="sicon" style="background:var(--fill)">❓</div><div class="l">Что означают показатели</div><svg class="ico s muted"><use href="#i-chev"/></svg></div>
+    </div>
+  </div>
+    <div class="fab"><svg class="ico"><use href="#i-plus"/></svg></div>
+    <nav class="tabbar"><div><svg class="ico"><use href="#i-home"/></svg>Сегодня</div><div><svg class="ico"><use href="#i-cal"/></svg>История</div><div><svg class="ico"><use href="#i-star"/></svg>Избранное</div><div><svg class="ico"><use href="#i-trend"/></svg>Тренды</div><div class="on"><svg class="ico"><use href="#i-user"/></svg>Профиль</div></nav>
+  </div>
+</section>
+
+<!-- ======================= ДОБАВИТЬ: ШАГ 1 ======================= -->
+<section class="variant">
+  <h2>6. Добавить еду — ввод</h2>
+  <ul>
+    <li>Шторка снизу. Текст, фото, штрихкод и голос — в одном месте</li>
+    <li>Приём пищи выбран по времени, его можно сменить. Из «+ Добавить ужин» сразу открывается с «Ужином»</li>
+  </ul>
+  <div class="phone"><div class="scroll num" style="filter:blur(1px)">
+    <div class="tg-head"><span>Закрыть</span><span>···</span></div>
+    <div class="ptitle"><b>Пн, 26 октября</b></div>
+    <div class="card" style="height:220px"></div>
+    <div class="card" style="height:200px"></div>
+  </div>
+    <div class="dim"></div>
+    <div class="sheet">
+      <div class="grab"></div>
+      <h4>Добавить еду <span class="x"><svg class="ico s"><use href="#i-x"/></svg></span></h4>
+      <div class="mealPick"><div>Завтрак</div><div>Обед</div><div class="on">Ужин</div><div>Перекус</div></div>
+      <div class="textarea">Опиши, что съел… Например: овсянка на воде 200 г и кофе без сахара</div>
+      <div class="modes"><div class="mode"><span class="e">📷</span>Фото</div><div class="mode"><span class="e">▥</span>Штрихкод</div><div class="mode"><span class="e">🎙️</span>Голосом</div></div>
+      <div class="sect" style="padding:4px 4px 8px">Из избранного</div>
+      <div class="chips" style="padding:0 0 16px"><div class="chip">Курица с рисом<small>520</small></div><div class="chip">Латте<small>110</small></div><div class="chip">Батончик<small>210</small></div></div>
+      <div class="btn">Распознать</div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= ДОБАВИТЬ: ШАГ 2 ======================= -->
+<section class="variant">
+  <h2>7. Добавить еду — проверка</h2>
+  <ul>
+    <li>Каждая позиция — карточка с весом в степпере ±10 г, КБЖУ пересчитываются на лету</li>
+    <li>Напитки помечены: уйдут в воду. Внизу итог и «Записать»</li>
+  </ul>
+  <div class="phone"><div class="scroll num" style="filter:blur(1px)">
+    <div class="tg-head"><span>Закрыть</span><span>···</span></div>
+    <div class="ptitle"><b>Пн, 26 октября</b></div>
+    <div class="card" style="height:220px"></div>
+  </div>
+    <div class="dim"></div>
+    <div class="sheet num">
+      <div class="grab"></div>
+      <h4>Проверьте <span class="x"><svg class="ico s"><use href="#i-x"/></svg></span></h4>
+      <div class="res">
+        <div class="top"><div><b>Лосось на гриле</b><div style="margin-top:6px"><span class="badge" style="margin:0;background:var(--accent-soft);color:var(--accent)">Ужин</span></div></div><div class="act"><svg class="ico s"><use href="#i-trash"/></svg></div></div>
+        <div class="w"><div class="stepper"><div class="pm">−</div><div>180 г</div><div class="pm">+</div></div></div>
+        <div class="kb">360 ккал · Б 36 · Ж 22 · У 0</div>
+      </div>
+      <div class="res">
+        <div class="top"><div><b>Брокколи на пару</b><div style="margin-top:6px"><span class="badge" style="margin:0;background:var(--accent-soft);color:var(--accent)">Ужин</span></div></div><div class="act"><svg class="ico s"><use href="#i-trash"/></svg></div></div>
+        <div class="w"><div class="stepper"><div class="pm">−</div><div>150 г</div><div class="pm">+</div></div></div>
+        <div class="kb">50 ккал · Б 4 · Ж 1 · У 7</div>
+      </div>
+      <div class="res">
+        <div class="top"><div><b>Вода с лимоном</b></div><div class="act"><svg class="ico s"><use href="#i-trash"/></svg></div></div>
+        <div class="w"><div class="stepper"><div class="pm">−</div><div>300 мл</div><div class="pm">+</div></div></div>
+        <div class="water-note">💧 Пойдёт в воду: +300 мл</div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:14px;margin:6px 4px 12px"><span class="muted">Итого</span><b>410 ккал · Б 40 · Ж 23 · У 7</b></div>
+      <div style="display:flex;gap:8px"><div class="btn sec" style="flex:1">Назад</div><div class="btn" style="flex:2">Записать (3)</div></div>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<div class="notes">
+  <h3>Что меняется относительно текущего приложения</h3>
+  <ul>
+    <li><b>Палитра своя</b>: светлая кремовая и тёплая тёмная. От Telegram берём только схему (светлая или тёмная) и красим шапку WebView в цвет фона.</li>
+    <li><b>«+» на всех экранах</b> — справа над «Профилем». Кнопка «+» в шапке «Сегодня» уходит.</li>
+    <li><b>Неделя</b> берётся из уже существующего <code>/api/app/stats?range=week</code>, бэкенд не меняется.</li>
+    <li><b>Подсказка про белок</b> считается на клиенте из целей и итогов дня; показываем только если до цели больше 20 г и время после обеда.</li>
+    <li><b>Новое по функциям</b>: выбор приёма пищи в шторке, степпер веса, итог в шторке, переключатель «Мои / Общие», меню «···» вместо ряда иконок. Голосовой ввод и штрихкод в шторке — кнопки-заготовки: в Mini App их сейчас нет, решим отдельно, делать или убрать.</li>
+  </ul>
+</div>
+</body>
+</html>

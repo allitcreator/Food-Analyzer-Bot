@@ -1,21 +1,47 @@
 import { useState } from "react";
+import { useSearch } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, MoreHorizontal, Pencil, RotateCw, Star, Trash2, Utensils } from "lucide-react";
 import { api } from "@/lib/api";
-import type { DayResponse, FoodLog, MeResponse, UpdateLogBody } from "@/lib/types";
-import { addDaysISO, formatDateHuman, MEAL_LABELS, MEAL_ORDER, round } from "@/lib/format";
+import type { DayResponse, FoodLog, MeResponse, UpdateLogBody, WeekStatsResponse } from "@/lib/types";
+import {
+  addDaysISO,
+  formatDateLong,
+  formatDateRange,
+  MEAL_LABELS,
+  MEAL_ORDER,
+  round,
+} from "@/lib/format";
 import { todayInTimeZone } from "@/lib/date-tz";
+import { invalidateDiary } from "@/lib/invalidate";
 import { hapticNotification, hapticSelection } from "@/lib/telegram";
 import { hasFavoriteTitle } from "@shared/favorites-filter";
 import { PageHeader } from "@/components/PageHeader";
-import { Card, CardContent } from "@/components/ui/Card";
+import { Card, SectionHeading } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { MealGroups } from "@/components/MealGroups";
+import { WeekBars } from "@/components/WeekBars";
+import { MacroPills } from "@/components/MacroPills";
 import { ErrorScreen } from "@/components/StateScreens";
-import { Modal } from "@/components/ui/Modal";
-import { Button } from "@/components/ui/Button";
+import { Modal, SheetAction } from "@/components/ui/Modal";
+import { Button, IconButton } from "@/components/ui/Button";
 import { Input, Field, Select } from "@/components/ui/Input";
 import { toast, toastError } from "@/components/ui/Toast";
+
+const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Целых дней от `a` до `b` (ISO-даты, b ≥ a). */
+function daysBetween(a: string, b: string): number {
+  const toUtc = (iso: string) => {
+    const [y, m, d] = iso.split("-").map(Number);
+    return Date.UTC(y, m - 1, d);
+  };
+  return Math.round((toUtc(b) - toUtc(a)) / 86_400_000);
+}
+
+/** Конец недели (шаг 7 дней от сегодня), в которую попадает `date`. */
+function weekEndFor(date: string, today: string): string {
+  return addDaysISO(today, -Math.floor(daysBetween(date, today) / 7) * 7);
+}
 
 export default function History() {
   const qc = useQueryClient();
@@ -23,13 +49,24 @@ export default function History() {
   // /me уже в кэше: App не рендерит вкладки, пока он не загружен.
   const me = useQuery<MeResponse>({ queryKey: ["me"], queryFn: api.me });
   const today = todayInTimeZone(me.data?.timezone);
-  const [date, setDate] = useState<string>(today);
+  // ?date=YYYY-MM-DD — день, выбранный тапом по неделе на «Сегодня».
+  const search = useSearch();
+  const [date, setDate] = useState<string>(() => {
+    const fromUrl = new URLSearchParams(search).get("date");
+    return fromUrl && ISO_RE.test(fromUrl) && fromUrl <= today ? fromUrl : today;
+  });
+  const [weekEnd, setWeekEnd] = useState(() => weekEndFor(date, today));
+  const [menuFor, setMenuFor] = useState<FoodLog | null>(null);
   const [editing, setEditing] = useState<FoodLog | null>(null);
   const [deleting, setDeleting] = useState<FoodLog | null>(null);
 
   const { data, isLoading, isError, error, refetch } = useQuery<DayResponse>({
     queryKey: ["day", date],
     queryFn: () => api.day(date),
+  });
+  const week = useQuery({
+    queryKey: ["stats", "week", weekEnd],
+    queryFn: () => api.stats("week", weekEnd) as Promise<WeekStatsResponse>,
   });
 
   // Own favorites — to show a filled star on already-saved dishes and to avoid
@@ -42,15 +79,12 @@ export default function History() {
     .filter((f) => f.isOwner)
     .map((f) => f.title);
 
-  // Today неактивен на этом экране — refetchType:"all", иначе останется stale.
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["day"], refetchType: "all" });
-
   const delMutation = useMutation({
     mutationFn: (id: number) => api.deleteLog(id),
     onSuccess: () => {
       hapticNotification("success");
       setDeleting(null);
-      invalidate();
+      invalidateDiary(qc);
     },
     onError: (err) => toastError(err, "Не удалось удалить"),
   });
@@ -60,7 +94,7 @@ export default function History() {
     onSuccess: (_res, log) => {
       hapticNotification("success");
       toast(`Повторено: ${log.foodName}`);
-      invalidate();
+      invalidateDiary(qc);
     },
     onError: () => {
       hapticNotification("error");
@@ -96,81 +130,177 @@ export default function History() {
     },
   });
 
-  const shift = (d: number) => {
+  // Стрелки листают неделю; выбранный день сдвигается на тот же день недели.
+  const shiftWeek = (dir: -1 | 1) => {
     hapticSelection();
-    setDate((cur) => addDaysISO(cur, d));
+    const end = addDaysISO(weekEnd, dir * 7);
+    if (end > today) return;
+    setWeekEnd(end);
+    setDate((cur) => {
+      const next = addDaysISO(cur, dir * 7);
+      return next > today ? today : next;
+    });
   };
+
+  const jumpTo = (d: string) => {
+    if (!ISO_RE.test(d) || d > today) return;
+    setDate(d);
+    setWeekEnd(weekEndFor(d, today));
+  };
+
+  const goal = data?.goals.calories ?? me.data?.goals.calories ?? null;
 
   return (
     <div>
-      <PageHeader title="История" />
-      <div className="space-y-4 px-4">
-        <Card>
-          <CardContent className="flex items-center justify-between pt-4">
-            <button
-              onClick={() => shift(-1)}
-              className="rounded-full p-2 hover:bg-secondary"
-              aria-label="Предыдущий день"
-            >
-              <ChevronLeft className="h-5 w-5" />
-            </button>
-            <label className="flex flex-col items-center">
-              <span className="text-[15px] font-semibold">{formatDateHuman(date)}</span>
-              <input
-                type="date"
-                value={date}
-                max={today}
-                onChange={(e) => e.target.value && setDate(e.target.value)}
-                className="mt-1 bg-transparent text-xs text-muted-foreground outline-none"
-              />
-            </label>
-            <button
-              onClick={() => shift(1)}
-              disabled={date >= today}
-              className="rounded-full p-2 hover:bg-secondary disabled:opacity-30"
-              aria-label="Следующий день"
-            >
-              <ChevronRight className="h-5 w-5" />
-            </button>
-          </CardContent>
-        </Card>
+      <PageHeader
+        title="История"
+        subtitle={
+          // Нативный выбор даты поверх подписи — для прыжка на далёкий день.
+          <label className="relative">
+            {formatDateRange(addDaysISO(weekEnd, -6), weekEnd)}
+            <input
+              type="date"
+              value={date}
+              max={today}
+              onChange={(e) => e.target.value && jumpTo(e.target.value)}
+              className="absolute inset-0 opacity-0"
+              aria-label="Выбрать дату"
+            />
+          </label>
+        }
+      />
 
+      <div className="flex items-center gap-1 px-1.5 pb-4">
+        <IconButton onClick={() => shiftWeek(-1)} aria-label="Предыдущая неделя">
+          <ChevronLeft className="h-5 w-5" />
+        </IconButton>
+        <div className="flex-1">
+          {week.data ? (
+            <WeekBars days={week.data.days} goal={goal} today={today} selected={date} onSelect={setDate} />
+          ) : (
+            <Skeleton className="h-[60px] w-full rounded-[10px]" />
+          )}
+        </div>
+        <IconButton
+          onClick={() => shiftWeek(1)}
+          disabled={weekEnd >= today}
+          aria-label="Следующая неделя"
+        >
+          <ChevronRight className="h-5 w-5" />
+        </IconButton>
+      </div>
+
+      <div className="px-4">
         {isError ? (
           <ErrorScreen error={error} onRetry={() => refetch()} />
         ) : isLoading || !data ? (
-          <>
-            <Skeleton className="h-40 w-full rounded-2xl" />
-            <Skeleton className="h-40 w-full rounded-2xl" />
-          </>
+          <div className="space-y-3.5">
+            <Skeleton className="h-40 w-full" />
+            <Skeleton className="h-40 w-full" />
+          </div>
         ) : (
           <>
-            <MealGroups
-              logs={data.foodLogs}
-              onEdit={setEditing}
-              onDelete={setDeleting}
-              emptyHint="В этот день ничего не записано"
-              onRepeat={(log) => repeatMutation.mutate(log)}
-              onFavorite={(log) => {
-                if (hasFavoriteTitle(ownFavTitles, log.foodName)) {
-                  toast("Уже в избранном");
-                  return;
-                }
-                favMutation.mutate(log);
-              }}
-              favoriteTitles={ownFavTitles}
-              repeatingId={repeatMutation.isPending ? repeatMutation.variables?.id : null}
-            />
-            {data.foodLogs.length > 0 && <DayTotals data={data} />}
+            <DaySummary date={date} data={data} />
+            {data.foodLogs.length === 0 ? (
+              <Card className="flex flex-col items-center gap-2 py-8 text-center text-muted-foreground">
+                <Utensils className="h-7 w-7" />
+                <p className="text-sm">В этот день ничего не записано</p>
+              </Card>
+            ) : (
+              MEAL_ORDER.map((meal) => {
+                const logs = data.foodLogs.filter((l) => l.mealType === meal);
+                if (logs.length === 0) return null;
+                const subtotal = round(logs.reduce((s, l) => s + l.calories, 0));
+                return (
+                  <div key={meal}>
+                    <SectionHeading title={MEAL_LABELS[meal]} right={`${subtotal} ккал`} />
+                    <Card className="mb-3.5 px-[18px] py-1.5">
+                      {logs.map((log) => {
+                        const isFavorited = hasFavoriteTitle(ownFavTitles, log.foodName);
+                        const repeating = repeatMutation.isPending && repeatMutation.variables?.id === log.id;
+                        return (
+                          <div
+                            key={log.id}
+                            className="flex items-center gap-2 border-border py-2 [&:not(:first-child)]:border-t"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <b className="block truncate text-[15px] font-medium">{log.foodName}</b>
+                              <span className="text-xs text-muted-foreground">
+                                {log.weight} г · Б {round(log.protein)} · Ж {round(log.fat)} · У {round(log.carbs)}
+                              </span>
+                            </div>
+                            <div className="text-sm font-semibold">{round(log.calories)}</div>
+                            <IconButton
+                              onClick={() => repeatMutation.mutate(log)}
+                              disabled={repeating}
+                              aria-label="Повторить на сегодня"
+                              title="Повторить на сегодня"
+                            >
+                              <RotateCw className={`h-4 w-4 ${repeating ? "animate-spin" : ""}`} />
+                            </IconButton>
+                            <IconButton
+                              active={isFavorited}
+                              onClick={() => {
+                                if (isFavorited) {
+                                  toast("Уже в избранном");
+                                  return;
+                                }
+                                favMutation.mutate(log);
+                              }}
+                              aria-label={isFavorited ? "Уже в избранном" : "В избранное"}
+                              title={isFavorited ? "Уже в избранном" : "В избранное"}
+                            >
+                              <Star className={`h-4 w-4 ${isFavorited ? "fill-current" : ""}`} />
+                            </IconButton>
+                            <IconButton
+                              onClick={() => {
+                                hapticSelection();
+                                setMenuFor(log);
+                              }}
+                              aria-label={`Ещё: ${log.foodName}`}
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                            </IconButton>
+                          </div>
+                        );
+                      })}
+                    </Card>
+                  </div>
+                );
+              })
+            )}
           </>
         )}
       </div>
+
+      <Modal open={!!menuFor} onOpenChange={(o) => !o && setMenuFor(null)} title={menuFor?.foodName}>
+        <Card className="divide-y divide-border">
+          <SheetAction
+            icon={<Pencil className="h-4 w-4" />}
+            label="Редактировать"
+            onClick={() => {
+              setEditing(menuFor);
+              setMenuFor(null);
+            }}
+          />
+          <SheetAction
+            icon={<Trash2 className="h-4 w-4" />}
+            label="Удалить"
+            destructive
+            onClick={() => {
+              setDeleting(menuFor);
+              setMenuFor(null);
+            }}
+          />
+        </Card>
+      </Modal>
 
       <EditFoodModal
         log={editing}
         onClose={() => setEditing(null)}
         onSaved={() => {
           setEditing(null);
-          invalidate();
+          invalidateDiary(qc);
         }}
       />
 
@@ -196,26 +326,31 @@ export default function History() {
   );
 }
 
-function DayTotals({ data }: { data: DayResponse }) {
-  const t = data.totals;
+/** Карточка дня: дата, калории из цели с бейджем, плашки БЖУ. */
+function DaySummary({ date, data }: { date: string; data: DayResponse }) {
+  const eaten = round(data.totals.calories);
+  const goal = data.goals.calories;
+  const over = goal ? eaten - goal : 0;
   return (
-    <Card>
-      <CardContent className="grid grid-cols-4 gap-2 pt-4 text-center">
-        <Totd label="Ккал" value={round(t.calories)} />
-        <Totd label="Белки" value={round(t.protein)} />
-        <Totd label="Жиры" value={round(t.fat)} />
-        <Totd label="Углев." value={round(t.carbs)} />
-      </CardContent>
+    <Card className="mb-3.5 p-[18px]">
+      <b className="text-lg">{formatDateLong(date)}</b>
+      <div className="mt-2 flex items-baseline gap-2">
+        <b className="text-[28px] leading-none">{eaten}</b>
+        <span className="text-muted-foreground">{goal ? `из ${goal} ккал` : "ккал"}</span>
+        {goal && eaten > 0 ? (
+          over > 0 ? (
+            <span className="ml-auto rounded-xl bg-bad-soft px-2.5 py-[5px] text-[13px] font-semibold text-destructive">
+              +{over}
+            </span>
+          ) : (
+            <span className="ml-auto rounded-xl bg-ok-soft px-2.5 py-[5px] text-[13px] font-semibold text-ok">
+              ✓ в норме
+            </span>
+          )
+        ) : null}
+      </div>
+      <MacroPills className="mt-3" values={data.totals} note={() => null} />
     </Card>
-  );
-}
-
-function Totd({ label, value }: { label: string; value: number }) {
-  return (
-    <div>
-      <div className="text-lg font-semibold leading-none">{value}</div>
-      <div className="mt-1 text-[11px] text-muted-foreground">{label}</div>
-    </div>
   );
 }
 
@@ -296,17 +431,17 @@ function EditForm({ log, onSaved }: { log: FoodLog; onSaved: () => void }) {
       <Field label="Вес, г (пересчитает КБЖУ)">
         <Input type="number" inputMode="numeric" value={weight} onChange={(e) => onWeightChange(e.target.value)} />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-2.5">
         <Field label="Калории">
           <Input type="number" inputMode="numeric" value={calories} onChange={(e) => setCalories(e.target.value)} />
         </Field>
-        <Field label="Белки, г">
+        <Field label="Белки, г" labelClassName="text-prot-fg">
           <Input type="number" inputMode="numeric" value={protein} onChange={(e) => setProtein(e.target.value)} />
         </Field>
-        <Field label="Жиры, г">
+        <Field label="Жиры, г" labelClassName="text-fat-fg">
           <Input type="number" inputMode="numeric" value={fat} onChange={(e) => setFat(e.target.value)} />
         </Field>
-        <Field label="Углеводы, г">
+        <Field label="Углеводы, г" labelClassName="text-carb-fg">
           <Input type="number" inputMode="numeric" value={carbs} onChange={(e) => setCarbs(e.target.value)} />
         </Field>
       </div>

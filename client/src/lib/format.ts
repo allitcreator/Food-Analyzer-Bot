@@ -31,7 +31,52 @@ const MONTHS_RU = [
   "января", "февраля", "марта", "апреля", "мая", "июня",
   "июля", "августа", "сентября", "октября", "ноября", "декабря",
 ];
+const MONTHS_SHORT_RU = [
+  "янв", "фев", "мар", "апр", "мая", "июн",
+  "июл", "авг", "сен", "окт", "ноя", "дек",
+];
 const WEEKDAYS_RU = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
+const WEEKDAYS_FULL_RU = [
+  "Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота",
+];
+
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+function parseISO(iso: string): { date: Date; d: number; m: number } {
+  const [y, m, d] = iso.split("-").map(Number);
+  return { date: new Date(y, m - 1, d), d, m };
+}
+
+/** "Пн" — подпись столбика недели. */
+export function weekdayShort(iso: string): string {
+  return capitalize(WEEKDAYS_RU[parseISO(iso).date.getDay()]);
+}
+
+/** "Пн, 26 октября" — заголовок «Сегодня». */
+export function formatDayTitle(iso: string): string {
+  const { d, m } = parseISO(iso);
+  return `${weekdayShort(iso)}, ${d} ${MONTHS_RU[m - 1]}`;
+}
+
+/** "Суббота, 24 октября" — карточка дня в «Истории». */
+export function formatDateLong(iso: string): string {
+  const { date, d, m } = parseISO(iso);
+  return `${WEEKDAYS_FULL_RU[date.getDay()]}, ${d} ${MONTHS_RU[m - 1]}`;
+}
+
+/** "20–26 октября" или "28 сентября – 4 октября". */
+export function formatDateRange(startIso: string, endIso: string): string {
+  const a = parseISO(startIso);
+  const b = parseISO(endIso);
+  if (a.m === b.m) return `${a.d}–${b.d} ${MONTHS_RU[b.m - 1]}`;
+  return `${a.d} ${MONTHS_RU[a.m - 1]} – ${b.d} ${MONTHS_RU[b.m - 1]}`;
+}
+
+/** "28 сен" — подписи оси графика веса. */
+export function formatDayMonthShort(iso: string): string {
+  const { d, m } = parseISO(iso);
+  return `${d} ${MONTHS_SHORT_RU[m - 1]}`;
+}
 
 /** "23 июля, пн" from an ISO date. */
 export function formatDateHuman(iso: string): string {
