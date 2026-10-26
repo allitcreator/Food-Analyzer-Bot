@@ -8,6 +8,7 @@
  * окна догона», а повторную отправку исключает claim в notification_sends
  * (один раз на kind и день пользователя), так что «≥» идемпотентно.
  */
+import { todayKey, zonedParts } from "./tz";
 
 /** Окно догона (мин): после рестарта или долгого тика шлём, если опоздали не
  *  больше чем на 2 часа. Утреннее напоминание вечером уже не приходит. */
@@ -79,4 +80,18 @@ export function createNonOverlapping<A extends unknown[]>(
 /** Кому слать отчёты и напоминания: одобренным и не заблокированным. */
 export function isNotificationRecipient(user: { isApproved: boolean | null; isBlocked: boolean | null }): boolean {
   return user.isApproved === true && user.isBlocked !== true;
+}
+
+/**
+ * Часы тика для пользователя: минуты суток, день недели и ключ дня claim в его
+ * зоне. dayKey — "YYYY-MM-DD" (тот же формат, что всегда писался в
+ * notification_sends), иначе после деплоя claim не совпадёт и уйдут дубли.
+ */
+export function tickClock(now: Date, tz: string | null | undefined): {
+  dayKey: string;
+  nowMinutes: number;
+  weekday: number;
+} {
+  const p = zonedParts(now, tz);
+  return { dayKey: todayKey(now, tz), nowMinutes: p.hour * 60 + p.minute, weekday: p.weekday };
 }

@@ -24,7 +24,8 @@ import { roundFoodLogField } from "./lib/food-log-fields";
 import { createAiQuota, msUntilNextDay, buildQuotaExceededMessage, checkVoiceDuration, buildVoiceTooLongMessage, type AiActionKind } from "./lib/ai-quota";
 import { tagVisionBarcode, markUserEdited, shouldCacheVisionBarcode } from "./lib/vision-barcode-cache";
 import { parseServingSize } from "./lib/serving-size";
-import { isScheduledDue, smartSnoozeClaimKind, createNonOverlapping, isNotificationRecipient } from "./lib/scheduler";
+import { isScheduledDue, smartSnoozeClaimKind, createNonOverlapping, isNotificationRecipient, tickClock } from "./lib/scheduler";
+import { resolveTz, todayKey, isValidDayKey, dayBoundsUtc, rangeBoundsUtc, addDaysKey, weekdayOfKey, parseDmyKey, formatKeyDmy, formatDdMm, wallClockDate } from "./lib/tz";
 import { decideDialogInput, CANCEL_HINT } from "./lib/dialog-state";
 
 const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
@@ -181,9 +182,11 @@ async function lookupBarcodeProduct(barcode: string): Promise<BarcodeLookupResul
   }
 }
 
-async function buildDailyProgress(storage: IStorage, userId: number, user: User, today: Date): Promise<string> {
-  const stats = await storage.getDailyStats(userId, today);
-  const workouts = await storage.getDailyWorkouts(userId, today);
+async function buildDailyProgress(storage: IStorage, userId: number, user: User): Promise<string> {
+  const tz = userTz(user);
+  const today = todayKey(new Date(), tz);
+  const stats = await storage.getDailyStats(userId, today, tz);
+  const workouts = await storage.getDailyWorkouts(userId, today, tz);
   const burnedTotal = workouts.reduce((s, w) => s + w.caloriesBurned, 0);
 
   let text = `\n\n📊 Прогресс за сегодня:\n`;
@@ -291,10 +294,20 @@ function buildEditKeyboard(pending: any, unit: string) {
   };
 }
 
-// ─── Timezone helper (module-level, used by setupBot) ──
-function getUserNowModule(tz: string = 'Europe/Moscow'): Date {
-  const now = new Date();
-  return new Date(now.toLocaleString('en-US', { timeZone: tz }));
+// ─── Таймзона пользователя (lib/tz) ──
+/** Валидная зона пользователя; пустая/неизвестная → Europe/Moscow. */
+function userTz(user: { timezone?: string | null }): string {
+  return resolveTz(user.timezone);
+}
+
+/** «Сегодня» пользователя: "YYYY-MM-DD" в его зоне. */
+function userTodayKey(user: { timezone?: string | null }): string {
+  return todayKey(new Date(), userTz(user));
+}
+
+/** Текущее время пользователя для потребителей getHours (тип приёма, AI). */
+function userWallClock(user: { timezone?: string | null }): Date {
+  return wallClockDate(new Date(), userTz(user));
 }
 
 // ─── Bot setup ───────────────────────────────────────────────────────────────
@@ -496,11 +509,11 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
 
     const thinking = await bot.sendMessage(chatId, "🤔 Думаю...");
 
-    const today = getUserNow(user.timezone ?? 'Europe/Moscow');
-    const startOfDay = new Date(today); startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(today); endOfDay.setHours(23, 59, 59, 999);
+    const tz = userTz(user);
+    const today = todayKey(new Date(), tz);
+    const { start: startOfDay, end: endOfDay } = dayBoundsUtc(today, tz);
     const logs = await storage.getFoodLogsInRange(user.id, startOfDay, endOfDay);
-    const stats = await storage.getDailyStats(user.id, today);
+    const stats = await storage.getDailyStats(user.id, today, tz);
 
     const todayLog = logs.map(f => ({
       foodName: f.foodName,
@@ -835,14 +848,13 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
 
-    const tz = user.timezone ?? 'Europe/Moscow';
-    const today = getUserNow(tz);
-    const todayStart = new Date(today); todayStart.setHours(0, 0, 0, 0);
-    const todayEnd = new Date(today); todayEnd.setHours(23, 59, 59, 999);
+    const tz = userTz(user);
+    const today = todayKey(new Date(), tz);
+    const { start: todayStart, end: todayEnd } = dayBoundsUtc(today, tz);
     const [stats, streak, workouts, foodLogsToday] = await Promise.all([
-      storage.getDailyStats(user.id, today),
+      storage.getDailyStats(user.id, today, tz),
       storage.getStreak(user.id, tz),
-      storage.getDailyWorkouts(user.id, today),
+      storage.getDailyWorkouts(user.id, today, tz),
       storage.getFoodLogsInRange(user.id, todayStart, todayEnd),
     ]);
 
@@ -926,10 +938,9 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
 
-    const tz = user.timezone ?? 'Europe/Moscow';
-    const now = getUserNow(tz);
-    const end = new Date(now); end.setHours(23, 59, 59, 999);
-    const start = new Date(now); start.setDate(start.getDate() - 6); start.setHours(0, 0, 0, 0);
+    const tz = userTz(user);
+    const today = todayKey(new Date(), tz);
+    const { start, end } = rangeBoundsUtc(addDaysKey(today, -6), today, tz);
 
     const days = await storage.getWeeklyFullStats(user.id, tz);
     const daysWithData = days.filter(d => d.calories > 0);
@@ -1066,9 +1077,9 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
         return;
       }
       const sorted = [...logs].sort((a, b) => new Date(a.date!).getTime() - new Date(b.date!).getTime());
+      const tz = userTz(user);
       const lines = sorted.map(l => {
-        const d = new Date(l.date!);
-        const dl = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const dl = formatDdMm(new Date(l.date!), tz);
         return `${dl}: ${l.weight.toFixed(1)} кг`;
       });
       const first = sorted[0].weight, last = sorted[sorted.length - 1].weight;
@@ -1136,7 +1147,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
 
-    const workouts = await storage.getDailyWorkouts(user.id, getUserNow(user.timezone ?? 'Europe/Moscow'));
+    const workouts = await storage.getDailyWorkouts(user.id, userTodayKey(user), userTz(user));
     if (workouts.length === 0) {
       bot.sendMessage(chatId,
         `🏋️ Сегодня тренировок нет.\n\nПросто напиши что делал — например:\n• *"пробежал 5 км"*\n• *"30 мин на эллипсе"*\n• *"прошёл 10000 шагов"*\n• *"потратил 500 ккал на тренировке"*`,
@@ -1152,7 +1163,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     });
     text += `\n🔥 Итого сожжено: *${total} ккал*`;
 
-    const stats = await storage.getDailyStats(user.id, getUserNow(user.timezone ?? 'Europe/Moscow'));
+    const stats = await storage.getDailyStats(user.id, userTodayKey(user), userTz(user));
     const energyBlock = buildEnergyBalanceText(user, stats.calories);
     if (energyBlock) {
       text += `\n${energyBlock}`;
@@ -1315,12 +1326,11 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
 
     bot.sendMessage(chatId, "Собираю статистику за месяц...");
 
-    const tz = user.timezone ?? 'Europe/Moscow';
-    const now = getUserNow(tz);
-    const end = new Date(now); end.setHours(23, 59, 59, 999);
-    const start = new Date(now); start.setDate(start.getDate() - 27); start.setHours(0, 0, 0, 0);
+    const tz = userTz(user);
+    const today = todayKey(new Date(), tz);
+    const { start, end } = rangeBoundsUtc(addDaysKey(today, -27), today, tz);
 
-    const weeks = await storage.getMonthlyStats(user.id);
+    const weeks = await storage.getMonthlyStats(user.id, tz);
 
     const totalDays = weeks.reduce((s, w) => s + w.days, 0);
     if (totalDays === 0) {
@@ -1416,16 +1426,17 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
   async function sendPDFReport(chatId: number, user: User) {
     bot.sendMessage(chatId, "Генерирую PDF-отчёт...");
     try {
-      const tz = user.timezone ?? 'Europe/Moscow';
-      const today = getUserNow(tz);
-      const monthStart = new Date(today); monthStart.setDate(today.getDate() - 27); monthStart.setHours(0, 0, 0, 0);
+      const tz = userTz(user);
+      const now = new Date();
+      const today = todayKey(now, tz);
+      const { start: monthStart, end: monthEnd } = rangeBoundsUtc(addDaysKey(today, -27), today, tz);
 
       const [weeklyStats, dailyStats, allLogs, weightLogs, workoutLogs] = await Promise.all([
         storage.getMonthlyStats(user.id, tz),
         storage.getWeeklyFullStats(user.id, tz),
-        storage.getFoodLogsInRange(user.id, monthStart, today),
+        storage.getFoodLogsInRange(user.id, monthStart, monthEnd),
         storage.getWeightLogs(user.id, 30),
-        storage.getWorkoutLogsInRange(user.id, monthStart, today),
+        storage.getWorkoutLogsInRange(user.id, monthStart, monthEnd),
       ]);
 
       const sortedWeightLogs = [...weightLogs].sort((a, b) => new Date(a.date!).getTime() - new Date(b.date!).getTime());
@@ -1446,8 +1457,9 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       const dayMap = new Map<string, { dow: number; cal: number; prot: number; fat: number; carbs: number }>();
       for (const log of allLogs) {
         if (!log.date) continue;
-        const key = log.date.toISOString().slice(0, 10);
-        if (!dayMap.has(key)) dayMap.set(key, { dow: log.date.getDay(), cal: 0, prot: 0, fat: 0, carbs: 0 });
+        // День и день недели — в зоне пользователя, а не по UTC/зоне сервера.
+        const key = todayKey(log.date, tz);
+        if (!dayMap.has(key)) dayMap.set(key, { dow: weekdayOfKey(key), cal: 0, prot: 0, fat: 0, carbs: 0 });
         const day = dayMap.get(key)!;
         day.cal += log.calories; day.prot += log.protein; day.fat += log.fat; day.carbs += log.carbs;
       }
@@ -1489,14 +1501,14 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
 
       const pdfBuffer = await generateMonthlyPDF(
         user, weeklyStats, dailyStats, sortedWeightLogs, topFoods,
-        mealDistribution, dayOfWeekAverages, stabilityCV, workoutStats
+        mealDistribution, dayOfWeekAverages, stabilityCV, workoutStats, now
       );
 
-      const monthName = today.toLocaleString('ru-RU', { month: 'long', year: 'numeric' });
+      const monthName = now.toLocaleString('ru-RU', { month: 'long', year: 'numeric', timeZone: tz });
       await bot.sendDocument(chatId, pdfBuffer, {
         caption: `📄 Отчёт о питании — ${monthName}`
       }, {
-        filename: `nutrition_report_${today.toISOString().slice(0, 7)}.pdf`,
+        filename: `nutrition_report_${today.slice(0, 7)}.pdf`,
         contentType: 'application/pdf'
       });
     } catch (err) {
@@ -1506,16 +1518,15 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
   }
 
   async function sendEveningReport(user: User, manual = false) {
-    const tz = user.timezone ?? 'Europe/Moscow';
-    const today = getUserNow(tz);
-    const todayStart = new Date(today); todayStart.setHours(0, 0, 0, 0);
-    const todayEnd   = new Date(today); todayEnd.setHours(23, 59, 59, 999);
+    const tz = userTz(user);
+    const today = todayKey(new Date(), tz);
+    const { start: todayStart, end: todayEnd } = dayBoundsUtc(today, tz);
 
     const [stats, foodLogs, workouts, waterMl] = await Promise.all([
-      storage.getDailyStats(user.id, today),
+      storage.getDailyStats(user.id, today, tz),
       storage.getFoodLogsInRange(user.id, todayStart, todayEnd),
-      storage.getDailyWorkouts(user.id, today),
-      storage.getDailyWater(user.id, today),
+      storage.getDailyWorkouts(user.id, today, tz),
+      storage.getDailyWater(user.id, today, tz),
     ]);
 
     if (foodLogs.length === 0 && !manual) return;
@@ -1646,16 +1657,6 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     );
   }
 
-  // Календарный день (в tz пользователя) для произвольного момента — тем же
-  // форматом "YYYY-MM-DD", что и todayKey в тике, чтобы их можно было сравнивать.
-  function tzDayKey(date: Date, tz: string): string {
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
-    }).formatToParts(date);
-    const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
-    return `${get('year')}-${get('month')}-${get('day')}`;
-  }
-
   // Снять снуз конкретного приёма (после записи/пропуска), соблюдая touch-конвенцию.
   function clearSmartSnooze(telegramId: string, meal: string) {
     const rec = smartSnooze[telegramId];
@@ -1677,17 +1678,6 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     });
   });
 
-  function getUserNow(tz: string = 'Europe/Moscow'): Date {
-    return getUserNowModule(tz);
-  }
-
-  function toUserDate(date: Date, tz: string = 'Europe/Moscow'): Date {
-    return new Date(date.toLocaleString('en-US', { timeZone: tz }));
-  }
-
-  // backward compat
-  function getMoscowNow(): Date { return getUserNow('Europe/Moscow'); }
-
   // Dedup of scheduled sends is now a Postgres at-most-once ledger
   // (notification_sends) via storage.claimNotificationSend — the claim is taken
   // BEFORE sending, so a restart can neither double-send nor lose a send.
@@ -1706,17 +1696,17 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     const tickNow = new Date();
     const allUsers = (await storage.getAllApprovedUsers()).filter(isNotificationRecipient);
     for (const user of allUsers) {
-      const tz = user.timezone ?? 'Europe/Moscow';
-      const userNow = toUserDate(tickNow, tz);
-      const nowMinutes = userNow.getHours() * 60 + userNow.getMinutes();
-      const todayKey = `${userNow.getFullYear()}-${String(userNow.getMonth() + 1).padStart(2, '0')}-${String(userNow.getDate()).padStart(2, '0')}`;
+      const tz = userTz(user);
+      // dayKey — "YYYY-MM-DD" в зоне пользователя, тот же формат, что и раньше
+      // писался в notification_sends (иначе после деплоя claim не совпадёт).
+      const { dayKey, nowMinutes, weekday: todayDow } = tickClock(tickNow, tz);
 
       // Ошибка одного пользователя (БД, claim) не мешает остальным.
       try {
         // «Время наступило и не прошло окно догона» + claim раз в день
         // (lib/scheduler.ts). Сравнение «≥» идемпотентно благодаря claim.
         if (isScheduledDue(user.reportTime, nowMinutes)) {
-          if (await storage.claimNotificationSend(user.id, 'report', todayKey)) {
+          if (await storage.claimNotificationSend(user.id, 'report', dayKey)) {
             console.log(`Sending evening report to user ${user.id}`);
             sendDetached(`scheduled report user=${user.id}`, () => sendEveningReport(user));
           }
@@ -1733,7 +1723,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
 
           for (const { field, meal } of meals) {
             if (!isScheduledDue(field, nowMinutes)) continue;
-            if (!(await storage.claimNotificationSend(user.id, `meal_${meal}`, todayKey))) continue;
+            if (!(await storage.claimNotificationSend(user.id, `meal_${meal}`, dayKey))) continue;
             console.log(`Sending ${meal} reminder to user ${user.id}`);
             sendDetached(`scheduled ${meal} reminder user=${user.id}`, () =>
               bot.sendMessage(user.telegramId!, `Время записать ${MEAL_LABELS[meal]?.toLowerCase()}! Отправьте текст или фото еды.`));
@@ -1745,11 +1735,11 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
         if (user.smartReminders) {
           try {
             const logs = await storage.getMealLogTimes(user.id, 28);
-            const typical = typicalMealTimes(logs, tz, userNow);
+            const typical = typicalMealTimes(logs, tz, tickNow);
 
             const loggedMealsToday = new Set<string>();
             for (const l of logs) {
-              if (tzDayKey(l.date, tz) === todayKey) loggedMealsToday.add(l.mealType);
+              if (todayKey(l.date, tz) === dayKey) loggedMealsToday.add(l.mealType);
             }
 
             // 1) Snooze: приём записали → снять; истёк и всё ещё не записан →
@@ -1766,7 +1756,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
                 if (new Date(until).getTime() <= tickNow.getTime()) {
                   clearSmartSnooze(user.telegramId!, meal); // touch/delete ДО отправки
                   const t = typical[meal as 'breakfast' | 'lunch' | 'dinner'];
-                  if (t && await storage.claimNotificationSend(user.id, smartSnoozeClaimKind(meal, until), todayKey)) {
+                  if (t && await storage.claimNotificationSend(user.id, smartSnoozeClaimKind(meal, until), dayKey)) {
                     sendDetached(`smart snooze user=${user.id}`, () => sendSmartReminder(user, meal, t.medianMinutes));
                   }
                 }
@@ -1777,7 +1767,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
             const due = dueSmartReminder(typical, loggedMealsToday, nowMinutes);
             if (due) {
               const t = typical[due]!;
-              if (await storage.claimNotificationSend(user.id, `smart_${due}`, todayKey)) {
+              if (await storage.claimNotificationSend(user.id, `smart_${due}`, dayKey)) {
                 sendDetached(`smart reminder user=${user.id}`, () => sendSmartReminder(user, due, t.medianMinutes));
               }
             }
@@ -1788,9 +1778,9 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
 
         // No-log reminder: fires if user set noLogReminderTime and has no food entries today
         if (isScheduledDue(user.noLogReminderTime, nowMinutes)) {
-          if (await storage.claimNotificationSend(user.id, 'nolog', todayKey)) {
+          if (await storage.claimNotificationSend(user.id, 'nolog', dayKey)) {
             sendDetached(`nolog reminder user=${user.id}`, async () => {
-              const todayStats = await storage.getDailyStats(user.id, userNow);
+              const todayStats = await storage.getDailyStats(user.id, dayKey, tz);
               if (todayStats.calories === 0) {
                 await bot.sendMessage(user.telegramId!, `⚠️ Ты ещё ничего не записал сегодня. Не забудь залогировать еду!`);
               }
@@ -1800,12 +1790,12 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
 
         // Weight reminder: fires on due time + allowed day of week
         if (isScheduledDue(user.weightReminderTime, nowMinutes)) {
-          const todayDow = userNow.getDay(); // 0=Sun,1=Mon,...,6=Sat
+          // todayDow: 0=Sun,1=Mon,...,6=Sat — в зоне пользователя (tickClock)
           const allowedDays = user.weightReminderDays
             ? user.weightReminderDays.split(',').filter(Boolean).map(Number)
             : [];
           const dayOk = allowedDays.length === 0 || allowedDays.includes(todayDow);
-          if (dayOk && await storage.claimNotificationSend(user.id, 'weight', todayKey)) {
+          if (dayOk && await storage.claimNotificationSend(user.id, 'weight', dayKey)) {
             sendDetached(`weight reminder user=${user.id}`, () =>
               bot.sendMessage(user.telegramId!, `⚖️ Время взвеситься! Запишите вес: /weight 75.0`));
           }
@@ -1957,7 +1947,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
   // Write favorite/repeat items to today (mealType by CURRENT time), then reply
   // with a confirmation + daily progress — the same feedback style as confirm_yes.
   async function applyItemsToToday(user: User, items: FavoriteItem[]): Promise<string> {
-    const now = getUserNow(user.timezone ?? 'Europe/Moscow');
+    const now = userWallClock(user);
     const mealType = mealTypeByTime(now, {
       breakfastEnd: user.mealBreakfastEnd ?? '12:30',
       lunchEnd: user.mealLunchEnd ?? '16:30',
@@ -1991,7 +1981,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     // Confirmation head — single item vs. a whole meal.
     let head: string;
     if (items.length === 1 && items[0].hydrating) {
-      const total = await storage.getDailyWater(user.id, now);
+      const total = await storage.getDailyWater(user.id, userTodayKey(user), userTz(user));
       head = `💧 +${waterMl} мл, всего за день ${total} мл`;
     } else if (savedFood === 1 && waterMl === 0) {
       const only = items.find((i) => !i.hydrating)!;
@@ -2001,7 +1991,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       head = `✅ Записано: ${savedFood} поз. (+${addedCal} ккал)`;
       if (waterMl > 0) head += `\n💧 В воду: ${waterMl} мл`;
     }
-    const progress = await buildDailyProgress(storage, user.id, user, now);
+    const progress = await buildDailyProgress(storage, user.id, user);
     return `${head}${progress}`;
   }
 
@@ -2052,20 +2042,25 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     if (!user) return;
 
     const dateArg = match?.[2];
-    let targetDate: Date;
+    const tz = userTz(user);
+    let targetKey: string;
     let headerText: string;
 
     if (dateArg) {
-      const [d, m, y] = dateArg.split('.').map(Number);
-      targetDate = new Date(y, m - 1, d);
+      const parsed = parseDmyKey(dateArg);
+      if (!parsed) {
+        bot.sendMessage(chatId, "Некорректная дата. Формат: /history ДД.ММ.ГГГГ");
+        return;
+      }
+      targetKey = parsed;
       headerText = `📋 История за ${dateArg}`;
     } else {
-      targetDate = getMoscowNow();
+      targetKey = todayKey(new Date(), tz);
       headerText = '📋 История за сегодня';
     }
 
-    const dayStart = new Date(targetDate); dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date(targetDate); dayEnd.setHours(23, 59, 59, 999);
+    // Дата из ввода — календарный день в зоне пользователя.
+    const { start: dayStart, end: dayEnd } = dayBoundsUtc(targetKey, tz);
     const logs = await storage.getFoodLogsInRange(user.id, dayStart, dayEnd);
 
     if (logs.length === 0) {
@@ -2076,17 +2071,18 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     await sendHistoryMessages(chatId, logs, user, headerText);
   });
 
+  // «Сегодня» для примеров в подсказках /export и /clear: зона пользователя,
+  // если он есть в базе, иначе Europe/Moscow. Без проверки доступа — только дата.
+  async function helpTodayKey(msg: TelegramBot.Message): Promise<string> {
+    const telegramId = msg.from?.id.toString();
+    const user = telegramId ? await storage.getUserByTelegramId(telegramId) : undefined;
+    return todayKey(new Date(), resolveTz(user?.timezone));
+  }
+
   onText(/^\/export(@\w+)?$/, async (msg) => {
-    const today = getMoscowNow();
-    const dd = String(today.getDate()).padStart(2, '0');
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const yyyy = today.getFullYear();
-    const todayStr = `${dd}.${mm}.${yyyy}`;
-    const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 7);
-    const wd = String(weekAgo.getDate()).padStart(2, '0');
-    const wm = String(weekAgo.getMonth() + 1).padStart(2, '0');
-    const wy = weekAgo.getFullYear();
-    const weekStr = `${wd}.${wm}.${wy}`;
+    const today = await helpTodayKey(msg);
+    const todayStr = formatKeyDmy(today);
+    const weekStr = formatKeyDmy(addDaysKey(today, -7));
     bot.sendMessage(msg.chat.id,
       `📤 Формат:\n` +
       `/export ДД.ММ.ГГГГ — экспорт за день\n` +
@@ -2108,14 +2104,15 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     const startStr = match[2];
     const endStr = match[3] || startStr;
 
-    const parseDate = (s: string) => {
-      const [d, m, y] = s.split('.').map(Number);
-      return new Date(y, m - 1, d);
-    };
-
-    const startDate = parseDate(startStr);
-    const endDate = parseDate(endStr);
-    endDate.setHours(23, 59, 59, 999);
+    // Даты из ввода — календарные дни в зоне пользователя.
+    const tz = userTz(user);
+    const startKey = parseDmyKey(startStr);
+    const endKey = parseDmyKey(endStr);
+    if (!startKey || !endKey || startKey > endKey) {
+      bot.sendMessage(chatId, "Некорректная дата или период. Формат: ДД.ММ.ГГГГ или ДД.ММ.ГГГГ - ДД.ММ.ГГГГ");
+      return;
+    }
+    const { start: startDate, end: endDate } = rangeBoundsUtc(startKey, endKey, tz);
 
     const logs = await storage.getFoodLogsInRange(user.id, startDate, endDate);
 
@@ -2157,8 +2154,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     // Style header
     ws1.getRow(1).font = { bold: true };
 
-    const formatDateDDMMYYYY = (d: Date) =>
-      `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+    const formatDateDDMMYYYY = (d: Date) => formatKeyDmy(todayKey(d, tz));
 
     // Group logs by date, then by mealType
     const dayGroups = new Map<string, typeof sortedLogs>();
@@ -2270,11 +2266,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
   });
 
   onText(/^\/clear(@\w+)?$/, async (msg) => {
-    const today = getMoscowNow();
-    const dd = String(today.getDate()).padStart(2, '0');
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const yyyy = today.getFullYear();
-    const todayStr = `${dd}.${mm}.${yyyy}`;
+    const todayStr = formatKeyDmy(await helpTodayKey(msg));
     bot.sendMessage(msg.chat.id,
       `🗑 Формат:\n` +
       `/clear ДД.ММ.ГГГГ — удалить записи за день\n` +
@@ -2295,14 +2287,15 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     const startStr = match[2];
     const endStr = match[3] || startStr;
 
-    const parseDate = (s: string) => {
-      const [d, m, y] = s.split('.').map(Number);
-      return new Date(y, m - 1, d);
-    };
-
-    const startDate = parseDate(startStr);
-    const endDate = parseDate(endStr);
-    endDate.setHours(23, 59, 59, 999);
+    // Даты из ввода — календарные дни в зоне пользователя.
+    const tz = userTz(user);
+    const startKey = parseDmyKey(startStr);
+    const endKey = parseDmyKey(endStr);
+    if (!startKey || !endKey || startKey > endKey) {
+      bot.sendMessage(chatId, "Некорректная дата или период. Формат: ДД.ММ.ГГГГ или ДД.ММ.ГГГГ - ДД.ММ.ГГГГ");
+      return;
+    }
+    const { start: startDate, end: endDate } = rangeBoundsUtc(startKey, endKey, tz);
 
     const periodLabel = `${startStr}${startStr !== endStr ? ` - ${endStr}` : ''}`;
     const logs = await storage.getFoodLogsInRange(user.id, startDate, endDate);
@@ -2313,8 +2306,6 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     }
 
     // ISO-даты в callback_data (компактно, ≤64 байт): clr_yes_<start>_<end>
-    const iso = (d: Date) =>
-      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
     const n = logs.length;
     const recWord = n % 10 === 1 && n % 100 !== 11 ? 'запись'
@@ -2326,7 +2317,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       {
         reply_markup: {
           inline_keyboard: [[
-            { text: '🗑 Да, удалить', callback_data: `clr_yes_${iso(startDate)}_${iso(endDate)}` },
+            { text: '🗑 Да, удалить', callback_data: `clr_yes_${startKey}_${endKey}` },
             { text: 'Отмена', callback_data: 'clr_no' },
           ]]
         }
@@ -2397,7 +2388,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
           restorePending(pendingStore, telegramId, pending);
           throw e;
         }
-        const totalWater = await storage.getDailyWater(user.id, getUserNow(user.timezone ?? 'Europe/Moscow'));
+        const totalWater = await storage.getDailyWater(user.id, userTodayKey(user), userTz(user));
         bot.editMessageText(`💧 +${amount} мл, всего за день ${totalWater} мл`, {
           chat_id: chatId,
           message_id: query.message?.message_id
@@ -2428,7 +2419,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
           restorePending(pendingStore, telegramId, pending);
           throw e;
         }
-        const progress = await buildDailyProgress(storage, user.id, user, getUserNow(user.timezone ?? 'Europe/Moscow'));
+        const progress = await buildDailyProgress(storage, user.id, user);
         bot.editMessageText(`✅ Добавлено: ${pending.foodName} (${pending.weight}${unit})${progress}`, {
           chat_id: chatId,
           message_id: query.message?.message_id
@@ -2555,7 +2546,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
         }
       }
       const totalCal = items.reduce((s, i) => s + (i.hydrating ? 0 : i.calories), 0);
-      const progress = await buildDailyProgress(storage, user.id, user, getUserNow(user.timezone ?? 'Europe/Moscow'));
+      const progress = await buildDailyProgress(storage, user.id, user);
       let savedMsg = `✅ Сохранено ${savedCount} из ${items.length} позиций  (+${totalCal} ккал)`;
       if (waterMl > 0) savedMsg += `\n💧 В воду: ${waterMl} мл`;
       // Offer to save the whole meal as a favorite (one-tap repeat later).
@@ -2636,8 +2627,12 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       const parts = query.data.split("_"); // ['clr','yes','<start>','<end>']
       const startISO = parts[2];
       const endISO = parts[3];
-      const startDate = new Date(`${startISO}T00:00:00`);
-      const endDate = new Date(`${endISO}T23:59:59.999`);
+      if (!isValidDayKey(startISO) || !isValidDayKey(endISO)) {
+        bot.answerCallbackQuery(query.id).catch(() => {});
+        return;
+      }
+      // Календарные дни в зоне пользователя — те же границы, что при подсчёте.
+      const { start: startDate, end: endDate } = rangeBoundsUtc(startISO, endISO, userTz(user));
       await storage.deleteFoodLogsInRange(user.id, startDate, endDate);
       bot.editMessageText("🗑 Записи за период удалены.", {
         chat_id: chatId,
@@ -3053,7 +3048,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       try {
         await bot.answerCallbackQuery(query.id, { text: 'Анализирую...' });
         const wLogs = await storage.getWeightLogs(user.id, 7);
-        const weekStats = await storage.getWeeklyFullStats(user.id);
+        const weekStats = await storage.getWeeklyFullStats(user.id, userTz(user));
         if (wLogs.length < 2) {
           await bot.sendMessage(chatId, "Нужно хотя бы 2 замера веса для анализа. Записывайте вес командой /weight 75.0");
           return;
@@ -3326,7 +3321,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
         caloriesBurned: pending.caloriesBurned,
       });
 
-      const progress = await buildDailyProgress(storage, user.id, user, getUserNow(user.timezone ?? 'Europe/Moscow'));
+      const progress = await buildDailyProgress(storage, user.id, user);
       bot.editMessageText(`✅ Тренировка сохранена: *${pending.description}* — ${pending.caloriesBurned} ккал${progress}`, {
         chat_id: chatId,
         message_id: query.message?.message_id,
@@ -4027,7 +4022,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
               }
             );
             if (intent === "both") {
-              const items = await analyzeFoodText(msg.text, getUserNow(user.timezone ?? 'Europe/Moscow'), { breakfastEnd: user.mealBreakfastEnd ?? '12:30', lunchEnd: user.mealLunchEnd ?? '16:30' });
+              const items = await analyzeFoodText(msg.text, userWallClock(user), { breakfastEnd: user.mealBreakfastEnd ?? '12:30', lunchEnd: user.mealLunchEnd ?? '16:30' });
               if (items && items.length > 0) await processFoodItems(chatId, telegramId, items);
             }
             return;
@@ -4035,7 +4030,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
         }
 
         if (intent === "food" || intent === "both" || intent === "other") {
-          const items = await analyzeFoodText(msg.text, getUserNow(user.timezone ?? 'Europe/Moscow'), { breakfastEnd: user.mealBreakfastEnd ?? '12:30', lunchEnd: user.mealLunchEnd ?? '16:30' });
+          const items = await analyzeFoodText(msg.text, userWallClock(user), { breakfastEnd: user.mealBreakfastEnd ?? '12:30', lunchEnd: user.mealLunchEnd ?? '16:30' });
           await bot.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
           if (items && items.length > 0) {
             await processFoodItems(chatId, telegramId, items);
@@ -4143,7 +4138,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
 
         // Step 2: Fall back to GPT-4o vision
         if (!analysis) {
-          const userNow = getUserNow(user.timezone ?? 'Europe/Moscow');
+          const userNow = userWallClock(user);
           const visionItems = await analyzeFoodImage(base64, userNow, {
             breakfastEnd: user.mealBreakfastEnd ?? '12:30',
             lunchEnd: user.mealLunchEnd ?? '16:30',
@@ -4214,7 +4209,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
         console.log(`Voice transcribed: len=${voiceLen}`);
         bot.sendMessage(chatId, `🗣 "${transcript}"\n\nАнализирую...`);
 
-        const items = await analyzeFoodText(transcript, getUserNow(user.timezone ?? 'Europe/Moscow'), { breakfastEnd: user.mealBreakfastEnd ?? '12:30', lunchEnd: user.mealLunchEnd ?? '16:30' });
+        const items = await analyzeFoodText(transcript, userWallClock(user), { breakfastEnd: user.mealBreakfastEnd ?? '12:30', lunchEnd: user.mealLunchEnd ?? '16:30' });
         if (items && items.length > 0) {
           await processFoodItems(chatId, telegramId, items);
         } else {

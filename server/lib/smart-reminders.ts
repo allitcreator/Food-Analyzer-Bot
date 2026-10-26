@@ -7,6 +7,8 @@
  * таймзоне), а пинг шлётся только если приём реально не записан к этому времени.
  */
 
+import { minutesOfDay } from "./tz";
+
 export type SmartMeal = "breakfast" | "lunch" | "dinner";
 
 /** Приёмы, для которых считаем «обычное время»; snack сознательно игнорируем. */
@@ -19,20 +21,6 @@ const WINDOW_START_OFFSET = 30;
 const WINDOW_LENGTH = 120;
 /** Минимум записей приёма, чтобы «обычное время» считалось устойчивым. */
 const MIN_COUNT = 5;
-
-/** Минуты суток (0..1439) для момента `date` в таймзоне `tz` (formatToParts). */
-function minutesOfDayInTz(date: Date, tz: string): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    hour: "numeric",
-    minute: "numeric",
-    hour12: false,
-  }).formatToParts(date);
-  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
-  let hour = get("hour");
-  if (hour === 24) hour = 0; // некоторые движки отдают 24 для полуночи при hour12:false
-  return hour * 60 + get("minute");
-}
 
 /** Медиана (не мутирует вход). Для чётной длины — среднее двух центральных. */
 function median(values: number[]): number {
@@ -57,7 +45,7 @@ export function typicalMealTimes(
   const byMeal: Record<SmartMeal, number[]> = { breakfast: [], lunch: [], dinner: [] };
   for (const log of logs) {
     if (log.mealType === "breakfast" || log.mealType === "lunch" || log.mealType === "dinner") {
-      byMeal[log.mealType].push(minutesOfDayInTz(log.date, tz));
+      byMeal[log.mealType].push(minutesOfDay(log.date, tz));
     }
   }
   const out: Partial<Record<SmartMeal, { medianMinutes: number; count: number }>> = {};

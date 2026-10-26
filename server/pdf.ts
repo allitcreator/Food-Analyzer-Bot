@@ -1,6 +1,8 @@
 import PDFDocument from "pdfkit";
 import path from "path";
 import type { User, FoodLog, WeightLog } from "@shared/schema";
+import { dayBoundsUtc, formatDdMm, resolveTz } from "./lib/tz";
+import { monthlyWeekDefs } from "./lib/stats-days";
 
 const FONT_REGULAR = path.join(process.cwd(), "node_modules", "dejavu-fonts-ttf", "ttf", "DejaVuSans.ttf");
 const FONT_BOLD = path.join(process.cwd(), "node_modules", "dejavu-fonts-ttf", "ttf", "DejaVuSans-Bold.ttf");
@@ -35,8 +37,11 @@ export function generateMonthlyPDF(
   mealDistribution?: MealDist[],
   dayOfWeekAverages?: DowAvg[],
   stabilityCV?: number,
-  workoutStats?: WorkoutStats
+  workoutStats?: WorkoutStats,
+  now: Date = new Date(),
 ): Promise<Buffer> {
+  // Даты и недели — в зоне пользователя, как в storage.getMonthlyStats.
+  const tz = resolveTz(user.timezone);
   return new Promise<Buffer>((resolve, reject) => {
     const chunks: Buffer[] = [];
     const doc = new PDFDocument({ size: "A4", margin: 50, bufferPages: true });
@@ -63,7 +68,7 @@ export function generateMonthlyPDF(
     doc.fillColor("white").font("Bold").fontSize(24)
       .text("Отчёт о питании", 50, 52, { align: "center", width: W });
 
-    const monthName = new Date().toLocaleString("ru-RU", { month: "long", year: "numeric" });
+    const monthName = now.toLocaleString("ru-RU", { month: "long", year: "numeric", timeZone: tz });
     doc.fontSize(13).font("Regular")
       .text(monthName.charAt(0).toUpperCase() + monthName.slice(1), 50, 88, { align: "center", width: W });
     if (user.username) {
@@ -221,8 +226,7 @@ export function generateMonthlyPDF(
 
       points.forEach((p, i) => {
         doc.circle(p.x, p.yp, 3).fill(ACCENT);
-        const d = new Date(sorted[i].date!);
-        const dl = `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`;
+        const dl = formatDdMm(new Date(sorted[i].date!), tz);
         doc.fillColor(GRAY).font("Regular").fontSize(7)
           .text(dl, p.x - 13, y + chartH + 5, { width: 28, align: "center" });
         doc.fillColor(DARK).fontSize(7)
@@ -241,18 +245,11 @@ export function generateMonthlyPDF(
     if (user.caloriesGoal && weeklyStats.some(w => w.days > 0) && weightLogs.length >= 1) {
       sectionTitle("Питание и динамика веса");
 
-      // Recompute week date ranges (same algorithm as storage.getMonthlyStats)
-      const today2 = new Date();
-      const weekRanges: { start: Date; end: Date }[] = [];
-      for (let w = 3; w >= 0; w--) {
-        const weekEnd = new Date(today2);
-        weekEnd.setDate(today2.getDate() - w * 7);
-        weekEnd.setHours(23, 59, 59, 999);
-        const weekStart = new Date(weekEnd);
-        weekStart.setDate(weekEnd.getDate() - 6);
-        weekStart.setHours(0, 0, 0, 0);
-        weekRanges.push({ start: weekStart, end: weekEnd });
-      }
+      // Те же недели, что в storage.getMonthlyStats (lib/stats-days), в зоне пользователя.
+      const weekRanges = monthlyWeekDefs(now, tz).map((wd) => ({
+        start: dayBoundsUtc(wd.startKey, tz).start,
+        end: dayBoundsUtc(wd.endKey, tz).end,
+      }));
 
       const sortedWL = [...weightLogs].sort((a, b) => new Date(a.date!).getTime() - new Date(b.date!).getTime());
 
@@ -610,7 +607,7 @@ export function generateMonthlyPDF(
         .strokeColor(LIGHT).lineWidth(0.5).stroke();
       doc.fillColor(GRAY).font("Regular").fontSize(8)
         .text(
-          `Calorie Tracker Bot  •  Страница ${i + 1} из ${pageCount}  •  ${new Date().toLocaleDateString("ru-RU")}`,
+          `Calorie Tracker Bot  •  Страница ${i + 1} из ${pageCount}  •  ${now.toLocaleDateString("ru-RU", { timeZone: tz })}`,
           50, FOOTER_TEXT_Y, { align: "center", width: W, lineBreak: false }
         );
     }

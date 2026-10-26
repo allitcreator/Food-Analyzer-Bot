@@ -15,6 +15,7 @@ import { computeEnergyBalance } from "./lib/energy";
 import { describeError } from "./lib/safe-log";
 import { publicUser } from "./lib/public-user";
 import { mealTypeByTime, sameTitle } from "./lib/favorites";
+import { dayBoundsUtc, isValidDayKey, resolveTz, todayKey, wallClockDate } from "./lib/tz";
 import { analyzeFoodImage, analyzeFoodText } from "./openai";
 import type { User, FoodLog, FavoriteItem, VisibleFavorite } from "@shared/schema";
 import {
@@ -69,54 +70,19 @@ function userGoals(user: User) {
   };
 }
 
-/** Current calendar day in the user's timezone, as a server-local midnight Date. */
-function userToday(tz: string): Date {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    year: "numeric",
-    month: "numeric",
-    day: "numeric",
-  }).formatToParts(new Date());
-  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
-  return new Date(get("year"), get("month") - 1, get("day"));
+/** Request day "YYYY-MM-DD": query value or today in the user's tz. */
+function resolveDay(dateStr: string | undefined, tz: string): string {
+  return dateStr ?? todayKey(new Date(), tz);
 }
 
-/** Resolve the request date (query "YYYY-MM-DD" or today in the user's tz). */
-function resolveDay(dateStr: string | undefined, tz: string): Date {
-  if (!dateStr) return userToday(tz);
-  const [y, m, d] = dateStr.split("-").map(Number);
-  return new Date(y, m - 1, d);
-}
-
-function dayBounds(day: Date): { start: Date; end: Date } {
-  const start = new Date(day);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(day);
-  end.setHours(23, 59, 59, 999);
-  return { start, end };
-}
-
-/** ISO "YYYY-MM-DD" from a server-local Date. */
-function isoOf(day: Date): string {
-  return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
-}
-
-/** Current wall-clock time in the user's timezone (for "repeat"/favorites mealType). */
+/** Current wall-clock time in the user's tz (for meal type by time of day). */
 function userNow(tz: string): Date {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    year: "numeric",
-    month: "numeric",
-    day: "numeric",
-    hour: "numeric",
-    minute: "numeric",
-    second: "numeric",
-    hour12: false,
-  }).formatToParts(new Date());
-  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
-  let hour = get("hour");
-  if (hour === 24) hour = 0; // some engines emit 24 for midnight with hour12:false
-  return new Date(get("year"), get("month") - 1, get("day"), hour, get("minute"), get("second"));
+  return wallClockDate(new Date(), tz);
+}
+
+/** User's tz, validated (unknown → Europe/Moscow). */
+function userTz(user: User): string {
+  return resolveTz(user.timezone);
 }
 
 /** The user's configured meal-time boundaries (same defaults as the bot). */
@@ -128,19 +94,20 @@ function mealBoundaries(user: User) {
 }
 
 /** The full day payload (same shape GET /day returns) — reused after writes. */
-async function buildDayPayload(user: User, day: Date) {
-  const { start, end } = dayBounds(day);
+async function buildDayPayload(user: User, day: string) {
+  const tz = userTz(user);
+  const { start, end } = dayBoundsUtc(day, tz);
   const [totals, waterTotal, waterLogs, workouts, foodLogs] = await Promise.all([
-    storage.getDailyStats(user.id, day),
-    storage.getDailyWater(user.id, day),
-    storage.getDailyWaterLogs(user.id, day),
-    storage.getDailyWorkouts(user.id, day),
+    storage.getDailyStats(user.id, day, tz),
+    storage.getDailyWater(user.id, day, tz),
+    storage.getDailyWaterLogs(user.id, day, tz),
+    storage.getDailyWorkouts(user.id, day, tz),
     storage.getFoodLogsInRange(user.id, start, end),
   ]);
   const burnedTotal = workouts.reduce((s, w) => s + w.caloriesBurned, 0);
   const energyBalance = computeEnergyBalance(user, totals.calories, burnedTotal);
   return {
-    date: isoOf(day),
+    date: day,
     foodLogs,
     waterTotal,
     waterLogs,
@@ -160,7 +127,7 @@ async function applyItemsToToday(
   user: User,
   items: FavoriteItem[],
 ): Promise<{ createdFood: FoodLog[]; waterAdded: number }> {
-  const tz = user.timezone ?? "Europe/Moscow";
+  const tz = userTz(user);
   const mealType = mealTypeByTime(userNow(tz), mealBoundaries(user));
 
   const createdFood: FoodLog[] = [];
@@ -236,7 +203,7 @@ export function createAppApiRouter(): Router {
     analyzeLimiter,
     asyncHandler(async (req, res) => {
       const user = currentUser(req);
-      const tz = user.timezone ?? "Europe/Moscow";
+      const tz = userTz(user);
       const body = analyzeSchema.parse(req.body);
 
       const now = userNow(tz);
@@ -291,7 +258,7 @@ export function createAppApiRouter(): Router {
         });
         createdFood.push(log);
       }
-      const day = await buildDayPayload(user, userToday(user.timezone ?? "Europe/Moscow"));
+      const day = await buildDayPayload(user, todayKey(new Date(), userTz(user)));
       res.status(201).json({ ok: true, createdFood, waterAdded, day });
     }),
   );
@@ -311,8 +278,13 @@ export function createAppApiRouter(): Router {
     "/day",
     asyncHandler(async (req, res) => {
       const user = currentUser(req);
-      const tz = user.timezone ?? "Europe/Moscow";
+      const tz = userTz(user);
       const { date } = dayQuerySchema.parse(req.query);
+      // Формат проверила схема; несуществующая дата (2026-02-31) — тоже 400.
+      if (date && !isValidDayKey(date)) {
+        res.status(400).json({ error: "validation_error" });
+        return;
+      }
       const day = resolveDay(date, tz);
       res.json(await buildDayPayload(user, day));
     }),
@@ -323,7 +295,7 @@ export function createAppApiRouter(): Router {
     "/stats",
     asyncHandler(async (req, res) => {
       const user = currentUser(req);
-      const tz = user.timezone ?? "Europe/Moscow";
+      const tz = userTz(user);
       const { range } = statsQuerySchema.parse(req.query);
 
       if (range === "month") {
@@ -394,7 +366,8 @@ export function createAppApiRouter(): Router {
       const user = currentUser(req);
       const { amount } = waterSchema.parse(req.body);
       await storage.logWater(user.id, amount);
-      const total = await storage.getDailyWater(user.id, userToday(user.timezone ?? "Europe/Moscow"));
+      const tz = userTz(user);
+      const total = await storage.getDailyWater(user.id, todayKey(new Date(), tz), tz);
       res.status(201).json({ ok: true, waterTotal: total });
     }),
   );
@@ -433,7 +406,7 @@ export function createAppApiRouter(): Router {
           weight: log.weight,
         },
       ]);
-      const day = await buildDayPayload(user, userToday(user.timezone ?? "Europe/Moscow"));
+      const day = await buildDayPayload(user, todayKey(new Date(), userTz(user)));
       res.status(201).json({ ok: true, createdFood, waterAdded: 0, day });
     }),
   );
@@ -523,7 +496,7 @@ export function createAppApiRouter(): Router {
         return;
       }
       const { createdFood, waterAdded } = await applyItemsToToday(user, fav.items);
-      const day = await buildDayPayload(user, userToday(user.timezone ?? "Europe/Moscow"));
+      const day = await buildDayPayload(user, todayKey(new Date(), userTz(user)));
       res.status(201).json({ ok: true, createdFood, waterAdded, day });
     }),
   );
