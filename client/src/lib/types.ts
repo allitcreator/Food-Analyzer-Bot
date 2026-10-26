@@ -96,24 +96,18 @@ export interface WorkoutLog {
   date: string | null;
 }
 
-/** GET /me and PATCH /profile|/settings — user profile without server secrets. */
+/**
+ * GET /me and PATCH /profile|/settings — только поля, которые читает Mini App.
+ * Список совпадает с `PUBLIC_USER_FIELDS` в server/lib/public-user.ts (это
+ * сверяет tests/public-user.test.ts); служебных полей и токенов здесь нет.
+ */
 export interface MeResponse {
-  id: number;
-  telegramId: string | null;
-  username: string | null;
-  isApproved: boolean | null;
-  isAdmin: boolean | null;
-  isBlocked: boolean | null;
   age: number | null;
   gender: string | null;
   weight: number | null;
   height: number | null;
   activityLevel: string | null;
   goal: string | null;
-  caloriesGoal: number | null;
-  proteinGoal: number | null;
-  fatGoal: number | null;
-  carbsGoal: number | null;
   reportTime: string | null;
   breakfastReminder: string | null;
   lunchReminder: string | null;
@@ -131,7 +125,6 @@ export interface MeResponse {
   timezone: string | null;
   mealBreakfastEnd: string | null;
   mealLunchEnd: string | null;
-  createdAt: string | null;
   goals: Goals;
 }
 

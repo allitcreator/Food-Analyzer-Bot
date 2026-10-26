@@ -17,6 +17,10 @@ import { buildSyntheticUpdate, type SyntheticPayload } from "./lib/synthetic-upd
 import { buildQuickCardText, buildTokenMessage, buildShortcutCaption, shortcutPath, SHORTCUT_FILENAME } from "./lib/quick-shortcut";
 import { existsSync } from "node:fs";
 import { describeError } from "./lib/safe-log";
+import { safeHandler, handlerNameForPattern } from "./lib/safe-handler";
+import { createInFlightGuard, takePending, restorePending } from "./lib/callback-guard";
+import { checkAdminTarget, type AdminAction } from "./lib/admin-target";
+import { roundFoodLogField } from "./lib/food-log-fields";
 
 const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
 
@@ -353,6 +357,13 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
 
   botInstance = bot;
 
+  // Все onText-хендлеры регистрируются через safeHandler: ошибка внутри
+  // команды пишется в лог и не превращается в unhandledRejection.
+  const onText = (
+    re: RegExp,
+    fn: (msg: TelegramBot.Message, match: RegExpExecArray | null) => unknown,
+  ) => bot.onText(re, safeHandler(`onText ${handlerNameForPattern(re)}`, fn));
+
   // Register bot commands in Telegram menu
   bot.setMyCommands([
     { command: "stats",          description: "Статистика за сегодня + серия дней 🔥" },
@@ -393,7 +404,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     return user;
   };
 
-  bot.onText(/^\/help(@\w+)?$/, async (msg) => {
+  onText(/^\/help(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const helpText = [
       "📋 *Команды бота*\n",
@@ -434,7 +445,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     bot.sendMessage(chatId, helpText, { parse_mode: "Markdown" });
   });
 
-  bot.onText(/^\/ask(@\w+)?(?:\s+([\s\S]+))?$/, async (msg, match) => {
+  onText(/^\/ask(@\w+)?(?:\s+([\s\S]+))?$/, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -647,7 +658,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     });
   }
 
-  bot.onText(/^\/start(@\w+)?$/, async (msg) => {
+  onText(/^\/start(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     const username = msg.from?.username;
@@ -712,7 +723,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
   });
 
   // Admin Commands
-  bot.onText(/^\/users(@\w+)?$/, async (msg) => {
+  onText(/^\/users(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -767,7 +778,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     }
   });
 
-  bot.onText(/^\/stats(@\w+)?$/, async (msg) => {
+  onText(/^\/stats(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -859,7 +870,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     bot.sendMessage(chatId, text);
   });
 
-  bot.onText(/^\/week(@\w+)?$/, async (msg) => {
+  onText(/^\/week(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -947,7 +958,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     if (analysis) bot.sendMessage(chatId, `💡 Анализ:\n\n${analysis}`);
   });
 
-  bot.onText(/^\/goal(@\w+)?$/, async (msg) => {
+  onText(/^\/goal(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -971,7 +982,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
   });
 
   // ─── /weight ──────────────────────────────────────────────────────────────
-  bot.onText(/^\/weight(@\w+)?(?:\s+(.+))?$/, async (msg, match) => {
+  onText(/^\/weight(@\w+)?(?:\s+(.+))?$/, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1025,7 +1036,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
   });
 
   // ─── /weightreminder ──────────────────────────────────────────────────────
-  bot.onText(/^\/weightreminder(@\w+)?$/, async (msg) => {
+  onText(/^\/weightreminder(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1068,7 +1079,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
   }
 
   // ─── /workout ─────────────────────────────────────────────────────────────
-  bot.onText(/^\/workout(@\w+)?$/, async (msg) => {
+  onText(/^\/workout(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1170,7 +1181,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
   }
 
   // ─── /settings ────────────────────────────────────────────────────────────
-  bot.onText(/^\/settings(@\w+)?$/, async (msg) => {
+  onText(/^\/settings(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1184,7 +1195,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
   });
 
   // ─── /quick — токен быстрой записи с телефона ──────────────────────────────
-  bot.onText(/^\/quick(@\w+)?$/, async (msg) => {
+  onText(/^\/quick(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1202,7 +1213,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
   });
 
   // ─── /editprofile ─────────────────────────────────────────────────────────
-  bot.onText(/^\/editprofile(@\w+)?$/, async (msg) => {
+  onText(/^\/editprofile(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1245,7 +1256,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
   });
 
   // ─── /month ───────────────────────────────────────────────────────────────
-  bot.onText(/^\/month(@\w+)?$/, async (msg) => {
+  onText(/^\/month(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1342,7 +1353,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
   });
 
   // ─── /pdf ─────────────────────────────────────────────────────────────────
-  bot.onText(/^\/pdf(@\w+)?$/, async (msg) => {
+  onText(/^\/pdf(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1533,7 +1544,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     bot.sendMessage(user.telegramId!, text.trimEnd());
   }
 
-  bot.onText(/^\/report(@\w+)?$/, async (msg) => {
+  onText(/^\/report(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1545,7 +1556,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     await sendEveningReport(user, true);
   });
 
-  bot.onText(/^\/report_time(@\w+)?$/, async (msg) => {
+  onText(/^\/report_time(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1602,7 +1613,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     else smartSnooze[telegramId] = rec; // touch
   }
 
-  bot.onText(/^\/reminders(@\w+)?$/, async (msg) => {
+  onText(/^\/reminders(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1758,10 +1769,13 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     }
   }
 
-  setTimeout(() => checkScheduledNotifications(), 5000);
-  setInterval(checkScheduledNotifications, 60000);
+  // Тик без общего try/catch ронял процесс, если база недоступна
+  // (getAllApprovedUsers бросал вне циклов с локальными catch).
+  const scheduledTick = safeHandler("checkScheduledNotifications", checkScheduledNotifications);
+  setTimeout(() => { void scheduledTick(); }, 5000);
+  setInterval(() => { void scheduledTick(); }, 60000);
 
-  bot.onText(/^\/profile(@\w+)?$/, async (msg) => {
+  onText(/^\/profile(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1959,7 +1973,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     }
   }
 
-  bot.onText(/^\/favorites(@\w+)?$/, async (msg) => {
+  onText(/^\/favorites(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -1968,7 +1982,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     await sendFavoritesList(chatId, user.id, telegramId);
   });
 
-  bot.onText(/^\/history(@\w+)?(?:\s+(\d{2}\.\d{2}\.\d{4}))?$/, async (msg, match) => {
+  onText(/^\/history(@\w+)?(?:\s+(\d{2}\.\d{2}\.\d{4}))?$/, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId) return;
@@ -2001,7 +2015,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     await sendHistoryMessages(chatId, logs, user, headerText);
   });
 
-  bot.onText(/^\/export(@\w+)?$/, async (msg) => {
+  onText(/^\/export(@\w+)?$/, async (msg) => {
     const today = getMoscowNow();
     const dd = String(today.getDate()).padStart(2, '0');
     const mm = String(today.getMonth() + 1).padStart(2, '0');
@@ -2022,7 +2036,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     );
   });
 
-  bot.onText(/^\/export(@\w+)?\s+(\d{2}\.\d{2}\.\d{4})(?: - (\d{2}\.\d{2}\.\d{4}))?$/, async (msg, match) => {
+  onText(/^\/export(@\w+)?\s+(\d{2}\.\d{2}\.\d{4})(?: - (\d{2}\.\d{2}\.\d{4}))?$/, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId || !match) return;
@@ -2193,7 +2207,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     bot.sendDocument(chatId, Buffer.from(buffer as Buffer), {}, { filename, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   });
 
-  bot.onText(/^\/clear(@\w+)?$/, async (msg) => {
+  onText(/^\/clear(@\w+)?$/, async (msg) => {
     const today = getMoscowNow();
     const dd = String(today.getDate()).padStart(2, '0');
     const mm = String(today.getMonth() + 1).padStart(2, '0');
@@ -2208,7 +2222,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     );
   });
 
-  bot.onText(/^\/clear(@\w+)?\s+(\d{2}\.\d{2}\.\d{4})(?: - (\d{2}\.\d{2}\.\d{4}))?$/, async (msg, match) => {
+  onText(/^\/clear(@\w+)?\s+(\d{2}\.\d{2}\.\d{4})(?: - (\d{2}\.\d{2}\.\d{4}))?$/, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
     if (!telegramId || !match) return;
@@ -2258,7 +2272,11 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     );
   });
 
-  bot.on("callback_query", async (query) => {
+  // Повторы, где отложенной записи нет и снять её до записи нельзя: двойной
+  // тап по «🔁»/«⭐» иначе пишет блюдо дважды.
+  const callbackInFlight = createInFlightGuard();
+
+  bot.on("callback_query", safeHandler("callback_query", async (query: TelegramBot.CallbackQuery) => {
     const chatId = query.message?.chat.id;
     const telegramId = query.from?.id.toString();
     if (!chatId || !telegramId || !query.data) return;
@@ -2277,6 +2295,15 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       return;
     }
 
+    // Единая проверка цели для кнопок admin_*: главного админа не трогаем,
+    // себя не удаляем/блокируем/разжалуем, отклоняем только заявки.
+    const denyAdminAction = (action: AdminAction, target: User): boolean => {
+      const check = checkAdminTarget(action, { telegramId }, target, ADMIN_TELEGRAM_ID);
+      if (check.ok) return false;
+      bot.answerCallbackQuery(query.id, { text: check.reason }).catch(() => {});
+      return true;
+    };
+
     if (query.data === "quick_reset") {
       const token = randomBytes(24).toString("hex");
       await storage.setQuickToken(user.id, token);
@@ -2294,45 +2321,57 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     }
 
     if (query.data === "confirm_yes") {
-      const pending = (bot as any).pendingLogs?.[telegramId];
+      // Снимаем pending ДО записи (как save_all): второй тап по «✅ Да»,
+      // пришедший, пока идёт await, уже ничего не найдёт и не запишет дубль.
+      // Если запись упала — возвращаем pending, чтобы можно было нажать снова.
+      const pendingStore: Record<string, any> = (bot as any).pendingLogs ?? {};
+      const pending = takePending(pendingStore, telegramId);
       if (pending && pending.hydrating) {
         // Hydrating drink → water tracking, not the food diary.
         const amount = Math.round(Number(pending.weight)) || 0;
-        await storage.logWater(user.id, amount);
+        try {
+          await storage.logWater(user.id, amount);
+        } catch (e) {
+          restorePending(pendingStore, telegramId, pending);
+          throw e;
+        }
         const totalWater = await storage.getDailyWater(user.id, getUserNow(user.timezone ?? 'Europe/Moscow'));
         bot.editMessageText(`💧 +${amount} мл, всего за день ${totalWater} мл`, {
           chat_id: chatId,
           message_id: query.message?.message_id
         });
         await maybeCacheVisionBarcode(pending);
-        delete (bot as any).pendingLogs[telegramId];
         const favItem = toFavoriteItems([{ ...pending, weight: amount, hydrating: true }])[0];
         await maybeSuggestFavorite(chatId, telegramId, user, favItem);
       } else if (pending) {
         const unit = getUnit(pending.foodName);
-        await storage.createFoodLog({
-          userId: user.id,
-          foodName: pending.foodName,
-          calories: Math.round(Number(pending.calories)) || 0,
-          protein: Math.round(Number(pending.protein)) || 0,
-          fat: Math.round(Number(pending.fat)) || 0,
-          carbs: Math.round(Number(pending.carbs)) || 0,
-          weight: Math.round(Number(pending.weight)) || 0,
-          mealType: pending.mealType || 'snack',
-          foodScore: pending.foodScore ? Math.round(Number(pending.foodScore)) : null,
-          nutritionAdvice: pending.nutritionAdvice || null,
-          fiber: pending.fiber != null ? Number(pending.fiber) : null,
-          sugar: pending.sugar != null ? Number(pending.sugar) : null,
-          sodium: pending.sodium != null ? Number(pending.sodium) : null,
-          saturatedFat: pending.saturatedFat != null ? Number(pending.saturatedFat) : null,
-        });
+        try {
+          await storage.createFoodLog({
+            userId: user.id,
+            foodName: pending.foodName,
+            calories: Math.round(Number(pending.calories)) || 0,
+            protein: Math.round(Number(pending.protein)) || 0,
+            fat: Math.round(Number(pending.fat)) || 0,
+            carbs: Math.round(Number(pending.carbs)) || 0,
+            weight: Math.round(Number(pending.weight)) || 0,
+            mealType: pending.mealType || 'snack',
+            foodScore: pending.foodScore ? Math.round(Number(pending.foodScore)) : null,
+            nutritionAdvice: pending.nutritionAdvice || null,
+            fiber: pending.fiber != null ? Number(pending.fiber) : null,
+            sugar: pending.sugar != null ? Number(pending.sugar) : null,
+            sodium: pending.sodium != null ? Number(pending.sodium) : null,
+            saturatedFat: pending.saturatedFat != null ? Number(pending.saturatedFat) : null,
+          });
+        } catch (e) {
+          restorePending(pendingStore, telegramId, pending);
+          throw e;
+        }
         const progress = await buildDailyProgress(storage, user.id, user, getUserNow(user.timezone ?? 'Europe/Moscow'));
         bot.editMessageText(`✅ Добавлено: ${pending.foodName} (${pending.weight}${unit})${progress}`, {
           chat_id: chatId,
           message_id: query.message?.message_id
         });
         await maybeCacheVisionBarcode(pending);
-        delete (bot as any).pendingLogs[telegramId];
         const favItem = toFavoriteItems([pending])[0];
         await maybeSuggestFavorite(chatId, telegramId, user, favItem);
       } else {
@@ -2620,31 +2659,43 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     // ─── Repeat a history entry onto today ────────────────────────────────
     } else if (query.data.startsWith("hist_rep_")) {
       const logId = parseInt(query.data.replace("hist_rep_", ""));
-      const log = await storage.getFoodLogById(logId, user.id);
-      if (!log) {
-        bot.answerCallbackQuery(query.id, { text: 'Запись не найдена' });
+      const result = await callbackInFlight.run(`${telegramId}:${query.data}`, async () => {
+        const log = await storage.getFoodLogById(logId, user.id);
+        if (!log) {
+          bot.answerCallbackQuery(query.id, { text: 'Запись не найдена' }).catch(() => {});
+          return;
+        }
+        bot.answerCallbackQuery(query.id, { text: '🔁 Повторяю…' }).catch(() => {});
+        const favItem: FavoriteItem = {
+          foodName: log.foodName, calories: log.calories, protein: log.protein,
+          fat: log.fat, carbs: log.carbs, weight: log.weight,
+        };
+        const reply = await applyItemsToToday(user, [favItem]);
+        bot.sendMessage(chatId, reply).catch(() => {});
+      });
+      if (!result.ran) {
+        bot.answerCallbackQuery(query.id, { text: '⏳ Уже записываю…' }).catch(() => {});
         return;
       }
-      bot.answerCallbackQuery(query.id, { text: '🔁 Повторяю…' }).catch(() => {});
-      const favItem: FavoriteItem = {
-        foodName: log.foodName, calories: log.calories, protein: log.protein,
-        fat: log.fat, carbs: log.carbs, weight: log.weight,
-      };
-      const reply = await applyItemsToToday(user, [favItem]);
-      bot.sendMessage(chatId, reply);
 
     // ─── Favorites: use / edit / delete ───────────────────────────────────
     } else if (query.data.startsWith("fav_use_")) {
       const favId = parseInt(query.data.replace("fav_use_", ""));
-      // Visible = own OR shared by someone else; both can be logged to my diary.
-      const fav = await storage.getVisibleFavoriteById(user.id, favId);
-      if (!fav) {
-        bot.answerCallbackQuery(query.id, { text: 'Избранное не найдено' });
+      const result = await callbackInFlight.run(`${telegramId}:${query.data}`, async () => {
+        // Visible = own OR shared by someone else; both can be logged to my diary.
+        const fav = await storage.getVisibleFavoriteById(user.id, favId);
+        if (!fav) {
+          bot.answerCallbackQuery(query.id, { text: 'Избранное не найдено' }).catch(() => {});
+          return;
+        }
+        bot.answerCallbackQuery(query.id, { text: '⭐ Записываю…' }).catch(() => {});
+        const reply = await applyItemsToToday(user, fav.items);
+        bot.sendMessage(chatId, reply).catch(() => {});
+      });
+      if (!result.ran) {
+        bot.answerCallbackQuery(query.id, { text: '⏳ Уже записываю…' }).catch(() => {});
         return;
       }
-      bot.answerCallbackQuery(query.id, { text: '⭐ Записываю…' }).catch(() => {});
-      const reply = await applyItemsToToday(user, fav.items);
-      bot.sendMessage(chatId, reply);
 
     } else if (query.data === "fav_edit" || query.data === "fav_done") {
       const editMode = query.data === "fav_edit";
@@ -3072,6 +3123,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       const targetUserId = parseInt(query.data.split("_")[2]);
       const targetUser = await storage.getUser(targetUserId);
       if (targetUser) {
+        if (denyAdminAction("approve", targetUser)) return;
         await storage.updateUser(targetUserId, { isApproved: true });
         bot.editMessageText(`✅ Пользователь @${targetUser.username} одобрен.`, {
           chat_id: chatId,
@@ -3084,6 +3136,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       const targetUserId = parseInt(query.data.split("_")[2]);
       const targetUser = await storage.getUser(targetUserId);
       if (targetUser) {
+        if (denyAdminAction("reject", targetUser)) return;
         await storage.deleteUser(targetUserId);
         bot.editMessageText(`❌ Пользователь @${targetUser.username} отклонен и удален.`, {
           chat_id: chatId,
@@ -3096,12 +3149,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       const targetUserId = parseInt(query.data.split("_")[2]);
       const targetUser = await storage.getUser(targetUserId);
       if (targetUser) {
-        const isTargetGlobalAdmin = ADMIN_TELEGRAM_ID && String(targetUser.telegramId).trim() === String(ADMIN_TELEGRAM_ID).trim();
-        if (isTargetGlobalAdmin) {
-          bot.sendMessage(chatId, "Нельзя удалить главного администратора.");
-          bot.answerCallbackQuery(query.id);
-          return;
-        }
+        if (denyAdminAction("delete", targetUser)) return;
         await storage.deleteUser(targetUserId);
         bot.editMessageText(`🗑 Пользователь @${targetUser.username || targetUserId} удалён из системы.`, {
           chat_id: chatId,
@@ -3114,11 +3162,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       const targetUserId = parseInt(query.data.split("_")[2]);
       const targetUser = await storage.getUser(targetUserId);
       if (targetUser) {
-        const isTargetGlobalAdmin = ADMIN_TELEGRAM_ID && String(targetUser.telegramId).trim() === String(ADMIN_TELEGRAM_ID).trim();
-        if (isTargetGlobalAdmin) {
-          bot.answerCallbackQuery(query.id, { text: 'Нельзя заблокировать главного администратора' });
-          return;
-        }
+        if (denyAdminAction("block", targetUser)) return;
         await storage.updateUser(targetUserId, { isBlocked: true });
         bot.editMessageText(`🚫 @${targetUser.username || targetUserId} | Заблокирован | ID: ${targetUserId}`, {
           chat_id: chatId,
@@ -3138,6 +3182,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       const targetUserId = parseInt(query.data.split("_")[2]);
       const targetUser = await storage.getUser(targetUserId);
       if (targetUser) {
+        if (denyAdminAction("unblock", targetUser)) return;
         await storage.updateUser(targetUserId, { isBlocked: false });
         const isUAdmin = targetUser.isAdmin;
         bot.editMessageText(`✅ @${targetUser.username || targetUserId} | Активен${isUAdmin ? ' 👑' : ''} | ID: ${targetUserId}`, {
@@ -3159,6 +3204,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       const targetUserId = parseInt(query.data.split("_")[2]);
       const targetUser = await storage.getUser(targetUserId);
       if (targetUser) {
+        if (denyAdminAction("makeadmin", targetUser)) return;
         await storage.updateUser(targetUserId, { isAdmin: true });
         bot.editMessageText(`✅ @${targetUser.username || targetUserId} | Активен 👑 | ID: ${targetUserId}`, {
           chat_id: chatId,
@@ -3179,6 +3225,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       const targetUserId = parseInt(query.data.split("_")[2]);
       const targetUser = await storage.getUser(targetUserId);
       if (targetUser) {
+        if (denyAdminAction("removeadmin", targetUser)) return;
         await storage.updateUser(targetUserId, { isAdmin: false });
         bot.editMessageText(`✅ @${targetUser.username || targetUserId} | Активен | ID: ${targetUserId}`, {
           chat_id: chatId,
@@ -3235,22 +3282,28 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     // ─── Умные напоминания: повторить / пропустить / отложить ──────────────
     if (query.data.startsWith("smart_rep_")) {
       const meal = query.data.replace("smart_rep_", "");
-      const log = await storage.getTopMealFood(user.id, meal, 28);
-      if (!log) {
-        bot.answerCallbackQuery(query.id, { text: 'Не нашёл, что ты обычно ешь' }).catch(() => {});
-        return;
+      // Та же защита от двойного тапа, что у hist_rep_/fav_use_.
+      const result = await callbackInFlight.run(`${telegramId}:${query.data}`, async () => {
+        const log = await storage.getTopMealFood(user.id, meal, 28);
+        if (!log) {
+          bot.answerCallbackQuery(query.id, { text: 'Не нашёл, что ты обычно ешь' }).catch(() => {});
+          return;
+        }
+        bot.answerCallbackQuery(query.id, { text: '🔁 Повторяю…' }).catch(() => {});
+        // mealType при записи возьмётся по текущему времени внутри applyItemsToToday.
+        const favItem: FavoriteItem = {
+          foodName: log.foodName, calories: log.calories, protein: log.protein,
+          fat: log.fat, carbs: log.carbs, weight: log.weight,
+        };
+        const reply = await applyItemsToToday(user, [favItem]);
+        clearSmartSnooze(telegramId, meal); // приём записан — снять отложку
+        bot.editMessageText(reply, {
+          chat_id: chatId, message_id: query.message?.message_id,
+        }).catch(() => {});
+      });
+      if (!result.ran) {
+        bot.answerCallbackQuery(query.id, { text: '⏳ Уже записываю…' }).catch(() => {});
       }
-      bot.answerCallbackQuery(query.id, { text: '🔁 Повторяю…' }).catch(() => {});
-      // mealType при записи возьмётся по текущему времени внутри applyItemsToToday.
-      const favItem: FavoriteItem = {
-        foodName: log.foodName, calories: log.calories, protein: log.protein,
-        fat: log.fat, carbs: log.carbs, weight: log.weight,
-      };
-      const reply = await applyItemsToToday(user, [favItem]);
-      clearSmartSnooze(telegramId, meal); // приём записан — снять отложку
-      bot.editMessageText(reply, {
-        chat_id: chatId, message_id: query.message?.message_id,
-      }).catch(() => {});
       return;
     }
 
@@ -3489,9 +3542,13 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     }
 
     bot.answerCallbackQuery(query.id);
-  });
+  }, {
+    // Ответить на callback, чтобы у пользователя не крутилась кнопка. Если
+    // хендлер уже ответил, Telegram вернёт 400 — safeHandler это проглотит.
+    onError: (_err, query) => bot.answerCallbackQuery(query.id, { text: "⚠️ Ошибка, попробуйте ещё раз" }),
+  }));
 
-  bot.on("message", async (msg) => {
+  bot.on("message", safeHandler("message", async (msg: TelegramBot.Message) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from?.id.toString();
 
@@ -3534,17 +3591,25 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
         // If weight changed — recalculate КБЖУ and micronutrients proportionally
         if (field === 'weight' && pending.weight > 0) {
           const ratio = val / pending.weight;
-          pending.calories = Math.round(pending.calories * ratio);
-          pending.protein  = Math.round(pending.protein  * ratio * 10) / 10;
-          pending.fat      = Math.round(pending.fat      * ratio * 10) / 10;
-          pending.carbs    = Math.round(pending.carbs    * ratio * 10) / 10;
+          // Округление по типу колонки food_logs (КБЖУ — integer): что видно в
+          // карточке, то и запишется.
+          pending.calories = roundFoodLogField('calories', pending.calories * ratio);
+          pending.protein  = roundFoodLogField('protein',  pending.protein  * ratio);
+          pending.fat      = roundFoodLogField('fat',      pending.fat      * ratio);
+          pending.carbs    = roundFoodLogField('carbs',    pending.carbs    * ratio);
           if (pending.fiber != null) pending.fiber = Math.round(pending.fiber * ratio * 10) / 10;
           if (pending.sugar != null) pending.sugar = Math.round(pending.sugar * ratio * 10) / 10;
           if (pending.sodium != null) pending.sodium = Math.round(pending.sodium * ratio);
           if (pending.saturatedFat != null) pending.saturatedFat = Math.round(pending.saturatedFat * ratio * 10) / 10;
         }
 
-        (pending as any)[field] = field === 'weight' ? Math.round(val) : Math.round(val * 10) / 10;
+        const rounded = roundFoodLogField(field, val);
+        if (rounded === undefined) {
+          delete userStates[telegramId];
+          bot.sendMessage(chatId, "Данные устарели, попробуйте заново.");
+          return;
+        }
+        (pending as any)[field] = rounded;
         // touch: вложенные мутации не триггерят персист — переприсваиваем верхний ключ
         (bot as any).pendingLogs[telegramId] = pending;
         delete userStates[telegramId];
@@ -3595,7 +3660,14 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
           if (log.saturatedFat != null) updates.saturatedFat = Math.round((log.saturatedFat as number) * ratio * 10) / 10;
           updates.weight = Math.round(val);
         } else {
-          updates[field] = field === 'weight' ? Math.round(val) : Math.round(val * 10) / 10;
+          // calories/protein/fat/carbs — integer-колонки: дробь Postgres не примет.
+          const rounded = roundFoodLogField(field, val);
+          if (rounded === undefined) {
+            delete userStates[telegramId];
+            bot.sendMessage(chatId, "Данные устарели, попробуйте заново.");
+            return;
+          }
+          updates[field] = rounded;
         }
 
         await storage.updateFoodLog(logId, user.id, updates);
@@ -3640,17 +3712,23 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
         // If weight changed — recalculate macros proportionally
         if (field === 'weight' && item.weight > 0) {
           const ratio = val / item.weight;
-          item.calories = Math.round(item.calories * ratio);
-          item.protein  = Math.round(item.protein  * ratio * 10) / 10;
-          item.fat      = Math.round(item.fat      * ratio * 10) / 10;
-          item.carbs    = Math.round(item.carbs    * ratio * 10) / 10;
+          item.calories = roundFoodLogField('calories', item.calories * ratio)!;
+          item.protein  = roundFoodLogField('protein',  item.protein  * ratio)!;
+          item.fat      = roundFoodLogField('fat',      item.fat      * ratio)!;
+          item.carbs    = roundFoodLogField('carbs',    item.carbs    * ratio)!;
           if (item.fiber != null) item.fiber = Math.round(item.fiber * ratio * 10) / 10;
           if (item.sugar != null) item.sugar = Math.round(item.sugar * ratio * 10) / 10;
           if (item.sodium != null) item.sodium = Math.round(item.sodium * ratio);
           if (item.saturatedFat != null) item.saturatedFat = Math.round(item.saturatedFat * ratio * 10) / 10;
         }
 
-        (item as any)[field] = field === 'weight' ? Math.round(val) : Math.round(val * 10) / 10;
+        const rounded = roundFoodLogField(field, val);
+        if (rounded === undefined) {
+          delete userStates[telegramId];
+          bot.sendMessage(chatId, "Данные устарели, попробуйте заново.");
+          return;
+        }
+        (item as any)[field] = rounded;
         // touch: мутация items[idx] — вложенная, персист триггерит только переприсваивание ключа
         pendingMulti[telegramId] = items;
         delete userStates[telegramId];
@@ -4057,7 +4135,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
         bot.sendMessage(chatId, "Произошла ошибка при обработке голосового сообщения.");
       }
     }
-  });
+  }));
 
   console.log("Telegram Bot started!");
   return bot;

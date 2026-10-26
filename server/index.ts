@@ -6,6 +6,13 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { describeError } from "./lib/safe-log";
 
+// Промис, отклонённый без обработчика (например, `bot.editMessageText` без
+// .catch, когда Telegram вернул 400), по умолчанию в Node завершает процесс.
+// Один такой сбой не должен класть весь бот: пишем в лог и работаем дальше.
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled promise rejection:", describeError(reason));
+});
+
 const app = express();
 const httpServer = createServer(app);
 

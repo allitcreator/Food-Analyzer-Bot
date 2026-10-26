@@ -13,6 +13,7 @@ import { storage } from "./storage";
 import { telegramAuth } from "./lib/telegram-auth";
 import { computeEnergyBalance } from "./lib/energy";
 import { describeError } from "./lib/safe-log";
+import { publicUser } from "./lib/public-user";
 import { mealTypeByTime, sameTitle } from "./lib/favorites";
 import { analyzeFoodImage, analyzeFoodText } from "./openai";
 import type { User, FoodLog, FavoriteItem, VisibleFavorite } from "@shared/schema";
@@ -45,11 +46,6 @@ function asyncHandler(
 /** The authenticated user is guaranteed by `telegramAuth`. */
 function currentUser(req: Request): User {
   return req.appUser as User;
-}
-
-/** Shape a user object before sending it to the client. */
-function publicUser(user: User) {
-  return { ...user };
 }
 
 /** Shape a favorite for the client: only the fields the Mini App needs. */
@@ -300,7 +296,8 @@ export function createAppApiRouter(): Router {
     }),
   );
 
-  // GET /api/app/me — profile + goals (no server-only fields).
+  // GET /api/app/me — profile + goals. Поля — allowlist из lib/public-user:
+  // без quickToken, telegramId и флагов доступа.
   router.get(
     "/me",
     asyncHandler(async (req, res) => {
