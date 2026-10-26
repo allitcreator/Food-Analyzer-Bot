@@ -1,171 +1,124 @@
 # HANDOFF
 
 Статус: открыт
-Обновлено: 2026-10-26 22:40 MSK
+Обновлено: 2026-10-27 00:00 MSK
 Клиент: Claude
 
 ## Цель
 
-Аудит бота от 2026-10-26: ревью кода, безопасности, Mini App, прода на vps4,
-рынка и LLM — и исправление найденного. Полный список доработок с отметками —
-раздел «Аудит 2026-10-26» в `docs/ROADMAP.md`. Блоки 1–5 (прод, устойчивость
-и безопасность, модели, баги, сопровождение) сделаны; впереди блок 6 —
-новые функции. Прошлая история (техдолг tsc, утечка в логах) — в
-`HANDOFF-archive.md`.
+Редизайн Mini App в тёплом стиле (вариант 5 из макетов) для всех экранов,
+плюс голосовой ввод и штрихкод в шторке «Добавить еду». Сделано и выкачено;
+осталась проверка на устройстве. Итоги прошлой сессии (аудит, блоки 1–5) —
+в `HANDOFF-archive.md`, последний раздел.
 
 ## Выполнено
 
-Всё закоммичено, запушено и задеплоено. Прод — `17b5505`, следом только
-docs-коммиты.
+Коммит `101c37e`, запушен в main, задеплоен на vps4 2026-10-26 ~23:58 MSK.
 
-1. **Прод (vps4).** Поставлен logrotate (пакета не было, nginx-логи не
-   ротировались). Ежедневный дамп БД: `scripts/backup-db.sh`, cron 04:20,
-   `/root/foodbot/backups`, 14 дней; копий вне VPS не делаем — решение
-   пользователя. nginx: `access_log off` для `location = /api/quick`, 9 строк
-   с подписями к фото вырезаны из access.log, бэкап конфига
-   `/root/nginx-bots.bak-*`.
-2. **Устойчивость и безопасность** (`f4b9778`, `e727a09`): `safeHandler` на всех
-   хендлерах и тике, `unhandledRejection`, `pool.on('error')`; округление по
-   типу колонки; защита от двойного тапа; проверка цели в `admin_*`;
-   allowlist полей `/me`; дневной лимит AI (`AI_DAILY_LIMIT=150`,
-   `AI_DAILY_PHOTO_LIMIT=40`, `VOICE_MAX_SECONDS=300`, счётчик в памяти);
-   vision-кэш штрихкодов без пользовательских правок и без затирания OFF;
-   `.dockerignore`, `USER node`, runtime без devDependencies, healthcheck с
-   `SELECT 1`, CSP + `nosniff` + `no-referrer`.
-3. **Модели** (`81f469c` + `.env` на проде): роли `AI_MODEL_VISION/BARCODE/
-   TEXT/CHAT/AUDIO`, `AI_FALLBACK_*`, `AI_REASONING_EFFORT`
-   (`server/lib/ai-models.ts`). На проде: text и chat → `openai/gpt-6-luna`
-   (fallback `gpt-4o-mini`), audio → `google/gemini-3.5-flash-lite`
-   (fallback `gemini-3-flash-preview`). Vision и barcode — прежние
-   `gpt-4o`/`gpt-4o-mini`. Бэкап `.env` — `/root/foodbot/.env.bak-*`.
-   Eval: `eval/`, `scripts/eval-models.ts`; итоги — ROADMAP блок 3.
-4. **Баги** (`bd3e2c4`, `7158863`): планировщик «время наступило и не
-   отправлено» с окном догона 2 ч, неналожение тиков, неблокирующие отправки;
-   снуз без лимита; заблокированным не шлём; `/cancel` и TTL 30 мин диалогов;
-   порции OFF; баги Mini App (тема, цели, ошибки, таймауты, «сегодня» по tz,
-   `disableVerticalSwipes`); единый `server/lib/tz.ts`.
-5. **Сопровождение** (`783a729`, `17b5505`): снапшоты миграций 0005–0007
-   (сверены со схемой прода), CI с check/build/audit, сборка не качает SDK
-   (`npm run update:tg-sdk`), удалено ~50 пакетов и устаревшие доки, `db:push`
-   убран, `script/` → `scripts/`; `npm audit` = 0 (drizzle-orm 0.45.4, zod 4,
-   overrides для request/qs/uuid); `describeError` не печатает SQL и параметры
-   `DrizzleQueryError`; 35 HTTP-тестов Mini App API; 404 на удаление чужой
-   воды/избранного.
+1. **Макеты**: `docs/design/miniapp-mockups.html` (5 вариантов «Сегодня»),
+   `docs/design/miniapp-warm-screens.html` (утверждённые: все экраны,
+   тёмная тема, шторка в два шага).
+2. **Клиент** (`client/src`):
+   - своя палитра в `index.css` (светлая/тёмная), `lib/theme.ts` берёт от
+     Telegram только colorScheme; `theme-colors.ts` удалён;
+   - экраны `pages/*` переписаны; новые `AddFoodProvider`, `WeekBars`,
+     `MacroPills`, `FavoriteChips`; `MealGroups.tsx` удалён;
+   - FAB «+» над вкладкой «Профиль», шторка: выбор приёма, текст, фото,
+     штрихкод, голос (`lib/voice.ts`, MediaRecorder 32 кбит/с, автостоп 59 с),
+     степпер веса;
+   - логика с тестами: `lib/week-bars.ts` (пороги ≤100% ok, ≤110% near,
+     >110% over), `protein-tip.ts` (после mealLunchEnd, не хватает >20 г),
+     `stats-summary.ts` (сегодня исключено из средних/мин/макс),
+     `food-emoji.ts`, `weight-trend.ts`, `invalidate.ts` (сброс `day`+`stats`);
+   - `shared/meal-time.ts` — `mealTypeByTime`, сервер реэкспортирует из
+     `server/lib/favorites.ts`.
+3. **Сервер**:
+   - `POST /api/app/transcribe` → `lib/voice-transcode.ts`: явный демуксер по
+     mimeType, `-protocol_whitelist file`, 2 слота (иначе 503 busy), бюджет
+     40 с, длительность округляется вниз, лимит 60 с (422 too_long);
+   - штрихкод в `POST /api/app/analyze` (`mode: photo|barcode`): photo — только
+     zxing при `barcodeScanEnabled`, barcode — zxing + AI с EAN-checksum,
+     без кода 422 no_barcode; поток вынесен в `lib/barcode-pipeline.ts`,
+     `lib/open-food-facts.ts` (санитизация OFF), бот переведён на них;
+   - ответ `/analyze` — `{ items, source }`, items строго по
+     `analyzedItemSchema` (оценка округляется, совет ≤500);
+   - `GET /api/app/stats?range=week&end=YYYY-MM-DD`;
+   - общая с ботом дневная AI-квота (`lib/ai-quota-instance.ts`), Mini App
+     → 429 quota_exceeded;
+   - `server/barcode.ts`: `readImageSize`, zxing пропускает картинки >16 Мп.
+4. **Ревью**: skeptic по плану, общий reviewer и security-reviewer по диффу;
+   все подтверждённые находки исправлены до коммита.
 
 ## Текущее состояние
 
-- Прод на vps4: `17b5505`, контейнер `healthy`, Node 20, миграции без повторов,
-  вебхук без ошибок, тики планировщика без ошибок.
-- `npm run check` чист, `npm test` — 474 теста, 0 падений; тесты зелёные и при
-  `TZ=UTC`, `TZ=Asia/Tokyo`.
-- `server/bot.ts` — 4227 строк, `setupBot` по-прежнему одна функция.
-- Ручная проверка в Telegram пользователем не подтверждена: Mini App в
-  светлой/тёмной теме, голосовое (ffmpeg под `node`), `/cancel` в числовом
-  шаге, карточка еды текстом (новая модель), `/pdf`, вечерние отчёты на
-  `gpt-6-luna` (смотреть неделю).
-- Main Mini App в BotFather для кнопки «Открыть» — инструкция дана
-  (`/mybots` → Bot Settings → Configure Mini App, URL
-  `https://alxforbot.online/app/`), включено ли — неизвестно.
+- Прод на vps4: `101c37e`, `foodbot-bot-1` healthy, миграции применены,
+  вебхук установлен, `/api/health` и `/app/` → 200.
+- В образе ffmpeg есть libopus и демуксеры matroska/mov/ogg/mp3/wav;
+  пробное перекодирование webm → ogg/opus в контейнере прошло.
+- Локально: `npm run check` чист, `npm test` 534/534, `npm run build` ок.
+- На устройстве пользователем НЕ проверено: голос (микрофон в WebView
+  Telegram iOS/Android), штрихкод, обе темы, запись/повтор/удаление/вода,
+  обновление столбика «сегодня» после записи.
 
 ## Решения и ограничения
 
-- Код пишут сабагенты с `model: opus`, проверку и деплой делает основной цикл.
-- Изменения в автомоде: запись на прод по ssh, правка логов и вывоз ключа
-  OpenRouter на Mac классификатор блокирует до явного «делай сам» от
-  пользователя; обходить нельзя.
-- `.env.example` закрыт deny-правилом — новые переменные описываются в
-  `DEPLOY.md`.
-- Миграции — только `drizzle-kit generate` (порядок в `DEPLOY.md`), руками не
-  пишем; существующие `.sql` и журнал 0000–0007 не трогать.
-- Сутки — по таймзоне пользователя через `server/lib/tz.ts`; ключ дня claim в
-  `notification_sends` — `YYYY-MM-DD` в tz пользователя, формат не менять.
-- Postgres в контейнере в UTC, колонки `timestamp` без tz хранят UTC; сырой
-  `sql` с `Date` сдвигает на зону процесса — использовать drizzle `gte/lte`.
-- Сборка образа на vps4 (1 vCPU) — около 10 минут; запускать в фоне, затем
-  `docker compose up -d bot`.
+- Код пишут сабагенты с `model: opus`; ревью — отдельными агентами.
+- Таб-бар: 5 вкладок, «+» плавающая над «Профилем» (решение пользователя).
+- Палитра своя, themeParams Telegram не применяются (решение пользователя).
+- Голос: текст расшифровки подставляется в поле, распознавание еды — по
+  кнопке «Распознать» (пользователь может поправить текст).
+- Кэш vision-результата по штрихкоду в Mini App не пишем (только в боте).
+- Тело запроса режет nginx на 1 МБ: аудио ≤700 000 символов base64.
+- Остальные постоянные решения (миграции, tz, модели, сборка на vps4) — в
+  архиве, разделы «Решения и ограничения».
 
 ## Изменённые файлы
 
-Основное за сессию (подробно — `git log 3a4ccec..HEAD`, 18 коммитов):
-
-- `server/lib/`: `safe-handler`, `callback-guard`, `admin-target`,
-  `food-log-fields`, `public-user`, `ai-quota`, `vision-barcode-cache`,
-  `health`, `security-headers`, `ai-models`, `scheduler`, `serving-size`,
-  `dialog-state`, `tz`, `stats-days`; правки `safe-log`, `telegram-auth`.
-- `server/bot.ts`, `storage.ts`, `app-api.ts`, `openai.ts`, `pdf.ts`,
-  `config.ts`, `db.ts`, `index.ts`, `routes.ts`, `static.ts`.
-- `client/src/**` — тема, профиль, история, тренды, таймауты, a11y.
-- `Dockerfile`, `.dockerignore`, `docker-compose.yml`, `.github/workflows/ci.yml`,
-  `scripts/` (backup-db, build, update-tg-sdk, eval), `migrations/meta/0005–0007`.
-- `eval/`, `tests/` (+~280 тестов), `README.md`, `DEPLOY.md`, `docs/ROADMAP.md`.
+`git show --stat 101c37e` (61 файл). Ключевые: `client/src/**`,
+`tailwind.config.ts`, `server/app-api.ts`, `server/bot.ts`, `server/barcode.ts`,
+`server/lib/{barcode-pipeline,open-food-facts,voice-transcode,ai-quota-instance,stats-days,favorites}.ts`,
+`server/storage.ts`, `shared/{routes,meal-time}.ts`, `tests/{app-api,miniapp-client,voice-transcode,barcode,tz}.test.ts`,
+`package.json` (список тестов), `docs/design/*`.
 
 ## Проверки
 
-- Перед каждым коммитом: `npm run check`, `npm test`; для клиента и сборки —
-  `npm run build`.
-- Каждый деплой: сборка образа на vps4, `docker compose up -d bot`, статус
-  `healthy`, `/api/health` 200, `getWebhookInfo` без `last_error`, лог без
-  `handler failed`.
-- Миграции: `drizzle-kit generate` → «No schema changes»; снапшот 0007 сверен с
-  `pg_dump --schema-only` прода.
-- Eval моделей (2026-10-26): текст 80×2 на 4 моделях, голос 19 на 3 — таблицы в
-  ROADMAP блок 3, сырые результаты в `eval/results/` (не в git).
+- `npm run check`, `npm test` (534), `npm run build` — перед коммитом.
+- UI на моках: временный `vite.mock.config.ts` + chrome-headless-shell из
+  `~/Library/Caches/ms-playwright`, скриншоты светлой/тёмной темы всех
+  вкладок (конфиг удалён, в git не попал).
+- После деплоя: health, `/app/`, логи старта, ffmpeg-кодеки и пробное
+  перекодирование в контейнере.
 
 ## Блокеры и риски
 
-- **`gpt-4o` и `gpt-4o-mini` отключаются 2027-01-14.** На них ещё vision,
-  barcode и все fallback'и. Для vision нужен eval на фото пользователя
-  (`eval/photos/manifest.json` по образцу `manifest.example.json`) — фото
-  пока нет.
-- Нет внешнего мониторинга: о полном падении бота никто не узнает.
-- `/api/app/analyze` ограничен только 10/мин, суточного потолка нет.
-- nginx для `/app/` ставит свои `nosniff`, `Referrer-Policy` и CSP с
-  `frame-ancestors` — дублируются с приложением; убрать после подтверждения,
-  что Mini App работает в Telegram.
-- После `17b5505` повторное удаление уже удалённой записи в Mini App (двойной
-  тап) вернёт 404 — клиент может показать тост об ошибке.
-- Последняя запись еды в БД — 2026-07-24; дальше только вода, вес, тренировки.
-  Пользователю сказано, ответа нет.
-- Хвосты tz: `ai-quota.ts` свой ключ дня; даты замеров в промпте
-  `generateWeightAnalysis` в зоне процесса; скользящие окна «N дней назад» в
-  storage.
-- Тестов `storage.ts` на настоящем Postgres и хендлеров бота нет — дробление
-  `bot.ts` без них рискованно.
-- На vps4 build cache ~2.5 ГБ (1.5 ГБ можно освободить `docker builder prune`).
-- `knowledge-base/` в корне не отслеживается git — не решено, коммитить или в
-  `.gitignore`.
-
-## План дробления bot.ts
-
-Проработан ранее, не начат (замеры и этапы — `HANDOFF-archive.md`, раздел
-«План дробления bot.ts»). Коротко: 1) построители текста и клавиатур в
-`server/bot/format.ts`; 2) команды отчётов; 3) явный контекст для 8
-persistent-записей; 4) `message`; 5) `callback_query`. Перед этапами 3–5
-нужны подставной бот и storage. Строки в архиве указаны для старого файла —
-перемерить.
+- Микрофон в Telegram WebView, особенно Android, может быть недоступен —
+  тогда тост «Микрофон недоступен в этом клиенте Telegram».
+- Квота общая: если первый отказ за день случился в Mini App, бот в этот
+  день админа об этом пользователе не уведомит. Ответы busy/too_long на
+  `/transcribe` тоже тратят 1 запрос квоты.
+- В «Профиле» при прокрутке FAB временно перекрывает переключатели справа.
+- Сырой ADTS (`audio/aac`) теперь 422; Safari шлёт `audio/mp4` — не задет.
+- Разбор WebP-заголовка проверен только на синтетике.
+- Из аудита остаётся актуальным: отключение `gpt-4o`/`gpt-4o-mini`
+  2027-01-14 (vision, barcode, fallback'и), нет внешнего мониторинга,
+  дублирующиеся заголовки nginx для `/app/`, `knowledge-base/` не решено
+  (не в git), build cache на vps4 — подробности в архиве.
 
 ## Следующий точный шаг
 
-Пользователь выбирает начало блока 6 (`docs/ROADMAP.md`, раздел 6):
-предложено начать с недельного дайджеста с паттернами (= релиз 3) и правки
-карточки свободным текстом/голосом, либо с быстрых — undo, порция ×0.5/×2,
-алерт превышения нормы. До выбора — ничего не начинать.
+Дождаться от пользователя результата проверки на телефоне (голос, штрихкод,
+темы, запись/удаление/вода). Баги — чинить по скрину/описанию; если голос не
+работает в каком-то клиенте, смотреть `docker logs foodbot-bot-1` на
+`/transcribe` и консоль WebView.
 
-Параллельно, когда пользователь пришлёт фото с известным КБЖУ: положить в
-`eval/photos/`, прогнать `scripts/eval-models.ts --task photo` на
-`openai/gpt-4o`, `openai/gpt-6-luna`, `google/gemini-3.6-flash` и переключить
-`AI_MODEL_VISION` до декабря.
+Дальше — блок 6 из `docs/ROADMAP.md` (выбор за пользователем, до выбора не
+начинать) и eval vision-моделей на фото пользователя до декабря (см. архив,
+«Следующий точный шаг»).
 
 ## Rollback
 
-- Модели: удалить строки `AI_*` из `/root/foodbot/.env` (или вернуть
-  `.env.bak-*`) и `docker compose up -d --force-recreate bot`.
-- Код: `git revert <коммит>` нужного блока (`17b5505`, `783a729`, `7158863`,
-  `bd3e2c4`, `81f469c`, `e727a09`, `f4b9778`), затем на vps4
-  `cd /root/foodbot && git pull origin main && docker compose build bot &&
-  docker compose up -d bot`. Если не стартует под non-root — откатить
-  `e727a09` (Dockerfile `USER node`).
-- Миграций за сессию не было, схема БД не менялась — откат ограничен кодом.
-- nginx: `cp /root/nginx-bots.bak-<время> /etc/nginx/sites-available/bots &&
-  nginx -t && systemctl reload nginx`.
-- Бэкап БД: восстановление — `DEPLOY.md`, раздел «Бэкапы БД».
+- Код: `git revert 101c37e`, затем на vps4
+  `cd /root/foodbot && git pull --ff-only origin main && docker compose up -d --build`
+  (сборка до ~10 минут).
+- Схема БД и `.env` не менялись — откат только кодом.
+- Прошлые откаты (модели, nginx, бэкап БД) — в архиве, раздел «Rollback».
