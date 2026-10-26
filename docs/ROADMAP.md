@@ -52,11 +52,11 @@
 - [ ] Подпись в `/api/quick` перенести из query в заголовок или тело.
 
 ### 2. Устойчивость и безопасность
-- [ ] Общий try/catch для `bot.on("message")`, `callback_query`, тика планировщика; `process.on('unhandledRejection')`; `pool.on('error')` в `server/db.ts` (23.10 процесс уже падал при рестарте Postgres).
-- [ ] `/history` → правка дробным числом пишет float в integer-колонку (`bot.ts:3598`).
-- [ ] Двойной тап «✅ Да» пишет блюдо дважды (`bot.ts:2296`): снимать pending до первого `await`.
-- [ ] `admin_reject_`/`admin_removeadmin_` без защиты главного админа.
-- [ ] `/api/app/me` отдаёт `quickToken` и служебные поля: явный список полей.
+- [x] Общий try/catch для `bot.on("message")`, `callback_query`, тика планировщика; `process.on('unhandledRejection')`; `pool.on('error')` в `server/db.ts` (23.10 процесс уже падал при рестарте Postgres).
+- [x] `/history` → правка дробным числом пишет float в integer-колонку (`bot.ts:3598`).
+- [x] Двойной тап «✅ Да» пишет блюдо дважды (`bot.ts:2296`): снимать pending до первого `await`.
+- [x] `admin_reject_`/`admin_removeadmin_` без защиты главного админа.
+- [x] `/api/app/me` отдаёт `quickToken` и служебные поля: явный список полей.
 - [ ] Дневной лимит AI-вызовов на пользователя и лимит длины голосового.
 - [ ] Кэш штрихкодов из vision пишет правки пользователя в общий кэш.
 - [ ] `.env` в `.gitignore`, `.dockerignore`, `USER node`, runtime без devDependencies, CSP/`nosniff`.
