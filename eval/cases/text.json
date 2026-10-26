@@ -1,0 +1,3042 @@
+{
+ "version": 1,
+ "evalTime": "13:00",
+ "userWeightKg": 70,
+ "note": "Эталоны приблизительные: справочные значения (USDA / таблицы Скурихина) для типичной порции, диапазоны с запасом. Время запроса фиксировано 13:00 — mealType по умолчанию lunch, проверяется только там, где он указан в тексте.",
+ "cases": [
+  {
+   "id": "t01",
+   "category": "simple",
+   "text": "2 яйца и кусок хлеба",
+   "intent": "food",
+   "items": [
+    {
+     "name": "яйцо",
+     "aliases": [
+      "яйца",
+      "яйцо куриное"
+     ],
+     "weight": [
+      77.0,
+      143.0
+     ],
+     "calories": [
+      120.4,
+      223.6
+     ],
+     "protein": [
+      9.1,
+      18.9
+     ],
+     "fat": [
+      7.8,
+      16.2
+     ],
+     "carbs": [
+      0.0,
+      4
+     ],
+     "hydrating": false
+    },
+    {
+     "name": "хлеб",
+     "aliases": [
+      "хлеб белый",
+      "кусок хлеба"
+     ],
+     "weight": [
+      20,
+      40
+     ],
+     "calories": [
+      54.6,
+      101.4
+     ],
+     "protein": [
+      0.5,
+      4.5
+     ],
+     "fat": [
+      0.0,
+      3
+     ],
+     "carbs": [
+      9.8,
+      20.2
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t02",
+   "category": "simple",
+   "text": "банан",
+   "intent": "food",
+   "items": [
+    {
+     "name": "банан",
+     "weight": [
+      84.0,
+      156.0
+     ],
+     "calories": [
+      74.9,
+      139.1
+     ],
+     "protein": [
+      0.0,
+      3.3
+     ],
+     "fat": [
+      0.0,
+      2.4
+     ],
+     "carbs": [
+      17.6,
+      36.5
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t03",
+   "category": "simple",
+   "text": "яблоко",
+   "intent": "food",
+   "items": [
+    {
+     "name": "яблоко",
+     "weight": [
+      117.0,
+      243.0
+     ],
+     "calories": [
+      55.2,
+      114.8
+     ],
+     "protein": [
+      0.0,
+      2.7
+     ],
+     "fat": [
+      0.0,
+      2.7
+     ],
+     "carbs": [
+      11.7,
+      24.3
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t04",
+   "category": "simple",
+   "text": "овсянка на воде",
+   "intent": "food",
+   "items": [
+    {
+     "name": "овсянка на воде",
+     "aliases": [
+      "овсяная каша",
+      "овсянка"
+     ],
+     "weight": [
+      137.5,
+      362.5
+     ],
+     "calories": [
+      121.0,
+      319.0
+     ],
+     "protein": [
+      4.1,
+      10.9
+     ],
+     "fat": [
+      2,
+      6
+     ],
+     "carbs": [
+      20.4,
+      53.6
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t05",
+   "category": "simple",
+   "text": "тарелка гречки с котлетой",
+   "intent": "food",
+   "items": [
+    {
+     "name": "гречка",
+     "aliases": [
+      "гречневая каша"
+     ],
+     "weight": [
+      120.0,
+      280.0
+     ],
+     "calories": [
+      132.0,
+      308.0
+     ],
+     "protein": [
+      5.0,
+      11.8
+     ],
+     "fat": [
+      0.2,
+      4.2
+     ],
+     "carbs": [
+      25.2,
+      58.8
+     ],
+     "hydrating": false
+    },
+    {
+     "name": "котлета",
+     "aliases": [
+      "котлета мясная"
+     ],
+     "weight": [
+      60.0,
+      140.0
+     ],
+     "calories": [
+      150.0,
+      350.0
+     ],
+     "protein": [
+      9.0,
+      21.0
+     ],
+     "fat": [
+      10.2,
+      23.8
+     ],
+     "carbs": [
+      4.8,
+      11.2
+     ],
+     "hydrating": false
+    }
+   ],
+   "note": "модель может объединить в одно блюдо — смотрите total_kcal",
+   "reference": "approx"
+  },
+  {
+   "id": "t06",
+   "category": "simple",
+   "text": "сырники 3 штуки",
+   "intent": "food",
+   "items": [
+    {
+     "name": "сырники",
+     "weight": [
+      117.0,
+      243.0
+     ],
+     "calories": [
+      269.1,
+      558.9
+     ],
+     "protein": [
+      16.2,
+      33.8
+     ],
+     "fat": [
+      13.0,
+      27.0
+     ],
+     "carbs": [
+      20.8,
+      43.2
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t07",
+   "category": "simple",
+   "text": "бутерброд с сыром и колбасой",
+   "intent": "food",
+   "items": [
+    {
+     "name": "бутерброд с сыром и колбасой",
+     "aliases": [
+      "бутерброд"
+     ],
+     "weight": [
+      48.0,
+      112.0
+     ],
+     "calories": [
+      120.0,
+      280.0
+     ],
+     "protein": [
+      4.8,
+      11.2
+     ],
+     "fat": [
+      6.6,
+      15.4
+     ],
+     "carbs": [
+      9.6,
+      22.4
+     ],
+     "hydrating": false
+    }
+   ],
+   "note": "модель может разложить на хлеб/сыр/колбасу",
+   "reference": "approx"
+  },
+  {
+   "id": "t08",
+   "category": "simple",
+   "text": "пицца 2 куска",
+   "intent": "food",
+   "items": [
+    {
+     "name": "пицца",
+     "weight": [
+      130.0,
+      270.0
+     ],
+     "calories": [
+      338.0,
+      702.0
+     ],
+     "protein": [
+      14.3,
+      29.7
+     ],
+     "fat": [
+      13.0,
+      27.0
+     ],
+     "carbs": [
+      41.6,
+      86.4
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t09",
+   "category": "simple",
+   "text": "шаурма",
+   "intent": "food",
+   "items": [
+    {
+     "name": "шаурма",
+     "aliases": [
+      "шаверма"
+     ],
+     "weight": [
+      227.5,
+      472.5
+     ],
+     "calories": [
+      422.5,
+      877.5
+     ],
+     "protein": [
+      19.5,
+      40.5
+     ],
+     "fat": [
+      21.4,
+      44.6
+     ],
+     "carbs": [
+      35.8,
+      74.2
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t10",
+   "category": "simple",
+   "text": "суп куриный с лапшой, тарелка",
+   "intent": "food",
+   "items": [
+    {
+     "name": "куриный суп с лапшой",
+     "aliases": [
+      "суп куриный",
+      "суп с лапшой"
+     ],
+     "weight": [
+      165.0,
+      435.0
+     ],
+     "calories": [
+      82.5,
+      217.5
+     ],
+     "protein": [
+      5.0,
+      13.0
+     ],
+     "fat": [
+      2.8,
+      7.2
+     ],
+     "carbs": [
+      8.8,
+      23.2
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t11",
+   "category": "simple",
+   "text": "пельмени 15 штук со сметаной",
+   "intent": "food",
+   "items": [
+    {
+     "name": "пельмени",
+     "weight": [
+      117.0,
+      243.0
+     ],
+     "calories": [
+      292.5,
+      607.5
+     ],
+     "protein": [
+      13.7,
+      28.4
+     ],
+     "fat": [
+      14.3,
+      29.7
+     ],
+     "carbs": [
+      27.9,
+      58.1
+     ],
+     "hydrating": false
+    },
+    {
+     "name": "сметана",
+     "weight": [
+      20.0,
+      60.0
+     ],
+     "calories": [
+      32.5,
+      97.5
+     ],
+     "protein": [
+      0.0,
+      3
+     ],
+     "fat": [
+      3.0,
+      9.0
+     ],
+     "carbs": [
+      0.0,
+      4.5
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t12",
+   "category": "simple",
+   "text": "салат из огурцов и помидоров с растительным маслом",
+   "intent": "food",
+   "items": [
+    {
+     "name": "салат из огурцов и помидоров",
+     "aliases": [
+      "овощной салат",
+      "салат"
+     ],
+     "weight": [
+      120.0,
+      280.0
+     ],
+     "calories": [
+      90.0,
+      210.0
+     ],
+     "protein": [
+      0.0,
+      4
+     ],
+     "fat": [
+      6.6,
+      15.4
+     ],
+     "carbs": [
+      4.8,
+      11.2
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t13",
+   "category": "grams",
+   "text": "200 г куриной грудки",
+   "intent": "food",
+   "items": [
+    {
+     "name": "куриная грудка",
+     "aliases": [
+      "курица",
+      "куриное филе"
+     ],
+     "weight": [
+      140.0,
+      260.0
+     ],
+     "calories": [
+      210.0,
+      350.0
+     ],
+     "protein": [
+      29.9,
+      62.1
+     ],
+     "fat": [
+      3,
+      7
+     ],
+     "carbs": [
+      0.0,
+      3
+     ],
+     "hydrating": false
+    }
+   ],
+   "note": "сырая 226 ккал, варёная ~330 — диапазон покрывает оба",
+   "reference": "approx"
+  },
+  {
+   "id": "t14",
+   "category": "grams",
+   "text": "150 г творога 5%",
+   "intent": "food",
+   "items": [
+    {
+     "name": "творог 5%",
+     "aliases": [
+      "творог"
+     ],
+     "weight": [
+      105.0,
+      195.0
+     ],
+     "calories": [
+      145.6,
+      218.4
+     ],
+     "protein": [
+      16.8,
+      34.8
+     ],
+     "fat": [
+      4.9,
+      10.1
+     ],
+     "carbs": [
+      0.0,
+      5.7
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t15",
+   "category": "grams",
+   "text": "300 г варёной гречки",
+   "intent": "food",
+   "items": [
+    {
+     "name": "гречка варёная",
+     "aliases": [
+      "гречка",
+      "гречневая каша"
+     ],
+     "weight": [
+      210.0,
+      390.0
+     ],
+     "calories": [
+      247.5,
+      412.5
+     ],
+     "protein": [
+      8.2,
+      17.0
+     ],
+     "fat": [
+      1.3,
+      5.3
+     ],
+     "carbs": [
+      41.0,
+      85.1
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t16",
+   "category": "grams",
+   "text": "250 мл кефира 2,5%",
+   "intent": "food",
+   "items": [
+    {
+     "name": "кефир 2,5%",
+     "aliases": [
+      "кефир"
+     ],
+     "weight": [
+      175.0,
+      325.0
+     ],
+     "calories": [
+      106.4,
+      159.6
+     ],
+     "protein": [
+      4.7,
+      9.9
+     ],
+     "fat": [
+      4.1,
+      8.5
+     ],
+     "carbs": [
+      6.5,
+      13.5
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t17",
+   "category": "grams",
+   "text": "50 г грецких орехов",
+   "intent": "food",
+   "items": [
+    {
+     "name": "грецкие орехи",
+     "aliases": [
+      "орехи грецкие"
+     ],
+     "weight": [
+      35.0,
+      65.0
+     ],
+     "calories": [
+      277.9,
+      376.0
+     ],
+     "protein": [
+      4.9,
+      10.3
+     ],
+     "fat": [
+      21.2,
+      44.0
+     ],
+     "carbs": [
+      4,
+      10
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t18",
+   "category": "grams",
+   "text": "120 г лосося на пару",
+   "intent": "food",
+   "items": [
+    {
+     "name": "лосось на пару",
+     "aliases": [
+      "лосось",
+      "сёмга"
+     ],
+     "weight": [
+      84.0,
+      156.0
+     ],
+     "calories": [
+      161.0,
+      299.0
+     ],
+     "protein": [
+      16.2,
+      33.8
+     ],
+     "fat": [
+      8.5,
+      17.6
+     ],
+     "carbs": [
+      0.0,
+      3
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t19",
+   "category": "grams",
+   "text": "200 г отварного риса",
+   "intent": "food",
+   "items": [
+    {
+     "name": "рис отварной",
+     "aliases": [
+      "рис"
+     ],
+     "weight": [
+      140.0,
+      260.0
+     ],
+     "calories": [
+      195.0,
+      325.0
+     ],
+     "protein": [
+      3.4,
+      7.4
+     ],
+     "fat": [
+      0.0,
+      2.6
+     ],
+     "carbs": [
+      36.4,
+      75.6
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t20",
+   "category": "grams",
+   "text": "100 г молочного шоколада",
+   "intent": "food",
+   "items": [
+    {
+     "name": "молочный шоколад",
+     "aliases": [
+      "шоколад"
+     ],
+     "weight": [
+      70.0,
+      130.0
+     ],
+     "calories": [
+      454.8,
+      615.2
+     ],
+     "protein": [
+      4.9,
+      10.3
+     ],
+     "fat": [
+      19.5,
+      40.5
+     ],
+     "carbs": [
+      38.4,
+      79.7
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t21",
+   "category": "grams",
+   "text": "протеиновый коктейль: 30 г протеина на воде",
+   "intent": "food",
+   "items": [
+    {
+     "name": "протеиновый коктейль",
+     "aliases": [
+      "протеин",
+      "сывороточный протеин"
+     ],
+     "weight": [
+      231.0,
+      429.0
+     ],
+     "calories": [
+      84.0,
+      156.0
+     ],
+     "protein": [
+      15.6,
+      32.4
+     ],
+     "fat": [
+      0.0,
+      3.5
+     ],
+     "carbs": [
+      0.0,
+      5.5
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t22",
+   "category": "grams",
+   "text": "макароны с сыром 250 г",
+   "intent": "food",
+   "items": [
+    {
+     "name": "макароны с сыром",
+     "aliases": [
+      "макароны"
+     ],
+     "weight": [
+      162.5,
+      337.5
+     ],
+     "calories": [
+      292.5,
+      607.5
+     ],
+     "protein": [
+      11.1,
+      23.0
+     ],
+     "fat": [
+      9.1,
+      18.9
+     ],
+     "carbs": [
+      40.3,
+      83.7
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t23",
+   "category": "grams",
+   "text": "сало 30 грамм с чёрным хлебом",
+   "intent": "food",
+   "items": [
+    {
+     "name": "сало",
+     "weight": [
+      20,
+      40
+     ],
+     "calories": [
+      184.8,
+      277.2
+     ],
+     "protein": [
+      0.0,
+      2.7
+     ],
+     "fat": [
+      16.2,
+      33.8
+     ],
+     "carbs": [
+      0.0,
+      3
+     ],
+     "hydrating": false
+    },
+    {
+     "name": "чёрный хлеб",
+     "aliases": [
+      "хлеб ржаной",
+      "ржаной хлеб",
+      "хлеб"
+     ],
+     "weight": [
+      18.0,
+      42.0
+     ],
+     "calories": [
+      39.0,
+      91.0
+     ],
+     "protein": [
+      0.0,
+      4
+     ],
+     "fat": [
+      0.0,
+      2.4
+     ],
+     "carbs": [
+      7.8,
+      18.2
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t24",
+   "category": "grams",
+   "text": "вчера на ужин съел 300 г стейка",
+   "intent": "food",
+   "items": [
+    {
+     "name": "стейк",
+     "aliases": [
+      "стейк говяжий",
+      "говядина"
+     ],
+     "weight": [
+      210.0,
+      390.0
+     ],
+     "calories": [
+      525.0,
+      975.0
+     ],
+     "protein": [
+      48.8,
+      101.2
+     ],
+     "fat": [
+      31.2,
+      64.8
+     ],
+     "carbs": [
+      0.0,
+      3
+     ],
+     "hydrating": false,
+     "mealType": "dinner"
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t25",
+   "category": "grams",
+   "text": "йогурт греческий 140 г с ложкой мёда",
+   "intent": "food",
+   "items": [
+    {
+     "name": "греческий йогурт",
+     "aliases": [
+      "йогурт"
+     ],
+     "weight": [
+      84.0,
+      196.0
+     ],
+     "calories": [
+      61.2,
+      142.8
+     ],
+     "protein": [
+      8.4,
+      19.6
+     ],
+     "fat": [
+      0.8,
+      4.8
+     ],
+     "carbs": [
+      2,
+      8
+     ],
+     "hydrating": false
+    },
+    {
+     "name": "мёд",
+     "aliases": [
+      "мед"
+     ],
+     "weight": [
+      11,
+      31
+     ],
+     "calories": [
+      41.6,
+      86.4
+     ],
+     "protein": [
+      0.0,
+      2.1
+     ],
+     "fat": [
+      0.0,
+      2
+     ],
+     "carbs": [
+      11.1,
+      23.0
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t26",
+   "category": "multi",
+   "text": "на завтрак овсянка с бананом и кофе с молоком",
+   "intent": "food",
+   "items": [
+    {
+     "name": "овсянка",
+     "aliases": [
+      "овсяная каша",
+      "овсянка с бананом"
+     ],
+     "weight": [
+      137.5,
+      362.5
+     ],
+     "calories": [
+      121.0,
+      319.0
+     ],
+     "protein": [
+      4.1,
+      10.9
+     ],
+     "fat": [
+      2,
+      6
+     ],
+     "carbs": [
+      20.4,
+      53.6
+     ],
+     "hydrating": false,
+     "mealType": "breakfast"
+    },
+    {
+     "name": "банан",
+     "weight": [
+      72.0,
+      168.0
+     ],
+     "calories": [
+      64.2,
+      149.8
+     ],
+     "protein": [
+      0.0,
+      3.3
+     ],
+     "fat": [
+      0.0,
+      2.4
+     ],
+     "carbs": [
+      16.2,
+      37.8
+     ],
+     "hydrating": false,
+     "mealType": "breakfast"
+    },
+    {
+     "name": "кофе с молоком",
+     "aliases": [
+      "кофе"
+     ],
+     "weight": [
+      100.0,
+      300.0
+     ],
+     "calories": [
+      25.0,
+      75.0
+     ],
+     "protein": [
+      0.5,
+      4.5
+     ],
+     "fat": [
+      0.5,
+      4.5
+     ],
+     "carbs": [
+      1,
+      7
+     ],
+     "hydrating": false,
+     "mealType": "breakfast"
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t27",
+   "category": "multi",
+   "text": "на обед борщ, пюре с котлетой и компот",
+   "intent": "food",
+   "items": [
+    {
+     "name": "борщ",
+     "weight": [
+      180.0,
+      420.0
+     ],
+     "calories": [
+      90.0,
+      210.0
+     ],
+     "protein": [
+      3.6,
+      8.4
+     ],
+     "fat": [
+      4.2,
+      9.8
+     ],
+     "carbs": [
+      9.0,
+      21.0
+     ],
+     "hydrating": false,
+     "mealType": "lunch"
+    },
+    {
+     "name": "картофельное пюре",
+     "aliases": [
+      "пюре"
+     ],
+     "weight": [
+      120.0,
+      280.0
+     ],
+     "calories": [
+      120.0,
+      280.0
+     ],
+     "protein": [
+      2.5,
+      6.5
+     ],
+     "fat": [
+      4.8,
+      11.2
+     ],
+     "carbs": [
+      16.8,
+      39.2
+     ],
+     "hydrating": false,
+     "mealType": "lunch"
+    },
+    {
+     "name": "котлета",
+     "weight": [
+      60.0,
+      140.0
+     ],
+     "calories": [
+      150.0,
+      350.0
+     ],
+     "protein": [
+      9.0,
+      21.0
+     ],
+     "fat": [
+      10.2,
+      23.8
+     ],
+     "carbs": [
+      4.8,
+      11.2
+     ],
+     "hydrating": false,
+     "mealType": "lunch"
+    },
+    {
+     "name": "компот",
+     "weight": [
+      125.0,
+      375.0
+     ],
+     "calories": [
+      40.0,
+      120.0
+     ],
+     "protein": [
+      0.0,
+      2.3
+     ],
+     "fat": [
+      0.0,
+      2
+     ],
+     "carbs": [
+      10.0,
+      30.0
+     ],
+     "hydrating": false,
+     "mealType": "lunch"
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t28",
+   "category": "multi",
+   "text": "на ужин салат цезарь с курицей",
+   "intent": "food",
+   "items": [
+    {
+     "name": "салат цезарь с курицей",
+     "aliases": [
+      "цезарь",
+      "салат цезарь"
+     ],
+     "weight": [
+      150.0,
+      350.0
+     ],
+     "calories": [
+      270.0,
+      630.0
+     ],
+     "protein": [
+      15.0,
+      35.0
+     ],
+     "fat": [
+      18.0,
+      42.0
+     ],
+     "carbs": [
+      10.8,
+      25.2
+     ],
+     "hydrating": false,
+     "mealType": "dinner"
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t29",
+   "category": "multi",
+   "text": "на завтрак 2 тоста с авокадо, на обед суп и хлеб",
+   "intent": "food",
+   "items": [
+    {
+     "name": "тост с авокадо",
+     "aliases": [
+      "тосты с авокадо",
+      "тост",
+      "авокадо"
+     ],
+     "weight": [
+      78.0,
+      182.0
+     ],
+     "calories": [
+      162.0,
+      378.0
+     ],
+     "protein": [
+      3.6,
+      8.4
+     ],
+     "fat": [
+      8.4,
+      19.6
+     ],
+     "carbs": [
+      18.0,
+      42.0
+     ],
+     "hydrating": false,
+     "mealType": "breakfast"
+    },
+    {
+     "name": "суп",
+     "weight": [
+      150.0,
+      450.0
+     ],
+     "calories": [
+      75.0,
+      225.0
+     ],
+     "protein": [
+      3.0,
+      9.0
+     ],
+     "fat": [
+      3.0,
+      9.0
+     ],
+     "carbs": [
+      7.5,
+      22.5
+     ],
+     "hydrating": false,
+     "mealType": "lunch"
+    },
+    {
+     "name": "хлеб",
+     "weight": [
+      18.0,
+      42.0
+     ],
+     "calories": [
+      45.0,
+      105.0
+     ],
+     "protein": [
+      0.5,
+      4.5
+     ],
+     "fat": [
+      0.0,
+      3
+     ],
+     "carbs": [
+      9.0,
+      21.0
+     ],
+     "hydrating": false,
+     "mealType": "lunch"
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t30",
+   "category": "multi",
+   "text": "перекус: протеиновый батончик",
+   "intent": "food",
+   "items": [
+    {
+     "name": "протеиновый батончик",
+     "aliases": [
+      "батончик"
+     ],
+     "weight": [
+      42.0,
+      78.0
+     ],
+     "calories": [
+      150.5,
+      279.5
+     ],
+     "protein": [
+      13.0,
+      27.0
+     ],
+     "fat": [
+      4.5,
+      9.5
+     ],
+     "carbs": [
+      13.0,
+      27.0
+     ],
+     "hydrating": false,
+     "mealType": "snack"
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t31",
+   "category": "multi",
+   "text": "утром съел омлет из 3 яиц, а вечером гречку с курицей",
+   "intent": "food",
+   "items": [
+    {
+     "name": "омлет",
+     "weight": [
+      117.0,
+      243.0
+     ],
+     "calories": [
+      182.0,
+      378.0
+     ],
+     "protein": [
+      12.3,
+      25.7
+     ],
+     "fat": [
+      13.7,
+      28.4
+     ],
+     "carbs": [
+      0.0,
+      5
+     ],
+     "hydrating": false,
+     "mealType": "breakfast"
+    },
+    {
+     "name": "гречка",
+     "weight": [
+      110.0,
+      290.0
+     ],
+     "calories": [
+      121.0,
+      319.0
+     ],
+     "protein": [
+      4.6,
+      12.2
+     ],
+     "fat": [
+      0.2,
+      4.2
+     ],
+     "carbs": [
+      23.1,
+      60.9
+     ],
+     "hydrating": false,
+     "mealType": "dinner"
+    },
+    {
+     "name": "курица",
+     "aliases": [
+      "куриная грудка",
+      "куриное филе"
+     ],
+     "weight": [
+      82.5,
+      217.5
+     ],
+     "calories": [
+      137.5,
+      362.5
+     ],
+     "protein": [
+      19.2,
+      50.8
+     ],
+     "fat": [
+      5.5,
+      14.5
+     ],
+     "carbs": [
+      0.0,
+      3
+     ],
+     "hydrating": false,
+     "mealType": "dinner"
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t32",
+   "category": "multi",
+   "text": "кофе капучино и круассан",
+   "intent": "food",
+   "items": [
+    {
+     "name": "капучино",
+     "aliases": [
+      "кофе капучино"
+     ],
+     "weight": [
+      150.0,
+      350.0
+     ],
+     "calories": [
+      66.0,
+      154.0
+     ],
+     "protein": [
+      3.3,
+      7.7
+     ],
+     "fat": [
+      3.3,
+      7.7
+     ],
+     "carbs": [
+      5.4,
+      12.6
+     ],
+     "hydrating": false
+    },
+    {
+     "name": "круассан",
+     "weight": [
+      39.0,
+      81.0
+     ],
+     "calories": [
+      162.5,
+      337.5
+     ],
+     "protein": [
+      3,
+      7
+     ],
+     "fat": [
+      8.5,
+      17.6
+     ],
+     "carbs": [
+      17.6,
+      36.5
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t33",
+   "category": "multi",
+   "text": "гамбургер, картошка фри и кола",
+   "intent": "food",
+   "items": [
+    {
+     "name": "гамбургер",
+     "aliases": [
+      "бургер"
+     ],
+     "weight": [
+      60.5,
+      159.5
+     ],
+     "calories": [
+      143.0,
+      377.0
+     ],
+     "protein": [
+      7.2,
+      18.8
+     ],
+     "fat": [
+      5.5,
+      14.5
+     ],
+     "carbs": [
+      16.5,
+      43.5
+     ],
+     "hydrating": false
+    },
+    {
+     "name": "картофель фри",
+     "aliases": [
+      "картошка фри"
+     ],
+     "weight": [
+      66.0,
+      154.0
+     ],
+     "calories": [
+      198.0,
+      462.0
+     ],
+     "protein": [
+      2,
+      6
+     ],
+     "fat": [
+      9.6,
+      22.4
+     ],
+     "carbs": [
+      25.2,
+      58.8
+     ],
+     "hydrating": false
+    },
+    {
+     "name": "кола",
+     "aliases": [
+      "кока-кола"
+     ],
+     "weight": [
+      220.0,
+      580.0
+     ],
+     "calories": [
+      93.5,
+      246.5
+     ],
+     "protein": [
+      0.0,
+      2
+     ],
+     "fat": [
+      0.0,
+      2
+     ],
+     "carbs": [
+      23.1,
+      60.9
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t34",
+   "category": "multi",
+   "text": "роллы филадельфия 8 штук и мисо суп",
+   "intent": "food",
+   "items": [
+    {
+     "name": "роллы филадельфия",
+     "aliases": [
+      "ролл филадельфия",
+      "роллы"
+     ],
+     "weight": [
+      156.0,
+      324.0
+     ],
+     "calories": [
+      279.5,
+      580.5
+     ],
+     "protein": [
+      11.7,
+      24.3
+     ],
+     "fat": [
+      10.4,
+      21.6
+     ],
+     "carbs": [
+      35.8,
+      74.2
+     ],
+     "hydrating": false
+    },
+    {
+     "name": "мисо суп",
+     "aliases": [
+      "мисо-суп"
+     ],
+     "weight": [
+      125.0,
+      375.0
+     ],
+     "calories": [
+      35.0,
+      105.0
+     ],
+     "protein": [
+      2.5,
+      7.5
+     ],
+     "fat": [
+      1,
+      5
+     ],
+     "carbs": [
+      3.0,
+      9.0
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t35",
+   "category": "colloquial",
+   "text": "полтарелки борща",
+   "intent": "food",
+   "items": [
+    {
+     "name": "борщ",
+     "weight": [
+      82.5,
+      217.5
+     ],
+     "calories": [
+      49.5,
+      130.5
+     ],
+     "protein": [
+      2,
+      6
+     ],
+     "fat": [
+      2,
+      6
+     ],
+     "carbs": [
+      5.0,
+      13.0
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t36",
+   "category": "colloquial",
+   "text": "пару ложек сметаны",
+   "intent": "food",
+   "items": [
+    {
+     "name": "сметана",
+     "weight": [
+      24.0,
+      56.0
+     ],
+     "calories": [
+      42.0,
+      98.0
+     ],
+     "protein": [
+      0.0,
+      3
+     ],
+     "fat": [
+      4.2,
+      9.8
+     ],
+     "carbs": [
+      0.0,
+      4.5
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t37",
+   "category": "colloquial",
+   "text": "горсть орехов",
+   "intent": "food",
+   "items": [
+    {
+     "name": "орехи",
+     "aliases": [
+      "ореховая смесь",
+      "грецкие орехи",
+      "миндаль"
+     ],
+     "weight": [
+      19.5,
+      40.5
+     ],
+     "calories": [
+      117.0,
+      243.0
+     ],
+     "protein": [
+      3,
+      7
+     ],
+     "fat": [
+      10.4,
+      21.6
+     ],
+     "carbs": [
+      2,
+      8
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t38",
+   "category": "colloquial",
+   "text": "кусочек торта",
+   "intent": "food",
+   "items": [
+    {
+     "name": "торт",
+     "weight": [
+      65.0,
+      135.0
+     ],
+     "calories": [
+      240.5,
+      499.5
+     ],
+     "protein": [
+      3,
+      7
+     ],
+     "fat": [
+      13.0,
+      27.0
+     ],
+     "carbs": [
+      29.2,
+      60.8
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t39",
+   "category": "colloquial",
+   "text": "немного картошки фри",
+   "intent": "food",
+   "items": [
+    {
+     "name": "картофель фри",
+     "aliases": [
+      "картошка фри"
+     ],
+     "weight": [
+      44.0,
+      116.0
+     ],
+     "calories": [
+      137.5,
+      362.5
+     ],
+     "protein": [
+      1,
+      5
+     ],
+     "fat": [
+      6.6,
+      17.4
+     ],
+     "carbs": [
+      16.5,
+      43.5
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t40",
+   "category": "colloquial",
+   "text": "тарелку плова",
+   "intent": "food",
+   "items": [
+    {
+     "name": "плов",
+     "weight": [
+      195.0,
+      405.0
+     ],
+     "calories": [
+      351.0,
+      729.0
+     ],
+     "protein": [
+      13.0,
+      27.0
+     ],
+     "fat": [
+      14.3,
+      29.7
+     ],
+     "carbs": [
+      42.2,
+      87.8
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t41",
+   "category": "colloquial",
+   "text": "пол-литра кефира",
+   "intent": "food",
+   "items": [
+    {
+     "name": "кефир",
+     "weight": [
+      350.0,
+      650.0
+     ],
+     "calories": [
+      175.0,
+      325.0
+     ],
+     "protein": [
+      9.1,
+      18.9
+     ],
+     "fat": [
+      7.8,
+      16.2
+     ],
+     "carbs": [
+      13.0,
+      27.0
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t42",
+   "category": "colloquial",
+   "text": "ложку мёда",
+   "intent": "food",
+   "items": [
+    {
+     "name": "мёд",
+     "aliases": [
+      "мед"
+     ],
+     "weight": [
+      11,
+      31
+     ],
+     "calories": [
+      38.4,
+      89.6
+     ],
+     "protein": [
+      0.0,
+      2.1
+     ],
+     "fat": [
+      0.0,
+      2
+     ],
+     "carbs": [
+      10.2,
+      23.8
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t43",
+   "category": "colloquial",
+   "text": "пару печенек",
+   "intent": "food",
+   "items": [
+    {
+     "name": "печенье",
+     "weight": [
+      13.2,
+      34.8
+     ],
+     "calories": [
+      59.4,
+      156.6
+     ],
+     "protein": [
+      0.0,
+      3.6
+     ],
+     "fat": [
+      2.5,
+      6.5
+     ],
+     "carbs": [
+      8.8,
+      23.2
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t44",
+   "category": "drinks",
+   "text": "стакан воды",
+   "intent": "food",
+   "items": [
+    {
+     "name": "вода",
+     "aliases": [
+      "стакан воды",
+      "питьевая вода"
+     ],
+     "weight": [
+      175.0,
+      325.0
+     ],
+     "calories": [
+      0,
+      10
+     ],
+     "protein": [
+      0,
+      1
+     ],
+     "fat": [
+      0,
+      1
+     ],
+     "carbs": [
+      0,
+      2
+     ],
+     "hydrating": true
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t45",
+   "category": "drinks",
+   "text": "выпил 500 мл воды",
+   "intent": "food",
+   "items": [
+    {
+     "name": "вода",
+     "aliases": [
+      "питьевая вода"
+     ],
+     "weight": [
+      350.0,
+      650.0
+     ],
+     "calories": [
+      0,
+      10
+     ],
+     "protein": [
+      0,
+      1
+     ],
+     "fat": [
+      0,
+      1
+     ],
+     "carbs": [
+      0,
+      2
+     ],
+     "hydrating": true
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t46",
+   "category": "drinks",
+   "text": "бутылка минералки 0,5",
+   "intent": "food",
+   "items": [
+    {
+     "name": "минеральная вода",
+     "aliases": [
+      "минералка",
+      "вода"
+     ],
+     "weight": [
+      350.0,
+      650.0
+     ],
+     "calories": [
+      0,
+      10
+     ],
+     "protein": [
+      0,
+      1
+     ],
+     "fat": [
+      0,
+      1
+     ],
+     "carbs": [
+      0,
+      2
+     ],
+     "hydrating": true
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t47",
+   "category": "drinks",
+   "text": "чёрный кофе без сахара",
+   "intent": "food",
+   "items": [
+    {
+     "name": "чёрный кофе",
+     "aliases": [
+      "кофе",
+      "кофе без сахара",
+      "кофе чёрный"
+     ],
+     "weight": [
+      140.0,
+      260.0
+     ],
+     "calories": [
+      0,
+      10
+     ],
+     "protein": [
+      0,
+      1
+     ],
+     "fat": [
+      0,
+      1
+     ],
+     "carbs": [
+      0,
+      2
+     ],
+     "hydrating": true
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t48",
+   "category": "drinks",
+   "text": "американо без сахара",
+   "intent": "food",
+   "items": [
+    {
+     "name": "американо",
+     "aliases": [
+      "кофе американо",
+      "кофе"
+     ],
+     "weight": [
+      175.0,
+      325.0
+     ],
+     "calories": [
+      0,
+      10
+     ],
+     "protein": [
+      0,
+      1
+     ],
+     "fat": [
+      0,
+      1
+     ],
+     "carbs": [
+      0,
+      2
+     ],
+     "hydrating": true
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t49",
+   "category": "drinks",
+   "text": "зелёный чай",
+   "intent": "food",
+   "items": [
+    {
+     "name": "зелёный чай",
+     "aliases": [
+      "чай зелёный",
+      "чай"
+     ],
+     "weight": [
+      175.0,
+      325.0
+     ],
+     "calories": [
+      0,
+      10
+     ],
+     "protein": [
+      0,
+      1
+     ],
+     "fat": [
+      0,
+      1
+     ],
+     "carbs": [
+      0,
+      2
+     ],
+     "hydrating": true
+    }
+   ],
+   "note": "чай без сахара и молока по умолчанию — hydrating",
+   "reference": "approx"
+  },
+  {
+   "id": "t50",
+   "category": "drinks",
+   "text": "чай с сахаром",
+   "intent": "food",
+   "items": [
+    {
+     "name": "чай с сахаром",
+     "aliases": [
+      "чай"
+     ],
+     "weight": [
+      125.0,
+      375.0
+     ],
+     "calories": [
+      20.0,
+      60.0
+     ],
+     "protein": [
+      0.0,
+      2
+     ],
+     "fat": [
+      0.0,
+      2
+     ],
+     "carbs": [
+      5.0,
+      15.0
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t51",
+   "category": "drinks",
+   "text": "чашка кофе с молоком",
+   "intent": "food",
+   "items": [
+    {
+     "name": "кофе с молоком",
+     "aliases": [
+      "кофе"
+     ],
+     "weight": [
+      100.0,
+      300.0
+     ],
+     "calories": [
+      25.0,
+      75.0
+     ],
+     "protein": [
+      0.5,
+      4.5
+     ],
+     "fat": [
+      0.5,
+      4.5
+     ],
+     "carbs": [
+      1,
+      7
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t52",
+   "category": "drinks",
+   "text": "стакан апельсинового сока",
+   "intent": "food",
+   "items": [
+    {
+     "name": "апельсиновый сок",
+     "aliases": [
+      "сок апельсиновый",
+      "сок"
+     ],
+     "weight": [
+      175.0,
+      325.0
+     ],
+     "calories": [
+      84.0,
+      140.0
+     ],
+     "protein": [
+      0.0,
+      3.7
+     ],
+     "fat": [
+      0.0,
+      2.5
+     ],
+     "carbs": [
+      16.9,
+      35.1
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t53",
+   "category": "drinks",
+   "text": "кола 0,33",
+   "intent": "food",
+   "items": [
+    {
+     "name": "кола",
+     "aliases": [
+      "кока-кола"
+     ],
+     "weight": [
+      231.0,
+      429.0
+     ],
+     "calories": [
+      111.2,
+      166.8
+     ],
+     "protein": [
+      0.0,
+      2
+     ],
+     "fat": [
+      0.0,
+      2
+     ],
+     "carbs": [
+      22.8,
+      47.2
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t54",
+   "category": "drinks",
+   "text": "латте 400 мл",
+   "intent": "food",
+   "items": [
+    {
+     "name": "латте",
+     "aliases": [
+      "кофе латте"
+     ],
+     "weight": [
+      260.0,
+      540.0
+     ],
+     "calories": [
+      123.5,
+      256.5
+     ],
+     "protein": [
+      6.5,
+      13.5
+     ],
+     "fat": [
+      5.9,
+      12.2
+     ],
+     "carbs": [
+      9.8,
+      20.2
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t55",
+   "category": "drinks",
+   "text": "кружку какао",
+   "intent": "food",
+   "items": [
+    {
+     "name": "какао",
+     "aliases": [
+      "какао с молоком"
+     ],
+     "weight": [
+      162.5,
+      337.5
+     ],
+     "calories": [
+      123.5,
+      256.5
+     ],
+     "protein": [
+      5.2,
+      10.8
+     ],
+     "fat": [
+      4.5,
+      9.5
+     ],
+     "carbs": [
+      15.6,
+      32.4
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t56",
+   "category": "drinks",
+   "text": "смузи банан-клубника 300 мл",
+   "intent": "food",
+   "items": [
+    {
+     "name": "смузи банан-клубника",
+     "aliases": [
+      "смузи"
+     ],
+     "weight": [
+      195.0,
+      405.0
+     ],
+     "calories": [
+      117.0,
+      243.0
+     ],
+     "protein": [
+      0.5,
+      4.5
+     ],
+     "fat": [
+      0.0,
+      2.8
+     ],
+     "carbs": [
+      26.0,
+      54.0
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t57",
+   "category": "drinks",
+   "text": "банка энергетика",
+   "intent": "food",
+   "items": [
+    {
+     "name": "энергетик",
+     "aliases": [
+      "энергетический напиток"
+     ],
+     "weight": [
+      100.0,
+      400.0
+     ],
+     "calories": [
+      56.0,
+      224.0
+     ],
+     "protein": [
+      0.0,
+      2
+     ],
+     "fat": [
+      0.0,
+      2
+     ],
+     "carbs": [
+      13.6,
+      54.4
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t58",
+   "category": "alcohol",
+   "text": "бокал красного вина",
+   "intent": "food",
+   "items": [
+    {
+     "name": "красное вино",
+     "aliases": [
+      "вино"
+     ],
+     "weight": [
+      105.0,
+      195.0
+     ],
+     "calories": [
+      89.6,
+      166.4
+     ],
+     "protein": [
+      0.0,
+      2.1
+     ],
+     "fat": [
+      0.0,
+      2
+     ],
+     "carbs": [
+      1,
+      7
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t59",
+   "category": "alcohol",
+   "text": "выпил 2 бутылки пива",
+   "intent": "food",
+   "items": [
+    {
+     "name": "пиво",
+     "weight": [
+      700.0,
+      1300.0
+     ],
+     "calories": [
+      301.0,
+      559.0
+     ],
+     "protein": [
+      3,
+      7
+     ],
+     "fat": [
+      0.0,
+      2
+     ],
+     "carbs": [
+      23.4,
+      48.6
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t60",
+   "category": "alcohol",
+   "text": "50 г водки",
+   "intent": "food",
+   "items": [
+    {
+     "name": "водка",
+     "weight": [
+      35.0,
+      65.0
+     ],
+     "calories": [
+      98.6,
+      133.4
+     ],
+     "protein": [
+      0.0,
+      2
+     ],
+     "fat": [
+      0.0,
+      2
+     ],
+     "carbs": [
+      0.0,
+      3
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t61",
+   "category": "alcohol",
+   "text": "бокал шампанского",
+   "intent": "food",
+   "items": [
+    {
+     "name": "шампанское",
+     "aliases": [
+      "игристое вино"
+     ],
+     "weight": [
+      97.5,
+      202.5
+     ],
+     "calories": [
+      71.5,
+      148.5
+     ],
+     "protein": [
+      0.0,
+      2.3
+     ],
+     "fat": [
+      0.0,
+      2
+     ],
+     "carbs": [
+      1,
+      7
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t62",
+   "category": "alcohol",
+   "text": "джин-тоник",
+   "intent": "food",
+   "items": [
+    {
+     "name": "джин-тоник",
+     "aliases": [
+      "джин тоник"
+     ],
+     "weight": [
+      162.5,
+      337.5
+     ],
+     "calories": [
+      110.5,
+      229.5
+     ],
+     "protein": [
+      0.0,
+      2
+     ],
+     "fat": [
+      0.0,
+      2
+     ],
+     "carbs": [
+      10.4,
+      21.6
+     ],
+     "hydrating": false
+    }
+   ],
+   "reference": "approx"
+  },
+  {
+   "id": "t63",
+   "category": "workout",
+   "text": "пробежал 5 км",
+   "intent": "workout",
+   "items": [],
+   "workout": {
+    "caloriesBurned": [
+     280,
+     450
+    ]
+   },
+   "reference": "approx"
+  },
+  {
+   "id": "t64",
+   "category": "workout",
+   "text": "10000 шагов",
+   "intent": "workout",
+   "items": [],
+   "workout": {
+    "caloriesBurned": [
+     350,
+     550
+    ]
+   },
+   "reference": "approx"
+  },
+  {
+   "id": "t65",
+   "category": "workout",
+   "text": "час в зале, силовая",
+   "intent": "workout",
+   "items": [],
+   "workout": {
+    "caloriesBurned": [
+     250,
+     450
+    ]
+   },
+   "reference": "approx"
+  },
+  {
+   "id": "t66",
+   "category": "workout",
+   "text": "45 минут на велосипеде",
+   "intent": "workout",
+   "items": [],
+   "workout": {
+    "caloriesBurned": [
+     300,
+     520
+    ]
+   },
+   "reference": "approx"
+  },
+  {
+   "id": "t67",
+   "category": "workout",
+   "text": "плавал 30 минут",
+   "intent": "workout",
+   "items": [],
+   "workout": {
+    "caloriesBurned": [
+     200,
+     360
+    ]
+   },
+   "reference": "approx"
+  },
+  {
+   "id": "t68",
+   "category": "workout",
+   "text": "сжёг 300 ккал на эллипсе",
+   "intent": "workout",
+   "items": [],
+   "workout": {
+    "caloriesBurned": [
+     290,
+     310
+    ]
+   },
+   "reference": "approx"
+  },
+  {
+   "id": "t69",
+   "category": "workout",
+   "text": "йога 1 час",
+   "intent": "workout",
+   "items": [],
+   "workout": {
+    "caloriesBurned": [
+     120,
+     300
+    ]
+   },
+   "reference": "approx"
+  },
+  {
+   "id": "t70",
+   "category": "both",
+   "text": "пробежал 5 км и съел банан",
+   "intent": "both",
+   "items": [
+    {
+     "name": "банан",
+     "weight": [
+      78.0,
+      162.0
+     ],
+     "calories": [
+      69.5,
+      144.5
+     ],
+     "protein": [
+      0.0,
+      3.3
+     ],
+     "fat": [
+      0.0,
+      2.4
+     ],
+     "carbs": [
+      17.6,
+      36.5
+     ],
+     "hydrating": false
+    }
+   ],
+   "workout": {
+    "caloriesBurned": [
+     280,
+     450
+    ]
+   },
+   "reference": "approx"
+  },
+  {
+   "id": "t71",
+   "category": "both",
+   "text": "утром прошёл 8000 шагов, на обед съел гречку с курицей",
+   "intent": "both",
+   "items": [
+    {
+     "name": "гречка",
+     "weight": [
+      110.0,
+      290.0
+     ],
+     "calories": [
+      121.0,
+      319.0
+     ],
+     "protein": [
+      4.6,
+      12.2
+     ],
+     "fat": [
+      0.2,
+      4.2
+     ],
+     "carbs": [
+      23.1,
+      60.9
+     ],
+     "hydrating": false,
+     "mealType": "lunch"
+    },
+    {
+     "name": "курица",
+     "aliases": [
+      "куриная грудка",
+      "куриное филе"
+     ],
+     "weight": [
+      82.5,
+      217.5
+     ],
+     "calories": [
+      137.5,
+      362.5
+     ],
+     "protein": [
+      19.2,
+      50.8
+     ],
+     "fat": [
+      5.5,
+      14.5
+     ],
+     "carbs": [
+      0.0,
+      3
+     ],
+     "hydrating": false,
+     "mealType": "lunch"
+    }
+   ],
+   "workout": {
+    "caloriesBurned": [
+     260,
+     460
+    ]
+   },
+   "reference": "approx"
+  },
+  {
+   "id": "t72",
+   "category": "both",
+   "text": "сходил в бассейн на час и потом съел шаурму",
+   "intent": "both",
+   "items": [
+    {
+     "name": "шаурма",
+     "aliases": [
+      "шаверма"
+     ],
+     "weight": [
+      227.5,
+      472.5
+     ],
+     "calories": [
+      422.5,
+      877.5
+     ],
+     "protein": [
+      19.5,
+      40.5
+     ],
+     "fat": [
+      21.4,
+      44.6
+     ],
+     "carbs": [
+      35.8,
+      74.2
+     ],
+     "hydrating": false
+    }
+   ],
+   "workout": {
+    "caloriesBurned": [
+     400,
+     640
+    ]
+   },
+   "reference": "approx"
+  },
+  {
+   "id": "t73",
+   "category": "food-edge",
+   "text": "после тренировки выпил протеиновый коктейль",
+   "intent": "food",
+   "items": [
+    {
+     "name": "протеиновый коктейль",
+     "aliases": [
+      "протеин"
+     ],
+     "weight": [
+      150.0,
+      450.0
+     ],
+     "calories": [
+      90.0,
+      270.0
+     ],
+     "protein": [
+      12.5,
+      37.5
+     ],
+     "fat": [
+      1,
+      5
+     ],
+     "carbs": [
+      5.0,
+      15.0
+     ],
+     "hydrating": false
+    }
+   ],
+   "note": "пограничный случай из промпта classifyIntent: продукт, а не тренировка",
+   "reference": "approx"
+  },
+  {
+   "id": "t74",
+   "category": "other",
+   "text": "привет",
+   "intent": "other",
+   "items": [],
+   "reference": "approx"
+  },
+  {
+   "id": "t75",
+   "category": "other",
+   "text": "сколько мне нужно белка в день?",
+   "intent": "other",
+   "items": [],
+   "reference": "approx"
+  },
+  {
+   "id": "t76",
+   "category": "other",
+   "text": "как дела?",
+   "intent": "other",
+   "items": [],
+   "reference": "approx"
+  },
+  {
+   "id": "t77",
+   "category": "other",
+   "text": "спасибо!",
+   "intent": "other",
+   "items": [],
+   "reference": "approx"
+  },
+  {
+   "id": "t78",
+   "category": "other",
+   "text": "что лучше на ужин, рыба или курица?",
+   "intent": "other",
+   "items": [],
+   "reference": "approx"
+  },
+  {
+   "id": "t79",
+   "category": "other",
+   "text": "устал сегодня, настроение плохое",
+   "intent": "other",
+   "items": [],
+   "reference": "approx"
+  },
+  {
+   "id": "t80",
+   "category": "other",
+   "text": "поставь напоминание на 9 утра",
+   "intent": "other",
+   "items": [],
+   "reference": "approx"
+  }
+ ]
+}

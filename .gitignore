@@ -9,3 +9,10 @@ backups/
 .env
 .env.*
 !.env.example
+
+# eval: личные фото и локальные результаты прогонов моделей
+eval/photos/*
+!eval/photos/manifest.example.json
+eval/results/
+eval/voice/personal-*
+eval/voice/manifest.personal.json

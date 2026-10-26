@@ -70,7 +70,39 @@ TZ=Europe/Moscow
 # AI_DAILY_LIMIT=150
 # AI_DAILY_PHOTO_LIMIT=40
 # VOICE_MAX_SECONDS=300
+
+# Необязательно: модели ИИ (id моделей OpenRouter). Без переменных — значения
+# ниже, то есть то, что бот использовал всегда. Комментарии держите на
+# отдельных строках: значение после `=` берётся целиком.
+# Фото еды:
+# AI_MODEL_VISION=openai/gpt-4o
+# Штрихкод на фото; пусто → AI_MODEL_VISION, а без неё openai/gpt-4o-mini:
+# AI_MODEL_BARCODE=
+# Разбор текста еды, intent, тренировки, группировка названий (JSON):
+# AI_MODEL_TEXT=openai/gpt-4o-mini
+# Вечерний отчёт, анализ недели/месяца и веса, ИИ-тренер:
+# AI_MODEL_CHAT=openai/gpt-4o-mini
+# Расшифровка голосовых:
+# AI_MODEL_AUDIO=google/gemini-3-flash-preview
+# Запасные модели тех же ролей: один повтор, если основная упала после всех
+# ретраев. AI_FALLBACK_BARCODE пусто → AI_FALLBACK_VISION.
+# AI_FALLBACK_VISION=
+# AI_FALLBACK_BARCODE=
+# AI_FALLBACK_TEXT=
+# AI_FALLBACK_CHAT=
+# AI_FALLBACK_AUDIO=
+# Уровень reasoning для reasoning-моделей: none|minimal|low|medium|high.
+# Пусто → по семейству (server/lib/ai-models.ts): GPT-5.1+/6 и Claude 4.5+
+# выключено (none), GPT-5 и Gemini 3 flash — minimal, o-серия и Gemini Pro —
+# low. Ниже минимума модели значение не опускается. Если reasoning не
+# выключен, к max_tokens добавляется 1024 токена. Текущая
+# gemini-3-flash-preview без этой переменной идёт как раньше, без параметра.
+# AI_REASONING_EFFORT=
 ```
+
+Модели берутся из `.env` при старте контейнера: после правки —
+`docker compose up -d bot` (пересборка не нужна). Перед сменой модели
+прогоните eval (`eval/README.md`).
 
 Сгенерировать секреты:
 ```bash

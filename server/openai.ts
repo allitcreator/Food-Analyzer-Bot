@@ -7,6 +7,7 @@ import { writeFile, readFile, unlink, mkdtemp } from "fs/promises";
 import { tmpdir } from "os";
 import path from "path";
 import { describeError } from "./lib/safe-log";
+import { modelRequestParams, withFallback, type AIRole } from "./lib/ai-models";
 
 const execFileAsync = promisify(execFile);
 
@@ -33,12 +34,27 @@ function isRetriableStatus(status: number): boolean {
   return status === 408 || status === 429 || status >= 500;
 }
 
-async function callAI(
+type ChatParams = OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming;
+
+/**
+ * Наблюдатель за успешными вызовами — нужен eval-скрипту (scripts/eval-models.ts),
+ * чтобы снять usage/стоимость и сырой ответ. В боте не установлен.
+ */
+export type AICallObserver = (event: {
+  fnName: string;
+  model: string;
+  response: OpenAI.Chat.Completions.ChatCompletion;
+}) => void;
+let callObserver: AICallObserver | null = null;
+export function setAICallObserver(observer: AICallObserver | null): void {
+  callObserver = observer;
+}
+
+async function callModelWithRetry(
   fnName: string,
-  params: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
-  opts: { timeout?: number } = {},
+  params: ChatParams,
+  timeout: number,
 ): Promise<OpenAI.Chat.Completions.ChatCompletion> {
-  const timeout = opts.timeout ?? 60_000;
   return pRetry(
     async () => {
       try {
@@ -60,10 +76,38 @@ async function callAI(
       maxTimeout: 4000,
       onFailedAttempt: ({ error, attemptNumber, retriesLeft }) => {
         console.error(
-          `[AI:${fnName}] attempt ${attemptNumber} failed (retriesLeft=${retriesLeft}): ${describeError(error)}`,
+          `[AI:${fnName}] ${params.model} attempt ${attemptNumber} failed (retriesLeft=${retriesLeft}): ${describeError(error)}`,
         );
       },
     },
+  );
+}
+
+/**
+ * Вызов модели роли `role` из конфига. Параметры подгоняются под семейство
+ * модели (temperature, reasoning — см. server/lib/ai-models.ts). Если основная
+ * модель окончательно упала после ретраев и для роли задан AI_FALLBACK_*, один
+ * раз пробуем запасную.
+ */
+async function callAI(
+  fnName: string,
+  role: AIRole,
+  params: Omit<ChatParams, "model">,
+  opts: { timeout?: number } = {},
+): Promise<OpenAI.Chat.Completions.ChatCompletion> {
+  const timeout = opts.timeout ?? 60_000;
+  const primary = config.aiModels[role];
+  const fallback = config.aiFallbackModels[role];
+  const run = async (model: string) => {
+    const request = modelRequestParams(model, { ...params, model }, config.aiReasoningEffort) as ChatParams;
+    const response = await callModelWithRetry(fnName, request, timeout);
+    callObserver?.({ fnName, model, response });
+    return response;
+  };
+  return withFallback(
+    () => run(primary),
+    fallback && fallback !== primary ? () => run(fallback) : undefined,
+    (err) => console.error(`[AI:${fnName}] ${primary} failed, trying fallback ${fallback}: ${describeError(err)}`),
   );
 }
 
@@ -112,8 +156,7 @@ If the user explicitly says "на завтрак/breakfast", "на обед/lunc
 The user may describe multiple meals in one message (e.g. "на завтрак съел X, на обед съел Y") — assign the correct mealType to each item based on context.`;
     }
 
-    const response = await callAI("analyzeFoodText", {
-      model: "openai/gpt-4o-mini",
+    const response = await callAI("analyzeFoodText", "text", {
       max_tokens: 2048,
       messages: [
         {
@@ -173,8 +216,7 @@ export type MessageIntent = "food" | "workout" | "both" | "other";
 
 export async function classifyIntent(text: string): Promise<MessageIntent> {
   try {
-    const response = await callAI("classifyIntent", {
-      model: "openai/gpt-4o-mini",
+    const response = await callAI("classifyIntent", "text", {
       max_tokens: 50,
       messages: [
         {
@@ -214,8 +256,7 @@ export interface WorkoutResult {
 
 export async function analyzeWorkout(text: string, userWeightKg: number): Promise<WorkoutResult | null> {
   try {
-    const response = await callAI("analyzeWorkout", {
-      model: "openai/gpt-4o-mini",
+    const response = await callAI("analyzeWorkout", "text", {
       max_tokens: 256,
       messages: [
         {
@@ -298,8 +339,7 @@ export async function generateEveningReport(
       ? `Тренировки: ${workouts.map(w => `${w.description} (${w.caloriesBurned} ккал сожжено)`).join(', ')}`
       : '';
 
-    const response = await callAI("generateEveningReport", {
-      model: "openai/gpt-4o-mini",
+    const response = await callAI("generateEveningReport", "chat", {
       temperature: 0.3,
       max_tokens: 1024,
       messages: [
@@ -363,8 +403,7 @@ export async function generatePeriodAnalysis(params: {
       ? `Тренировки за период: ${workoutTypes.join(', ')}, сожжено ${totalCaloriesBurned} ккал`
       : 'тренировок не было';
 
-    const response = await callAI("generatePeriodAnalysis", {
-      model: "openai/gpt-4o-mini",
+    const response = await callAI("generatePeriodAnalysis", "chat", {
       temperature: 0.3,
       max_tokens: 1024,
       messages: [
@@ -396,10 +435,16 @@ export async function generatePeriodAnalysis(params: {
   }
 }
 
+// Голос уходит как `image_url` с data:audio/ogg — недокументированный, но
+// рабочий путь до Gemini. Документированный `input_audio` пока не включаем:
+// в списке форматов OpenRouter `ogg` описан как «OGG Vorbis», про Opus (а
+// голосовые Telegram — OGG/Opus) там ни слова
+// (https://openrouter.ai/docs/guides/overview/multimodal/audio). Перед
+// переходом проверить eval'ом (eval/README.md) либо конвертировать в mp3/flac
+// уже имеющимся ffmpeg.
 async function transcribeChunk(audioBuffer: Buffer): Promise<string | null> {
   const audioBase64 = audioBuffer.toString("base64");
-  const response = await callAI("transcribeChunk", {
-    model: "google/gemini-3-flash-preview",
+  const response = await callAI("transcribeChunk", "audio", {
     max_tokens: 4096,
     messages: [
       {
@@ -483,8 +528,7 @@ export async function transcribeVoice(audioBuffer: Buffer, duration?: number): P
 
 export async function detectBarcode(imageBase64: string): Promise<string | null> {
   try {
-    const response = await callAI("detectBarcode", {
-      model: "openai/gpt-4o-mini",
+    const response = await callAI("detectBarcode", "barcode", {
       max_tokens: 30,
       messages: [{
         role: "user",
@@ -544,8 +588,7 @@ export async function askCoach(
       ? `Осталось на сегодня: ${Math.max(0, profile.caloriesGoal - todayStats.calories)} ккал, Б${Math.max(0, (profile.proteinGoal ?? 0) - todayStats.protein)}г, Ж${Math.max(0, (profile.fatGoal ?? 0) - todayStats.fat)}г, У${Math.max(0, (profile.carbsGoal ?? 0) - todayStats.carbs)}г`
       : '';
 
-    const response = await callAI("askCoach", {
-      model: "openai/gpt-4o-mini",
+    const response = await callAI("askCoach", "chat", {
       max_tokens: 1024,
       messages: [
         {
@@ -587,8 +630,7 @@ export async function generateWeightAnalysis(
 
     const goalMap: Record<string, string> = { lose: 'похудение', maintain: 'поддержание веса', gain: 'набор массы' };
 
-    const response = await callAI("generateWeightAnalysis", {
-      model: "openai/gpt-4o-mini",
+    const response = await callAI("generateWeightAnalysis", "chat", {
       temperature: 0.3,
       max_tokens: 1024,
       messages: [
@@ -671,8 +713,7 @@ export async function analyzeFoodImage(
       productHint += `\nThe user captioned this photo: "${hint.userNote}". Trust this caption over your visual guess: if it names the dish, use that name; if it gives a weight, portion count or ingredients, use those numbers. The caption is written in Russian and may contain several dishes.`;
     }
 
-    const response = await callAI("analyzeFoodImage", {
-      model: "openai/gpt-4o",
+    const response = await callAI("analyzeFoodImage", "vision", {
       temperature: 0,
       max_tokens: 1024,
       messages: [
@@ -747,8 +788,7 @@ Example: {"items": [{...}, {...}]}`
 
 export async function groupFoodNames(foodNames: string[]): Promise<Record<string, string>> {
   try {
-    const response = await callAI("groupFoodNames", {
-      model: "openai/gpt-4o-mini",
+    const response = await callAI("groupFoodNames", "text", {
       max_tokens: 2048,
       messages: [
         {

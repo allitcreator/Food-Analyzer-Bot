@@ -1,0 +1,30 @@
+{
+ "note": "Скопируйте в eval/photos/manifest.json и положите фото рядом. Всё в eval/photos, кроме этого файла, в .gitignore. Диапазоны — [min, max]; для взвешенного на весах продукта и КБЖУ с этикетки ставьте узкий диапазон (±5–10%), для оценки на глаз — широкий.",
+ "evalTime": "13:00",
+ "items": [
+  {
+   "file": "oatmeal-banana.jpg",
+   "caption": "овсянка с бананом",
+   "source": "scale",
+   "expected": [
+    { "name": "овсянка на молоке", "aliases": ["овсяная каша", "овсянка"], "weight": [240, 260], "calories": [260, 300], "protein": [9, 12], "fat": [7, 10], "carbs": [38, 46], "hydrating": false },
+    { "name": "банан", "weight": [95, 105], "calories": [85, 95], "protein": [1, 1.5], "fat": [0, 0.5], "carbs": [20, 24], "hydrating": false }
+   ]
+  },
+  {
+   "file": "yogurt-label.jpg",
+   "source": "label",
+   "note": "Упаковка целиком, КБЖУ с этикетки × вес нетто",
+   "expected": [
+    { "name": "йогурт греческий 2%", "aliases": ["греческий йогурт", "йогурт"], "weight": [140, 140], "calories": [95, 110], "protein": [11, 13], "fat": [2.5, 3.2], "carbs": [4.5, 6], "hydrating": false }
+   ]
+  },
+  {
+   "file": "water-glass.jpg",
+   "source": "approx",
+   "expected": [
+    { "name": "вода", "aliases": ["стакан воды"], "weight": [200, 300], "calories": [0, 5], "protein": [0, 0.5], "fat": [0, 0.5], "carbs": [0, 0.5], "hydrating": true }
+   ]
+  }
+ ]
+}

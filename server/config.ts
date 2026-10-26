@@ -1,4 +1,5 @@
 import { parsePositiveInt } from "./lib/ai-quota";
+import { resolveAIModels } from "./lib/ai-models";
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -30,4 +31,18 @@ export const config = {
   aiDailyLimit:      parsePositiveInt(process.env.AI_DAILY_LIMIT, 150),
   aiDailyPhotoLimit: parsePositiveInt(process.env.AI_DAILY_PHOTO_LIMIT, 40),
   voiceMaxSeconds:   parsePositiveInt(process.env.VOICE_MAX_SECONDS, 300),
+
+  // Модели ИИ по ролям (AI_MODEL_VISION/TEXT/CHAT/AUDIO), запасные модели
+  // (AI_FALLBACK_*) и уровень reasoning (AI_REASONING_EFFORT). Без переменных —
+  // те же модели, что были захардкожены. См. server/lib/ai-models.ts и DEPLOY.md.
+  // Объекты изменяемые: openai.ts читает их на каждом вызове, eval-скрипт
+  // подменяет модель без перезапуска процесса.
+  ...(() => {
+    const ai = resolveAIModels(process.env);
+    return {
+      aiModels: ai.primary,
+      aiFallbackModels: ai.fallback,
+      aiReasoningEffort: ai.reasoningEffort,
+    };
+  })(),
 };

@@ -29,5 +29,7 @@ knowledge-base
 docs
 tests
 scripts
+# eval: личные фото, голосовые и результаты прогонов моделей
+eval
 **/*.md
 docker-compose.yml
