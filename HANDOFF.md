@@ -1,7 +1,7 @@
 # HANDOFF
 
 Статус: открыт
-Обновлено: 2026-10-26 18:40 MSK
+Обновлено: 2026-10-26 21:45 MSK
 Клиент: Claude
 
 ## Цель
@@ -252,8 +252,14 @@ gemini-3.5-flash-lite (итоги в ROADMAP блок 3). Vision остаётс�
 `gte/lte` и настоящие сутки пользователя. Блок 5: снапшоты миграций
 0005–0007 восстановлены и сверены со схемой прода, CI с check/build/audit,
 сборка не качает SDK (`npm run update:tg-sdk`), удалено ~50 пакетов, `replit.md`,
-`DEPLOY_GUIDE.md`, `.replit`, `db:push`; `script/` → `scripts/`. Осталось:
-тесты роутов/storage, `npm audit` (3 critical, 14 high в prod-зависимостях). Затем блок 3 (модели: `gpt-4o`/`-mini`
+`DEPLOY_GUIDE.md`, `.replit`, `db:push`; `script/` → `scripts/`. Затем `17b5505`:
+audit = 0 (drizzle-orm 0.45.4, zod 4, overrides request→@cypress/request,
+qs, uuid), `describeError` не печатает SQL/параметры `DrizzleQueryError`,
+35 HTTP-тестов Mini App API, 404 на удаление чужой воды/избранного. Прод на
+Node 20 поднялся, тики планировщика без ошибок. Блоки 1–5 ROADMAP закрыты,
+кроме: внешний uptime-пинг, тесты storage на PG, суточный потолок
+`/api/app/analyze`, дубли заголовков nginx для `/app/`, eval фото. Дальше —
+блок 6 (функции). Затем блок 3 (модели: `gpt-4o`/`-mini`
 отключаются 2027-01-14).
 
 

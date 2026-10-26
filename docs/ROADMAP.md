@@ -86,8 +86,9 @@
 - [ ] nginx для `/app/` дублирует `nosniff`, `Referrer-Policy` и шлёт свой CSP с `frame-ancestors` — убрать после проверки Mini App в Telegram.
 - [x] CI: `npm run check` и `npm run build`; сборка не должна перекачивать `client/public/telegram-web-app.js`.
 - [x] Удалить ~40 неиспользуемых зависимостей, `replit.md`, `DEPLOY_GUIDE.md`; README — Mini App, `/quick`, без `SESSION_SECRET`.
-- [ ] `npm audit --omit=dev`: 3 critical, 14 high (proxy-addr, body-parser, path-to-regexp, drizzle-orm <0.45.2, request у node-telegram-bot-api, zod <4.6.6 — мажор).
-- [ ] Тесты на роуты `app-api.ts`, `storage.ts` и хендлеры бота перед дроблением `bot.ts`.
+- [x] (`17b5505`, audit = 0) `npm audit --omit=dev`: 3 critical, 14 high (proxy-addr, body-parser, path-to-regexp, drizzle-orm <0.45.2, request у node-telegram-bot-api, zod <4.6.6 — мажор).
+- [x] HTTP-тесты роутов `app-api.ts` (35, на фейковом storage) — `17b5505`.
+- [ ] Тесты `storage.ts` на настоящем Postgres (в CI есть сервис) и хендлеров бота — перед дроблением `bot.ts`.
 
 ### 6. Функции (по конкурентам)
 - Быстрые: undo; алерт о превышении нормы (отключаемый); порция ×0.5/×1.5/×2; кнопка «что съесть на остаток дня»; напоминание «N часов без записей».
