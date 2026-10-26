@@ -16,7 +16,8 @@ import { hapticImpact, hapticNotification } from "@/lib/telegram";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { toast } from "@/components/ui/Toast";
+import { toast, toastError } from "@/components/ui/Toast";
+import { isValidFoodWeight, MAX_FOOD_WEIGHT } from "@/lib/food-weight";
 
 /** Строка результата: неизменяемый оригинал + текущий (правимый) вес. */
 interface Row {
@@ -73,18 +74,18 @@ export function AddFoodModal({
       setRows(items.map((it) => ({ original: it, weight: it.weight })));
     },
     onError: (err) => {
-      hapticNotification("error");
-      if (err instanceof ApiError) {
-        toast(
-          err.reason === "unrecognized"
-            ? "Не удалось распознать еду"
-            : err.status === 429
-              ? "Слишком часто — подождите минуту"
-              : "Ошибка анализа, попробуйте ещё раз",
-        );
-      } else {
-        toast(err instanceof Error ? err.message : "Ошибка анализа");
+      if (err instanceof ApiError && err.reason === "unrecognized") {
+        hapticNotification("error");
+        toast("Не удалось распознать еду");
+        return;
       }
+      // Ошибки сжатия фото (не ApiError) несут понятный текст сами.
+      if (!(err instanceof ApiError) && !(err instanceof TypeError) && err instanceof Error) {
+        hapticNotification("error");
+        toast(err.message);
+        return;
+      }
+      toastError(err, "Ошибка анализа, попробуйте ещё раз");
     },
   });
 
@@ -97,10 +98,7 @@ export function AddFoodModal({
       qc.invalidateQueries({ queryKey: ["day"] });
       handleOpenChange(false);
     },
-    onError: () => {
-      hapticNotification("error");
-      toast("Не удалось записать");
-    },
+    onError: (err) => toastError(err, "Не удалось записать"),
   });
 
   const onPickFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -119,10 +117,17 @@ export function AddFoodModal({
     setRows((cur) => (cur ? cur.filter((_, idx) => idx !== i) : cur));
   };
 
+  const allWeightsValid = !!rows && rows.every((r) => isValidFoodWeight(r.weight));
+
   const canAnalyze = (text.trim().length > 0 || !!file) && !analyzeMutation.isPending;
 
   const submit = () => {
     if (!rows || rows.length === 0) return;
+    if (!allWeightsValid) {
+      hapticNotification("error");
+      toast("Укажите вес больше 0");
+      return;
+    }
     const items = rows.map((r) => scaleFoodByWeight(r.original, r.weight));
     logMutation.mutate(items);
   };
@@ -214,7 +219,7 @@ export function AddFoodModal({
             </Button>
             <Button
               className="flex-1"
-              disabled={logMutation.isPending || rows.length === 0}
+              disabled={logMutation.isPending || rows.length === 0 || !allWeightsValid}
               onClick={submit}
             >
               {logMutation.isPending ? (
@@ -246,6 +251,7 @@ function ResultRow({
 }) {
   const scaled = scaleFoodByWeight(row.original, row.weight);
   const hydrating = row.original.hydrating === true;
+  const invalid = !isValidFoodWeight(row.weight);
 
   return (
     <div className="rounded-xl border border-card-border bg-card p-3">
@@ -271,17 +277,22 @@ function ResultRow({
         <Input
           type="number"
           inputMode="numeric"
-          min={0}
-          max={5000}
+          min={1}
+          max={MAX_FOOD_WEIGHT}
           value={row.weight}
-          onChange={(e) => onWeight(Math.max(0, Math.min(5000, Number(e.target.value) || 0)))}
-          className="h-9 w-24"
+          onChange={(e) =>
+            onWeight(Math.max(0, Math.min(MAX_FOOD_WEIGHT, Number(e.target.value) || 0)))
+          }
+          className={`h-9 w-24 ${invalid ? "border-destructive" : ""}`}
           aria-label="Вес, г"
+          aria-invalid={invalid}
         />
         <span className="text-sm text-muted-foreground">{hydrating ? "мл" : "г"}</span>
       </div>
 
-      {hydrating ? (
+      {invalid ? (
+        <p className="mt-2 text-xs text-destructive">Вес должен быть больше 0</p>
+      ) : hydrating ? (
         <p className="mt-2 flex items-center gap-1.5 text-xs text-chart-1">
           <Droplet className="h-3.5 w-3.5" /> Пойдёт в воду: +{round(row.weight)} мл
         </p>

@@ -33,19 +33,42 @@ export class ApiError extends Error {
   }
 }
 
+/** Таймауты запросов: AI-анализ фото/текста долгий, остальное — быстрое. */
+export const DEFAULT_TIMEOUT_MS = 15_000;
+export const ANALYZE_TIMEOUT_MS = 60_000;
+
+/** AbortSignal.timeout есть не во всех WebView Telegram (iOS < 16) — фолбэк. */
+function timeoutSignal(ms: number): AbortSignal {
+  if (typeof AbortSignal.timeout === "function") return AbortSignal.timeout(ms);
+  const ctrl = new AbortController();
+  setTimeout(() => ctrl.abort(new DOMException("Timeout", "TimeoutError")), ms);
+  return ctrl.signal;
+}
+
 async function request<T>(
   method: string,
   path: string,
   body?: unknown,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `tma ${getInitData()}`,
-    },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `tma ${getInitData()}`,
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: timeoutSignal(timeoutMs),
+    });
+  } catch (err) {
+    const name = (err as { name?: string } | null)?.name;
+    if (name === "TimeoutError" || name === "AbortError") {
+      throw new ApiError(0, "timeout", "Сервер не ответил вовремя");
+    }
+    throw new ApiError(0, "network", "Нет соединения с сервером");
+  }
 
   if (!res.ok) {
     let reason: string | undefined;
@@ -99,7 +122,7 @@ export const api = {
 
   // Ручной ввод еды: AI-анализ фото/текста → подтверждение → запись.
   analyzeFood: (payload: { text?: string; imageBase64?: string }) =>
-    request<AnalyzeResponse>("POST", "/analyze", payload),
+    request<AnalyzeResponse>("POST", "/analyze", payload, ANALYZE_TIMEOUT_MS),
   createLogs: (items: AnalyzedItem[]) =>
     request<LogApplyResponse>("POST", "/logs", { items }),
 };

@@ -24,6 +24,7 @@ export function TabBar() {
               key={path}
               href={path}
               onClick={() => hapticSelection()}
+              aria-current={active ? "page" : undefined}
               className={cn(
                 "flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] font-medium transition-colors",
                 active ? "text-primary" : "text-muted-foreground",

@@ -2,16 +2,9 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { api } from "@/lib/api";
-import type { DayResponse, FoodLog, UpdateLogBody } from "@/lib/types";
-import {
-  addDaysISO,
-  formatDateHuman,
-  isToday,
-  MEAL_LABELS,
-  MEAL_ORDER,
-  round,
-  todayISO,
-} from "@/lib/format";
+import type { DayResponse, FoodLog, MeResponse, UpdateLogBody } from "@/lib/types";
+import { addDaysISO, formatDateHuman, MEAL_LABELS, MEAL_ORDER, round } from "@/lib/format";
+import { todayInTimeZone } from "@/lib/date-tz";
 import { hapticNotification, hapticSelection } from "@/lib/telegram";
 import { hasFavoriteTitle } from "@shared/favorites-filter";
 import { PageHeader } from "@/components/PageHeader";
@@ -22,11 +15,15 @@ import { ErrorScreen } from "@/components/StateScreens";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Input, Field, Select } from "@/components/ui/Input";
-import { toast } from "@/components/ui/Toast";
+import { toast, toastError } from "@/components/ui/Toast";
 
 export default function History() {
   const qc = useQueryClient();
-  const [date, setDate] = useState<string>(todayISO());
+  // «Сегодня» — по таймзоне профиля, как на сервере, а не по часам устройства.
+  // /me уже в кэше: App не рендерит вкладки, пока он не загружен.
+  const me = useQuery<MeResponse>({ queryKey: ["me"], queryFn: api.me });
+  const today = todayInTimeZone(me.data?.timezone);
+  const [date, setDate] = useState<string>(today);
   const [editing, setEditing] = useState<FoodLog | null>(null);
   const [deleting, setDeleting] = useState<FoodLog | null>(null);
 
@@ -55,6 +52,7 @@ export default function History() {
       setDeleting(null);
       invalidate();
     },
+    onError: (err) => toastError(err, "Не удалось удалить"),
   });
 
   const repeatMutation = useMutation({
@@ -121,14 +119,14 @@ export default function History() {
               <input
                 type="date"
                 value={date}
-                max={todayISO()}
+                max={today}
                 onChange={(e) => e.target.value && setDate(e.target.value)}
                 className="mt-1 bg-transparent text-xs text-muted-foreground outline-none"
               />
             </label>
             <button
               onClick={() => shift(1)}
-              disabled={isToday(date)}
+              disabled={date >= today}
               className="rounded-full p-2 hover:bg-secondary disabled:opacity-30"
               aria-label="Следующий день"
             >
@@ -150,6 +148,7 @@ export default function History() {
               logs={data.foodLogs}
               onEdit={setEditing}
               onDelete={setDeleting}
+              emptyHint="В этот день ничего не записано"
               onRepeat={(log) => repeatMutation.mutate(log)}
               onFavorite={(log) => {
                 if (hasFavoriteTitle(ownFavTitles, log.foodName)) {
@@ -264,6 +263,7 @@ function EditForm({ log, onSaved }: { log: FoodLog; onSaved: () => void }) {
       hapticNotification("success");
       onSaved();
     },
+    onError: (err) => toastError(err, "Не удалось сохранить"),
   });
 
   const save = () => {

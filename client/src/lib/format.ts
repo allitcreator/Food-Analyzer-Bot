@@ -8,11 +8,11 @@ export const clampPct = (value: number, goal: number | null | undefined): number
   return Math.min(100, Math.max(0, (value / goal) * 100));
 };
 
-/** Local calendar date as "YYYY-MM-DD" (no timezone shift). */
-export function todayISO(): string {
-  return toISO(new Date());
-}
-
+/**
+ * Local calendar date as "YYYY-MM-DD" (no timezone shift). Для «сегодня»
+ * используйте todayInTimeZone из ./date-tz — сервер считает день по таймзоне
+ * профиля, а не по часам устройства.
+ */
 export function toISO(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -44,10 +44,6 @@ export function formatDateHuman(iso: string): string {
 export function formatDateShort(iso: string): string {
   const [, m, d] = iso.split("-").map(Number);
   return `${String(d).padStart(2, "0")}.${String(m).padStart(2, "0")}`;
-}
-
-export function isToday(iso: string): boolean {
-  return iso === todayISO();
 }
 
 export const MEAL_LABELS: Record<string, string> = {

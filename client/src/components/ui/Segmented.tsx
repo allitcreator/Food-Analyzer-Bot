@@ -19,6 +19,8 @@ export function Segmented<T extends string>({
       {options.map((opt) => (
         <button
           key={opt.value}
+          type="button"
+          aria-pressed={opt.value === value}
           onClick={() => {
             hapticSelection();
             onChange(opt.value);

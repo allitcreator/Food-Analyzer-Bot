@@ -35,7 +35,10 @@ export function Modal({ open, onOpenChange, title, children, className }: ModalP
             <Dialog.Title className="text-lg font-semibold">
               {title}
             </Dialog.Title>
-            <Dialog.Close className="rounded-full p-1 text-muted-foreground hover:bg-secondary">
+            <Dialog.Close
+              className="rounded-full p-1 text-muted-foreground hover:bg-secondary"
+              aria-label="Закрыть"
+            >
               <X className="h-5 w-5" />
             </Dialog.Close>
           </div>

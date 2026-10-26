@@ -14,6 +14,8 @@ interface MealGroupsProps {
   repeatingId?: number | null;
   /** Titles of the user's own favorites — a matching dish shows a filled star. */
   favoriteTitles?: string[];
+  /** Подсказка под «Записей о еде пока нет» — своя для каждого экрана. */
+  emptyHint?: string;
 }
 
 /** Food entries grouped by meal type with per-meal calorie subtotals. */
@@ -25,13 +27,14 @@ export function MealGroups({
   onFavorite,
   repeatingId,
   favoriteTitles,
+  emptyHint,
 }: MealGroupsProps) {
   if (logs.length === 0) {
     return (
       <Card className="flex flex-col items-center gap-2 py-8 text-center text-muted-foreground">
         <Utensils className="h-7 w-7" />
         <p className="text-sm">Записей о еде пока нет</p>
-        <p className="text-xs">Добавьте приём пищи в чате бота</p>
+        {emptyHint && <p className="text-xs">{emptyHint}</p>}
       </Card>
     );
   }

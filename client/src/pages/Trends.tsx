@@ -72,7 +72,9 @@ export default function Trends() {
             <div className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
               <Scale className="h-4 w-4 text-chart-2" /> Вес
             </div>
-            {weight.isLoading || !weight.data ? (
+            {weight.isError ? (
+              <ErrorScreen error={weight.error} onRetry={() => weight.refetch()} />
+            ) : weight.isLoading || !weight.data ? (
               <Skeleton className="h-52 w-full rounded-xl" />
             ) : weight.data.logs.length < 2 ? (
               <p className="py-10 text-center text-sm text-muted-foreground">

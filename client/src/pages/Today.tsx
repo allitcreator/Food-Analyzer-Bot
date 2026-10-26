@@ -12,7 +12,9 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { MealGroups } from "@/components/MealGroups";
 import { AddFoodModal } from "@/components/AddFoodModal";
 import { ErrorScreen } from "@/components/StateScreens";
-import { toast } from "@/components/ui/Toast";
+import { toast, toastError } from "@/components/ui/Toast";
+import { Modal } from "@/components/ui/Modal";
+import { Button } from "@/components/ui/Button";
 
 export default function Today() {
   const qc = useQueryClient();
@@ -28,6 +30,7 @@ export default function Today() {
       hapticNotification("success");
       qc.invalidateQueries({ queryKey: ["day", "today"] });
     },
+    onError: (err) => toastError(err, "Не удалось добавить воду"),
   });
 
   if (isError) return <ErrorScreen error={error} onRetry={() => refetch()} />;
@@ -68,7 +71,10 @@ export default function Today() {
               pending={addWater.isPending}
             />
             {data.workouts.length > 0 && <WorkoutsCard workouts={data.workouts} />}
-            <MealGroups logs={data.foodLogs} />
+            <MealGroups
+              logs={data.foodLogs}
+              emptyHint="Нажмите «+» вверху, чтобы добавить еду"
+            />
           </>
         )}
       </div>
@@ -128,6 +134,7 @@ function MacrosCard({ data }: { data: DayResponse }) {
 function FavoritesCard() {
   const qc = useQueryClient();
   const [editMode, setEditMode] = useState(false);
+  const [deleting, setDeleting] = useState<Favorite | null>(null);
 
   const { data } = useQuery({
     queryKey: ["favorites"],
@@ -150,9 +157,11 @@ function FavoritesCard() {
   const delMutation = useMutation({
     mutationFn: (id: number) => api.deleteFavorite(id),
     onSuccess: () => {
-      hapticImpact("medium");
-      qc.invalidateQueries({ queryKey: ["favorites"] });
+      hapticNotification("success");
+      setDeleting(null);
+      qc.invalidateQueries({ queryKey: ["favorites"], refetchType: "all" });
     },
+    onError: (err) => toastError(err, "Не удалось удалить"),
   });
 
   const favorites = data?.favorites ?? [];
@@ -195,7 +204,7 @@ function FavoritesCard() {
               </button>
               {editMode && fav.isOwner && (
                 <button
-                  onClick={() => delMutation.mutate(fav.id)}
+                  onClick={() => setDeleting(fav)}
                   className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow"
                   aria-label={`Удалить ${fav.title}`}
                 >
@@ -206,6 +215,27 @@ function FavoritesCard() {
           ))}
         </div>
       </CardContent>
+
+      {/* Как на экране «Избранное»: удаление только после подтверждения. */}
+      <Modal open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)} title="Удалить из избранного?">
+        <p className="mb-5 text-sm text-muted-foreground">
+          «{deleting?.title}» будет удалено безвозвратно.
+          {deleting?.isShared && " Оно также пропадёт у других участников."}
+        </p>
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={() => setDeleting(null)}>
+            Отмена
+          </Button>
+          <Button
+            variant="destructive"
+            className="flex-1"
+            disabled={delMutation.isPending}
+            onClick={() => deleting && delMutation.mutate(deleting.id)}
+          >
+            Удалить
+          </Button>
+        </div>
+      </Modal>
     </Card>
   );
 }

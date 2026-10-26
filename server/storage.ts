@@ -1,6 +1,6 @@
 import { users, foodLogs, waterLogs, weightLogs, workoutLogs, barcodeProducts, favorites, botState, notificationSends, type User, type InsertUser, type FoodLog, type InsertFoodLog, type WaterLog, type WeightLog, type WorkoutLog, type InsertWorkoutLog, type BarcodeProduct, type InsertBarcodeProduct, type Favorite, type VisibleFavorite, type FavoriteItem } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, or, sql, desc, gte, lte, lt } from "drizzle-orm";
+import { eq, and, or, sql, desc, gte, lte, lt, isNull } from "drizzle-orm";
 import { calcGoalsFromProfile } from "./lib/goals";
 
 export interface IStorage {
@@ -12,6 +12,7 @@ export interface IStorage {
   updateUser(id: number, data: Partial<User>): Promise<User>;
   deleteUser(id: number): Promise<void>;
   getAllUsers(): Promise<User[]>;
+  /** Одобренные и не заблокированные — получатели планировщика уведомлений. */
   getAllApprovedUsers(): Promise<User[]>;
 
   createFoodLog(log: InsertFoodLog): Promise<FoodLog>;
@@ -153,7 +154,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getAllApprovedUsers(): Promise<User[]> {
-    return db.select().from(users).where(eq(users.isApproved, true));
+    // Получатели отчётов и напоминаний: одобренные и не заблокированные
+    // (is_blocked nullable — NULL считаем «не заблокирован»).
+    return db.select().from(users).where(and(
+      eq(users.isApproved, true),
+      or(isNull(users.isBlocked), eq(users.isBlocked, false)),
+    ));
   }
 
   async createFoodLog(log: InsertFoodLog): Promise<FoodLog> {

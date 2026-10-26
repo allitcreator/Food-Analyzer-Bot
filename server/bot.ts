@@ -23,6 +23,9 @@ import { checkAdminTarget, type AdminAction } from "./lib/admin-target";
 import { roundFoodLogField } from "./lib/food-log-fields";
 import { createAiQuota, msUntilNextDay, buildQuotaExceededMessage, checkVoiceDuration, buildVoiceTooLongMessage, type AiActionKind } from "./lib/ai-quota";
 import { tagVisionBarcode, markUserEdited, shouldCacheVisionBarcode } from "./lib/vision-barcode-cache";
+import { parseServingSize } from "./lib/serving-size";
+import { isScheduledDue, smartSnoozeClaimKind, createNonOverlapping, isNotificationRecipient } from "./lib/scheduler";
+import { decideDialogInput, CANCEL_HINT } from "./lib/dialog-state";
 
 const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
 
@@ -149,9 +152,8 @@ async function lookupBarcodeProduct(barcode: string): Promise<BarcodeLookupResul
     const fat100 = Math.round(n["fat_100g"] ?? 0);
     const carbs100 = Math.round(n["carbohydrates_100g"] ?? 0);
 
-    const servingStr: string = p.serving_size || "";
-    const servingMatch = servingStr.match(/(\d+)/);
-    const weight = servingMatch ? parseInt(servingMatch[1]) : 100;
+    // «0,5 l» → 500, «1 portion (40 g)» → 40; нераспознанное → 100 (lib/serving-size.ts).
+    const weight = parseServingSize(p.serving_size);
     const ratio = weight / 100;
 
     // Classify plain water / unsweetened tea-coffee → goes into water tracking.
@@ -385,6 +387,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     { command: "workout",     description: "История тренировок за сегодня" },
     { command: "settings",    description: "Настройки: AI, напоминания, отчёт, микронутриенты" },
     { command: "quick",       description: "Токен для быстрой записи с телефона ⚡" },
+    { command: "cancel",      description: "Отменить текущий ввод (число, время)" },
     { command: "help",        description: "Список всех команд" },
   ]).catch(err => console.error("setMyCommands error:", describeError(err)));
 
@@ -458,6 +461,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       "⚙️ *Настройки*",
       "/settings — AI-анализ, напоминания, авторепорт, микронутриенты",
       "/quick — Токен для быстрой записи шорткатом с телефона ⚡",
+      "/cancel — Отменить текущий ввод (число, время, шаг профиля)",
       "",
       "🔧 *Админ*",
       "/users — Управление пользователями",
@@ -523,7 +527,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
   // Wrapped in createPersistentRecord: reads/writes/deletes keep plain Record
   // semantics, every mutation is mirrored into Postgres. Snapshots restored
   // from `persisted` above.
-  const userStates = createPersistentRecord("userStates", (persisted.get("userStates") ?? {}) as Record<string, { step: string; data: Partial<User> & { reminderMeal?: string; field?: string; messageId?: number; promptMessageId?: number; idx?: number; settingsMsgId?: number; logId?: number; historyPage?: number } }>);
+  const userStates = createPersistentRecord("userStates", (persisted.get("userStates") ?? {}) as Record<string, { step: string; at?: number; data: Partial<User> & { reminderMeal?: string; field?: string; messageId?: number; promptMessageId?: number; idx?: number; settingsMsgId?: number; logId?: number; historyPage?: number } }>);
   const pendingMulti = createPersistentRecord("pendingMulti", (persisted.get("pendingMulti") ?? {}) as Record<string, FoodItem[]>);
   const pendingWorkouts = createPersistentRecord("pendingWorkouts", (persisted.get("pendingWorkouts") ?? {}) as Record<string, { description: string; workoutType: string; durationMin: number | null; caloriesBurned: number }>);
   // pendingLogs lives on the bot instance (legacy shape used across handlers);
@@ -538,6 +542,26 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
   // мутация не персистится сама — после неё обязателен «touch» (переприсваивание
   // верхнего ключа), см. шапку persistent-state.ts.
   const smartSnooze = createPersistentRecord("smartSnooze", (persisted.get("smartSnooze") ?? {}) as Record<string, Record<string, string>>);
+
+  // /cancel: выйти из диалогового шага (ввод числа/времени, профиль).
+  // Неподтверждённые карточки еды не трогаем — у них свои кнопки «Отмена».
+  // Хендлер `message` для /cancel шаг не сбрасывает (decideDialogInput →
+  // cancel_command), это делаем здесь, чтобы знать, было ли что отменять.
+  onText(/^\/cancel(@\w+)?$/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from?.id.toString();
+    if (!telegramId) return;
+    const state = userStates[telegramId];
+    if (!state) {
+      bot.sendMessage(chatId, "Нечего отменять.");
+      return;
+    }
+    delete userStates[telegramId];
+    if (state.data?.promptMessageId) {
+      bot.deleteMessage(chatId, state.data.promptMessageId).catch(() => {});
+    }
+    bot.sendMessage(chatId, "✖️ Ввод отменён. Можно отправлять еду или команды.");
+  });
 
   // ─── Cosmetic UI state — intentionally NOT persisted ──────────────────────
   // These only affect the look of a message that's already on screen; after a
@@ -670,7 +694,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
   }
 
   function startProfileFlow(chatId: number, telegramId: string) {
-    userStates[telegramId] = { step: 'gender', data: {} };
+    userStates[telegramId] = { at: Date.now(), step: 'gender', data: {} };
     bot.sendMessage(chatId, "Давайте настроим ваш профиль для расчета норм КБЖУ.\n\nВаш пол:", {
       reply_markup: {
         inline_keyboard: [
@@ -1669,121 +1693,125 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
   // BEFORE sending, so a restart can neither double-send nor lose a send.
   let lastPersistenceCleanup = 0; // throttle for the housekeeping below
 
+  // Отправка из тика не блокирует цикл: каждая — отдельный промис, ошибка
+  // пишется в лог (safeHandler: имя + describeError, без текста), тик идёт дальше.
+  // Claim уже взят до вызова, поэтому повтора не будет и при долгой отправке.
+  function sendDetached(label: string, fn: () => Promise<unknown>) {
+    void safeHandler(label, fn)();
+  }
+
   async function checkScheduledNotifications() {
-    const allUsers = await storage.getAllApprovedUsers();
+    // Один «сейчас» на весь тик: минута не «уезжает» у пользователей в конце
+    // списка, пока обрабатываются первые.
+    const tickNow = new Date();
+    const allUsers = (await storage.getAllApprovedUsers()).filter(isNotificationRecipient);
     for (const user of allUsers) {
       const tz = user.timezone ?? 'Europe/Moscow';
-      const userNow = getUserNow(tz);
-      const currentTime = `${String(userNow.getHours()).padStart(2, '0')}:${String(userNow.getMinutes()).padStart(2, '0')}`;
+      const userNow = toUserDate(tickNow, tz);
+      const nowMinutes = userNow.getHours() * 60 + userNow.getMinutes();
       const todayKey = `${userNow.getFullYear()}-${String(userNow.getMonth() + 1).padStart(2, '0')}-${String(userNow.getDate()).padStart(2, '0')}`;
 
-      if (user.reportTime && user.reportTime !== 'off' && user.reportTime === currentTime) {
-        if (await storage.claimNotificationSend(user.id, 'report', todayKey)) {
-          try {
-            console.log(`Sending evening report to user ${user.id} at ${currentTime}`);
-            await sendEveningReport(user);
-          } catch (e) {
-            console.error(`Failed to send report to user ${user.id}:`, describeError(e));
+      // Ошибка одного пользователя (БД, claim) не мешает остальным.
+      try {
+        // «Время наступило и не прошло окно догона» + claim раз в день
+        // (lib/scheduler.ts). Сравнение «≥» идемпотентно благодаря claim.
+        if (isScheduledDue(user.reportTime, nowMinutes)) {
+          if (await storage.claimNotificationSend(user.id, 'report', todayKey)) {
+            console.log(`Sending evening report to user ${user.id}`);
+            sendDetached(`scheduled report user=${user.id}`, () => sendEveningReport(user));
           }
         }
-      }
 
-      // Статические напоминания о еде по расписанию. При smartReminders их
-      // подавляем — умная проверка ниже заменяет пинги по расписанию.
-      if (!user.smartReminders) {
-        const meals: Array<{ field: string | null | undefined; meal: string }> = [
-          { field: user.breakfastReminder, meal: 'breakfast' },
-          { field: user.lunchReminder, meal: 'lunch' },
-          { field: user.dinnerReminder, meal: 'dinner' },
-        ];
+        // Статические напоминания о еде по расписанию. При smartReminders их
+        // подавляем — умная проверка ниже заменяет пинги по расписанию.
+        if (!user.smartReminders) {
+          const meals: Array<{ field: string | null | undefined; meal: string }> = [
+            { field: user.breakfastReminder, meal: 'breakfast' },
+            { field: user.lunchReminder, meal: 'lunch' },
+            { field: user.dinnerReminder, meal: 'dinner' },
+          ];
 
-        for (const { field, meal } of meals) {
-          if (!field || field === 'off' || field !== currentTime) continue;
-          if (!(await storage.claimNotificationSend(user.id, `meal_${meal}`, todayKey))) continue;
-          try {
-            console.log(`Sending ${meal} reminder to user ${user.id} at ${currentTime}`);
-            bot.sendMessage(user.telegramId!, `Время записать ${MEAL_LABELS[meal]?.toLowerCase()}! Отправьте текст или фото еды.`);
-          } catch (e) {
-            console.error(`Failed to send ${meal} reminder to user ${user.id}:`, describeError(e));
+          for (const { field, meal } of meals) {
+            if (!isScheduledDue(field, nowMinutes)) continue;
+            if (!(await storage.claimNotificationSend(user.id, `meal_${meal}`, todayKey))) continue;
+            console.log(`Sending ${meal} reminder to user ${user.id}`);
+            sendDetached(`scheduled ${meal} reminder user=${user.id}`, () =>
+              bot.sendMessage(user.telegramId!, `Время записать ${MEAL_LABELS[meal]?.toLowerCase()}! Отправьте текст или фото еды.`));
           }
         }
-      }
 
-      // Умные напоминания: обычное время приёмов из истории, пинг только если
-      // приём реально не записан к этому времени (+ обработка snooze).
-      if (user.smartReminders) {
-        try {
-          const logs = await storage.getMealLogTimes(user.id, 28);
-          const typical = typicalMealTimes(logs, tz, userNow);
+        // Умные напоминания: обычное время приёмов из истории, пинг только если
+        // приём реально не записан к этому времени (+ обработка snooze).
+        if (user.smartReminders) {
+          try {
+            const logs = await storage.getMealLogTimes(user.id, 28);
+            const typical = typicalMealTimes(logs, tz, userNow);
 
-          const loggedMealsToday = new Set<string>();
-          for (const l of logs) {
-            if (tzDayKey(l.date, tz) === todayKey) loggedMealsToday.add(l.mealType);
-          }
-          const nowMinutes = userNow.getHours() * 60 + userNow.getMinutes();
+            const loggedMealsToday = new Set<string>();
+            for (const l of logs) {
+              if (tzDayKey(l.date, tz) === todayKey) loggedMealsToday.add(l.mealType);
+            }
 
-          // 1) Snooze: приём записали → снять; истёк и всё ещё не записан →
-          // удалить (до отправки) и повторить один раз за день (claim *_s2).
-          const userSnooze = smartSnooze[user.telegramId!];
-          if (userSnooze) {
-            for (const meal of Object.keys(userSnooze)) {
-              if (loggedMealsToday.has(meal)) {
-                clearSmartSnooze(user.telegramId!, meal);
-                continue;
-              }
-              if (new Date(userSnooze[meal]).getTime() <= Date.now()) {
-                clearSmartSnooze(user.telegramId!, meal); // touch/delete ДО отправки
-                const t = typical[meal as 'breakfast' | 'lunch' | 'dinner'];
-                if (t && await storage.claimNotificationSend(user.id, `smart_${meal}_s2`, todayKey)) {
-                  await sendSmartReminder(user, meal, t.medianMinutes);
+            // 1) Snooze: приём записали → снять; истёк и всё ещё не записан →
+            // удалить (до отправки) и повторить. Claim по моменту окончания
+            // снуза: каждый «Напомнить позже» срабатывает ровно один раз.
+            const userSnooze = smartSnooze[user.telegramId!];
+            if (userSnooze) {
+              for (const meal of Object.keys(userSnooze)) {
+                if (loggedMealsToday.has(meal)) {
+                  clearSmartSnooze(user.telegramId!, meal);
+                  continue;
+                }
+                const until = userSnooze[meal];
+                if (new Date(until).getTime() <= tickNow.getTime()) {
+                  clearSmartSnooze(user.telegramId!, meal); // touch/delete ДО отправки
+                  const t = typical[meal as 'breakfast' | 'lunch' | 'dinner'];
+                  if (t && await storage.claimNotificationSend(user.id, smartSnoozeClaimKind(meal, until), todayKey)) {
+                    sendDetached(`smart snooze user=${user.id}`, () => sendSmartReminder(user, meal, t.medianMinutes));
+                  }
                 }
               }
             }
-          }
 
-          // 2) Свежий пинг: первый подходящий приём в окне (claim — раз в день).
-          const due = dueSmartReminder(typical, loggedMealsToday, nowMinutes);
-          if (due) {
-            const t = typical[due]!;
-            if (await storage.claimNotificationSend(user.id, `smart_${due}`, todayKey)) {
-              await sendSmartReminder(user, due, t.medianMinutes);
-            }
-          }
-        } catch (e) {
-          console.error(`Smart reminder check failed for user ${user.id}:`, describeError(e));
-        }
-      }
-
-      // No-log reminder: fires if user set noLogReminderTime and has no food entries today
-      if (user.noLogReminderTime && user.noLogReminderTime !== 'off' && user.noLogReminderTime === currentTime) {
-        if (await storage.claimNotificationSend(user.id, 'nolog', todayKey)) {
-          try {
-            const todayStats = await storage.getDailyStats(user.id, userNow);
-            if (todayStats.calories === 0) {
-              bot.sendMessage(user.telegramId!, `⚠️ Ты ещё ничего не записал сегодня. Не забудь залогировать еду!`);
+            // 2) Свежий пинг: первый подходящий приём в окне (claim — раз в день).
+            const due = dueSmartReminder(typical, loggedMealsToday, nowMinutes);
+            if (due) {
+              const t = typical[due]!;
+              if (await storage.claimNotificationSend(user.id, `smart_${due}`, todayKey)) {
+                sendDetached(`smart reminder user=${user.id}`, () => sendSmartReminder(user, due, t.medianMinutes));
+              }
             }
           } catch (e) {
-            console.error(`Failed to send no-log reminder to user ${user.id}:`, describeError(e));
+            console.error(`Smart reminder check failed for user ${user.id}:`, describeError(e));
           }
         }
-      }
 
-      // Weight reminder: fires on matching time + allowed day of week
-      if (user.weightReminderTime && user.weightReminderTime !== 'off' && user.weightReminderTime === currentTime) {
-        const todayDow = userNow.getDay(); // 0=Sun,1=Mon,...,6=Sat
-        const allowedDays = user.weightReminderDays
-          ? user.weightReminderDays.split(',').filter(Boolean).map(Number)
-          : [];
-        const dayOk = allowedDays.length === 0 || allowedDays.includes(todayDow);
-        if (dayOk) {
-          if (await storage.claimNotificationSend(user.id, 'weight', todayKey)) {
-            try {
-              bot.sendMessage(user.telegramId!, `⚖️ Время взвеситься! Запишите вес: /weight 75.0`);
-            } catch (e) {
-              console.error(`Failed to send weight reminder to user ${user.id}:`, describeError(e));
-            }
+        // No-log reminder: fires if user set noLogReminderTime and has no food entries today
+        if (isScheduledDue(user.noLogReminderTime, nowMinutes)) {
+          if (await storage.claimNotificationSend(user.id, 'nolog', todayKey)) {
+            sendDetached(`nolog reminder user=${user.id}`, async () => {
+              const todayStats = await storage.getDailyStats(user.id, userNow);
+              if (todayStats.calories === 0) {
+                await bot.sendMessage(user.telegramId!, `⚠️ Ты ещё ничего не записал сегодня. Не забудь залогировать еду!`);
+              }
+            });
           }
         }
+
+        // Weight reminder: fires on due time + allowed day of week
+        if (isScheduledDue(user.weightReminderTime, nowMinutes)) {
+          const todayDow = userNow.getDay(); // 0=Sun,1=Mon,...,6=Sat
+          const allowedDays = user.weightReminderDays
+            ? user.weightReminderDays.split(',').filter(Boolean).map(Number)
+            : [];
+          const dayOk = allowedDays.length === 0 || allowedDays.includes(todayDow);
+          if (dayOk && await storage.claimNotificationSend(user.id, 'weight', todayKey)) {
+            sendDetached(`weight reminder user=${user.id}`, () =>
+              bot.sendMessage(user.telegramId!, `⚖️ Время взвеситься! Запишите вес: /weight 75.0`));
+          }
+        }
+      } catch (e) {
+        console.error(`Scheduled check failed for user ${user.id}:`, describeError(e));
       }
     }
 
@@ -1798,8 +1826,13 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
   }
 
   // Тик без общего try/catch ронял процесс, если база недоступна
-  // (getAllApprovedUsers бросал вне циклов с локальными catch).
-  const scheduledTick = safeHandler("checkScheduledNotifications", checkScheduledNotifications);
+  // (getAllApprovedUsers бросал вне циклов с локальными catch). Поверх —
+  // защита от наложения: если прошлый тик ещё идёт (медленная БД), новый
+  // пропускается; пропущенное догонит следующий тик через окно догона.
+  const scheduledTick = createNonOverlapping(
+    safeHandler("checkScheduledNotifications", checkScheduledNotifications),
+    () => console.warn("checkScheduledNotifications: previous tick still running, skipped"),
+  );
   setTimeout(() => { void scheduledTick(); }, 5000);
   setInterval(() => { void scheduledTick(); }, 60000);
 
@@ -2477,7 +2510,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       };
       bot.answerCallbackQuery(query.id);
       const promptMsg = await bot.sendMessage(chatId, `Введите ${labels[field]}:`);
-      userStates[telegramId] = { step: 'edit_field_input', data: { field, messageId: query.message?.message_id, promptMessageId: promptMsg.message_id } };
+      userStates[telegramId] = { at: Date.now(), step: 'edit_field_input', data: { field, messageId: query.message?.message_id, promptMessageId: promptMsg.message_id } };
 
     } else if (query.data === "save_all") {
       const items = pendingMulti[telegramId];
@@ -2566,6 +2599,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       bot.answerCallbackQuery(query.id);
       const promptMsg = await bot.sendMessage(chatId, `Введите ${fieldLabels[field] ?? field}:`);
       userStates[telegramId] = {
+        at: Date.now(),
         step: 'mi_edit_field_input',
         data: { field, idx, messageId: query.message?.message_id, promptMessageId: promptMsg.message_id }
       };
@@ -2682,6 +2716,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       bot.answerCallbackQuery(query.id);
       const promptMsg = await bot.sendMessage(chatId, `Введите ${labels[field]}:`);
       userStates[telegramId] = {
+        at: Date.now(),
         step: 'history_field_input',
         data: { field, logId, messageId: query.message?.message_id, promptMessageId: promptMsg.message_id },
       };
@@ -2862,14 +2897,14 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     } else if (query.data.startsWith("rmcustom_")) {
       const target = query.data.replace("rmcustom_", "");
       if (target === 'nolog') {
-        userStates[telegramId] = { step: 'nolog_reminder_time', data: { settingsMsgId: settingsMessageIds.get(telegramId) } };
+        userStates[telegramId] = { at: Date.now(), step: 'nolog_reminder_time', data: { settingsMsgId: settingsMessageIds.get(telegramId) } };
         bot.editMessageText(`Введите время в формате ЧЧ:ММ\nНапример: 13:30`, {
           chat_id: chatId,
           message_id: query.message?.message_id
         });
       } else {
         const meal = target as 'breakfast' | 'lunch' | 'dinner';
-        userStates[telegramId] = { step: 'reminder_time', data: { reminderMeal: meal, settingsMsgId: settingsMessageIds.get(telegramId) } };
+        userStates[telegramId] = { at: Date.now(), step: 'reminder_time', data: { reminderMeal: meal, settingsMsgId: settingsMessageIds.get(telegramId) } };
         bot.editMessageText(`Введите время для напоминания "${MEAL_LABELS[meal]}" в формате ЧЧ:ММ\nНапример: 07:30`, {
           chat_id: chatId,
           message_id: query.message?.message_id
@@ -2897,7 +2932,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       await refreshSettingsMessage(chatId, telegramId);
     } else if (query.data.startsWith("set_gender_")) {
       const gender = query.data.split("_")[2];
-      userStates[telegramId] = { step: 'age', data: { gender } };
+      userStates[telegramId] = { at: Date.now(), step: 'age', data: { gender } };
       bot.editMessageText("Ваш возраст (полных лет):", { chat_id: chatId, message_id: query.message?.message_id });
     } else if (query.data.startsWith("set_activity_")) {
       const activity = query.data.split("_")[2];
@@ -2905,6 +2940,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       if (state) {
         state.data.activityLevel = activity;
         state.step = 'goal';
+        state.at = Date.now(); // шаг продвинулся — TTL отсчитываем заново
         // touch: вложенные мутации не триггерят персист — переприсваиваем верхний ключ
         userStates[telegramId] = state;
         bot.editMessageText("Ваша цель:", {
@@ -3044,7 +3080,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     } else if (query.data.startsWith('wrem_t_')) {
       const val = query.data.replace('wrem_t_', '');
       if (val === 'custom') {
-        userStates[telegramId] = { step: 'weight_reminder_time', data: { settingsMsgId: settingsMessageIds.get(telegramId) } };
+        userStates[telegramId] = { at: Date.now(), step: 'weight_reminder_time', data: { settingsMsgId: settingsMessageIds.get(telegramId) } };
         bot.editMessageText('Введите время в формате ЧЧ:ММ, например: 07:30', {
           chat_id: chatId, message_id: query.message?.message_id
         });
@@ -3089,19 +3125,19 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       const field = query.data.replace('ep_', '');
 
       if (field === 'age') {
-        userStates[telegramId] = { step: 'ep_age', data: {} };
+        userStates[telegramId] = { at: Date.now(), step: 'ep_age', data: {} };
         bot.editMessageText('Введите ваш возраст (лет):', { chat_id: chatId, message_id: query.message?.message_id });
 
       } else if (field === 'weight') {
-        userStates[telegramId] = { step: 'ep_weight', data: {} };
+        userStates[telegramId] = { at: Date.now(), step: 'ep_weight', data: {} };
         bot.editMessageText('Введите ваш текущий вес (кг), например: 74.5', { chat_id: chatId, message_id: query.message?.message_id });
 
       } else if (field === 'height') {
-        userStates[telegramId] = { step: 'ep_height', data: {} };
+        userStates[telegramId] = { at: Date.now(), step: 'ep_height', data: {} };
         bot.editMessageText('Введите ваш рост (см), например: 178', { chat_id: chatId, message_id: query.message?.message_id });
 
       } else if (field === 'calories') {
-        userStates[telegramId] = { step: 'ep_calories', data: {} };
+        userStates[telegramId] = { at: Date.now(), step: 'ep_calories', data: {} };
         bot.editMessageText(`Текущая норма: ${user.caloriesGoal ?? 'не задана'} ккал\n\nВведите новую норму калорий (ккал):`, { chat_id: chatId, message_id: query.message?.message_id });
 
       } else if (field === 'recalc') {
@@ -3584,7 +3620,17 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     const telegramId = msg.from?.id.toString();
 
     if (!telegramId) return;
-    if (msg.text?.startsWith('/')) return; // Ignore commands
+
+    // Выход из диалогового шага (lib/dialog-state.ts). Синхронно, до первого
+    // await: событие `message` эмитится раньше onText, поэтому команда видит
+    // уже сброшенный шаг и может завести свой (/profile). /cancel сбрасывает
+    // шаг сам, чтобы ответить «отменено».
+    const dialogDecision = decideDialogInput(userStates[telegramId], msg, Date.now());
+    if (dialogDecision === 'reset_command' || dialogDecision === 'reset_expired' || dialogDecision === 'reset_non_text') {
+      delete userStates[telegramId];
+    }
+
+    if (msg.text?.startsWith('/')) return; // Commands are handled by onText
 
     // Check if user exists at all (before isUserAllowed to give better onboarding message)
     const rawUser = await storage.getUserByTelegramId(telegramId);
@@ -3612,7 +3658,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
         }
         const val = parseFloat((msg.text || '').replace(',', '.'));
         if (isNaN(val) || val < 0) {
-          bot.sendMessage(chatId, "❌ Введите положительное число.");
+          bot.sendMessage(chatId, `❌ Введите положительное число.\n${CANCEL_HINT}`);
           return;
         }
         const field = state.data.field as string;
@@ -3668,7 +3714,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
 
         const val = parseFloat((msg.text || '').replace(',', '.'));
         if (isNaN(val) || val < 0) {
-          bot.sendMessage(chatId, "❌ Введите положительное число.");
+          bot.sendMessage(chatId, `❌ Введите положительное число.\n${CANCEL_HINT}`);
           return;
         }
 
@@ -3733,7 +3779,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
         }
         const val = parseFloat((msg.text || '').replace(',', '.'));
         if (isNaN(val) || val < 0) {
-          bot.sendMessage(chatId, "❌ Введите положительное число.");
+          bot.sendMessage(chatId, `❌ Введите положительное число.\n${CANCEL_HINT}`);
           return;
         }
         const field = state.data.field as string;
@@ -3796,7 +3842,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
             return;
           }
         }
-        bot.sendMessage(chatId, "Неверный формат. Введите время в формате ЧЧ:ММ, например: 07:30");
+        bot.sendMessage(chatId, `Неверный формат. Введите время в формате ЧЧ:ММ, например: 07:30\n${CANCEL_HINT}`);
         return;
       }
 
@@ -3816,7 +3862,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
             return;
           }
         }
-        bot.sendMessage(chatId, "Неверный формат. Введите время в формате ЧЧ:ММ, например: 13:30");
+        bot.sendMessage(chatId, `Неверный формат. Введите время в формате ЧЧ:ММ, например: 13:30\n${CANCEL_HINT}`);
         return;
       }
 
@@ -3836,14 +3882,14 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
             return;
           }
         }
-        bot.sendMessage(chatId, "Неверный формат. Введите время в формате ЧЧ:ММ, например: 08:00");
+        bot.sendMessage(chatId, `Неверный формат. Введите время в формате ЧЧ:ММ, например: 08:00\n${CANCEL_HINT}`);
         return;
       }
 
       if (state.step === 'ep_age') {
         const v = parseInt(msg.text || '');
         if (isNaN(v) || v < 10 || v > 100) {
-          bot.sendMessage(chatId, "Введите корректный возраст (10–100):");
+          bot.sendMessage(chatId, `Введите корректный возраст (10–100):\n${CANCEL_HINT}`);
           return;
         }
         await storage.updateUser(user.id, { age: v });
@@ -3856,7 +3902,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       if (state.step === 'ep_weight') {
         const v = parseFloat((msg.text || '').replace(',', '.'));
         if (isNaN(v) || v < 20 || v > 500) {
-          bot.sendMessage(chatId, "Введите корректный вес (кг), например: 74.5");
+          bot.sendMessage(chatId, `Введите корректный вес (кг), например: 74.5\n${CANCEL_HINT}`);
           return;
         }
         await storage.updateUser(user.id, { weight: Math.round(v) });
@@ -3870,7 +3916,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       if (state.step === 'ep_height') {
         const v = parseInt(msg.text || '');
         if (isNaN(v) || v < 100 || v > 250) {
-          bot.sendMessage(chatId, "Введите корректный рост (100–250 см):");
+          bot.sendMessage(chatId, `Введите корректный рост (100–250 см):\n${CANCEL_HINT}`);
           return;
         }
         await storage.updateUser(user.id, { height: v });
@@ -3883,7 +3929,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       if (state.step === 'ep_calories') {
         const v = parseInt(msg.text || '');
         if (isNaN(v) || v < 500 || v > 10000) {
-          bot.sendMessage(chatId, "Введите корректную норму (500–10000 ккал):");
+          bot.sendMessage(chatId, `Введите корректную норму (500–10000 ккал):\n${CANCEL_HINT}`);
           return;
         }
         const ratio = user.caloriesGoal && user.caloriesGoal > 0 ? v / user.caloriesGoal : 1;
@@ -3901,11 +3947,12 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       const val = parseInt(msg.text || "");
       if (state.step === 'age') {
         if (isNaN(val) || val < 10 || val > 100) {
-          bot.sendMessage(chatId, "Введите корректный возраст (число от 10 до 100):");
+          bot.sendMessage(chatId, `Введите корректный возраст (число от 10 до 100):\n${CANCEL_HINT}`);
           return;
         }
         state.data.age = val;
         state.step = 'weight';
+        state.at = Date.now(); // шаг продвинулся — TTL отсчитываем заново
         // touch: вложенные мутации не триггерят персист — переприсваиваем верхний ключ
         userStates[telegramId] = state;
         bot.sendMessage(chatId, "Ваш текущий вес (кг):");
@@ -3913,11 +3960,12 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       }
       if (state.step === 'weight') {
         if (isNaN(val) || val < 30 || val > 250) {
-          bot.sendMessage(chatId, "Введите корректный вес (число от 30 до 250):");
+          bot.sendMessage(chatId, `Введите корректный вес (число от 30 до 250):\n${CANCEL_HINT}`);
           return;
         }
         state.data.weight = val;
         state.step = 'height';
+        state.at = Date.now(); // шаг продвинулся — TTL отсчитываем заново
         // touch: вложенные мутации не триггерят персист — переприсваиваем верхний ключ
         userStates[telegramId] = state;
         bot.sendMessage(chatId, "Ваш рост (см):");
@@ -3925,11 +3973,12 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       }
       if (state.step === 'height') {
         if (isNaN(val) || val < 100 || val > 250) {
-          bot.sendMessage(chatId, "Введите корректный рост (число от 100 до 250):");
+          bot.sendMessage(chatId, `Введите корректный рост (число от 100 до 250):\n${CANCEL_HINT}`);
           return;
         }
         state.data.height = val;
         state.step = 'activity';
+        state.at = Date.now(); // шаг продвинулся — TTL отсчитываем заново
         // touch: вложенные мутации не триггерят персист — переприсваиваем верхний ключ
         userStates[telegramId] = state;
         bot.sendMessage(chatId, "Ваш уровень активности:", {

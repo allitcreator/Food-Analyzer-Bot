@@ -1,6 +1,8 @@
 /**
- * Typed wrapper around the official Telegram WebApp SDK
- * (loaded via <script src="https://telegram.org/js/telegram-web-app.js">).
+ * Typed wrapper around the official Telegram WebApp SDK. The SDK is self-hosted
+ * (client/public/telegram-web-app.js → <script src="/app/telegram-web-app.js">,
+ * refreshed from telegram.org at build time) because the CSP allows only
+ * script-src 'self'.
  *
  * No npm dependency — we only describe the subset of the API we use and read it
  * off `window.Telegram.WebApp` at runtime, degrading gracefully outside Telegram
@@ -57,6 +59,9 @@ export interface TelegramWebApp {
   HapticFeedback: HapticFeedback;
   onEvent(event: string, cb: () => void): void;
   offEvent(event: string, cb: () => void): void;
+  isVersionAtLeast?(version: string): boolean;
+  /** Bot API 7.7+: запрещает закрывать Mini App вертикальным свайпом. */
+  disableVerticalSwipes?(): void;
   setHeaderColor?(color: string): void;
   setBackgroundColor?(color: string): void;
 }
@@ -86,6 +91,12 @@ export function initTelegram() {
     wa.expand();
   } catch {
     /* older clients */
+  }
+  // На iOS свайп вниз по длинному списку иначе закрывает Mini App.
+  try {
+    if (wa.isVersionAtLeast?.("7.7")) wa.disableVerticalSwipes?.();
+  } catch {
+    /* unsupported */
   }
 }
 

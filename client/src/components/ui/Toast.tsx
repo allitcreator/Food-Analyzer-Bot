@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { hapticNotification } from "@/lib/telegram";
+import { describeError } from "@/lib/errors";
 
 /**
  * Minimal, dependency-free toast: call `toast("...")` from anywhere and mount
@@ -15,6 +17,12 @@ let counter = 0;
 export function toast(message: string) {
   const item: ToastItem = { id: ++counter, message };
   listeners.forEach((l) => l(item));
+}
+
+/** Ошибка мутации: haptic error + тост с понятной причиной. */
+export function toastError(err: unknown, fallback: string) {
+  hapticNotification("error");
+  toast(describeError(err, fallback));
 }
 
 export function Toaster() {

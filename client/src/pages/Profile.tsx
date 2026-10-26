@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/Button";
 import { Input, Field, Select } from "@/components/ui/Input";
 import { Switch } from "@/components/ui/Switch";
 import { ErrorScreen } from "@/components/StateScreens";
+import { toastError } from "@/components/ui/Toast";
 
 const TIMEZONES = [
   "Europe/Kaliningrad",
@@ -66,7 +67,9 @@ export default function Profile() {
         ) : (
           <>
             <ProfileSection user={me.data} onSaved={applyUser} />
-            <GoalsSection user={me.data} onSaved={applyUser} />
+            {/* key: после «Пересчитать нормы» форма целей пересоздаётся с новыми
+                числами, иначе «Сохранить цели» перезапишет их старыми. */}
+            <GoalsSection key={goalsKey(me.data)} user={me.data} onSaved={applyUser} />
             <SettingsSection user={me.data} onSaved={applyUser} />
             <GlossarySection />
           </>
@@ -74,6 +77,11 @@ export default function Profile() {
       </div>
     </div>
   );
+}
+
+function goalsKey(u: MeResponse): string {
+  const g = u.goals;
+  return [g.calories, g.protein, g.fat, g.carbs].join("/");
 }
 
 function SectionTitle({ children }: { children: ReactNode }) {
@@ -102,6 +110,7 @@ function ProfileSection({
       hapticNotification("success");
       onSaved(u);
     },
+    onError: (err) => toastError(err, "Не удалось сохранить профиль"),
   });
 
   const fields = (): ProfilePatchBody => ({
@@ -194,6 +203,7 @@ function GoalsSection({
       hapticNotification("success");
       onSaved(u);
     },
+    onError: (err) => toastError(err, "Не удалось сохранить цели"),
   });
 
   const save = () => {
@@ -245,6 +255,9 @@ function SettingsSection({
   const mutation = useMutation({
     mutationFn: (body: SettingsPatchBody) => api.updateSettings(body),
     onSuccess: (u) => onSaved(u),
+    // Тумблеры и поля управляются из кэша ["me"], так что при ошибке они сами
+    // остаются в прежнем положении — пользователю нужно только объяснить почему.
+    onError: (err) => toastError(err, "Не удалось сохранить настройку"),
   });
   const patch = (body: SettingsPatchBody) => mutation.mutate(body);
 
@@ -449,7 +462,11 @@ function TimeRow({
           type="time"
           value={timeValue || "09:00"}
           disabled={isOff}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => {
+            // Очистка поля (крестик в iOS/Android) даёт "" — сервер такое не примет.
+            if (e.target.value) onChange(e.target.value);
+          }}
+          aria-label={label}
           className="h-9 rounded-lg border border-input bg-background px-2 text-sm outline-none disabled:opacity-40"
         />
         {allowOff && (
@@ -482,6 +499,8 @@ function WeekdayRow({ value, onChange }: { value: string; onChange: (v: string) 
           return (
             <button
               key={w.v}
+              type="button"
+              aria-pressed={active}
               onClick={() => toggle(w.v)}
               className={`h-9 flex-1 rounded-lg text-xs font-medium ${
                 active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"

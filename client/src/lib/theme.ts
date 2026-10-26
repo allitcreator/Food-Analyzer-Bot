@@ -7,6 +7,7 @@
  * them in `hsl(var(--x) / <alpha>)`, so we convert Telegram's hex colors here.
  */
 import { tg, type TelegramThemeParams } from "./telegram";
+import { computeThemeColors } from "./theme-colors";
 
 /** "#rrggbb" → "H S% L%" triple, or null if unparseable. */
 function hexToHslTriple(hex: string): string | null {
@@ -56,26 +57,34 @@ function applyOnce() {
     if (triple) root.style.setProperty(name, triple);
   };
 
-  set("--background", tp.bg_color);
-  set("--foreground", tp.text_color);
-  set("--card", tp.secondary_bg_color ?? tp.bg_color);
-  set("--card-foreground", tp.text_color);
-  set("--popover", tp.secondary_bg_color ?? tp.bg_color);
-  set("--popover-foreground", tp.text_color);
-  set("--secondary", tp.secondary_bg_color);
-  set("--secondary-foreground", tp.text_color);
-  set("--muted", tp.secondary_bg_color);
-  set("--muted-foreground", tp.hint_color ?? tp.subtitle_text_color);
-  set("--primary", tp.button_color);
-  set("--primary-foreground", tp.button_text_color);
-  set("--accent", tp.button_color);
-  set("--accent-foreground", tp.button_text_color);
-  set("--ring", tp.button_color);
-  set("--destructive", tp.destructive_text_color);
+  // Раскладка цветов — в чистой computeThemeColors (покрыта тестом).
+  const c = computeThemeColors(tp);
+  set("--background", c.background);
+  set("--foreground", c.foreground);
+  set("--card", c.card);
+  set("--card-foreground", c.foreground);
+  set("--popover", c.card);
+  set("--popover-foreground", c.foreground);
+  set("--secondary", c.secondary);
+  set("--secondary-foreground", c.foreground);
+  set("--muted", c.muted);
+  set("--muted-foreground", c.mutedForeground);
+  set("--border", c.border);
+  set("--card-border", c.border);
+  set("--popover-border", c.border);
+  set("--input", c.border);
+  set("--primary", c.primary);
+  set("--primary-foreground", c.primaryForeground);
+  set("--accent", c.primary);
+  set("--accent-foreground", c.primaryForeground);
+  set("--ring", c.primary);
+  set("--destructive", c.destructive);
 
+  // Шапка и фон WebView — в цвет страницы, иначе на iOS видна полоса другого тона.
+  const pageColor = c.background ?? "#000000";
   try {
-    wa?.setHeaderColor?.(tp.bg_color ?? "#000000");
-    wa?.setBackgroundColor?.(tp.bg_color ?? "#000000");
+    wa?.setHeaderColor?.(pageColor);
+    wa?.setBackgroundColor?.(pageColor);
   } catch {
     /* unsupported on older clients */
   }
