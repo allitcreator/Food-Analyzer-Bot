@@ -7,7 +7,7 @@ Telegram-бот для отслеживания питания с ИИ-анал�
 ### 🤖 Распознавание еды
 - **Текст** — напишите что съели, ИИ рассчитает КБЖУ
 - **Фото** — сфотографируйте блюдо или упаковку, ИИ распознаёт визуально
-- **Голос** — надиктуйте голосовое сообщение (Gemini 2.0 Flash)
+- **Голос** — надиктуйте голосовое сообщение
 - **Штрихкод** — сфотографируйте штрихкод → поиск в Open Food Facts → GPT-анализ
 - **Несколько блюд** — одно сообщение может содержать несколько позиций, каждую можно отредактировать отдельно
 
@@ -68,14 +68,13 @@ Telegram-бот для отслеживания питания с ИИ-анал�
 | Компонент | Технология |
 |-----------|------------|
 | Bot | node-telegram-bot-api |
-| ИИ (текст/фото) | OpenRouter → openai/gpt-4o, openai/gpt-4o-mini |
-| ИИ (голос) | OpenRouter → google/gemini-2.0-flash |
+| ИИ | OpenRouter, модели по ролям задаются в env (см. ниже) |
 | База данных | PostgreSQL + Drizzle ORM |
 | PDF | pdfkit + dejavu-fonts-ttf |
 | Excel | exceljs |
 | Штрихкоды | Open Food Facts API |
 | Backend | Express + TypeScript |
-| Frontend | React + Vite + Tailwind + shadcn/ui |
+| Mini App | React + Vite + Tailwind |
 
 ## Переменные окружения
 
@@ -83,7 +82,6 @@ Telegram-бот для отслеживания питания с ИИ-анал�
 TELEGRAM_BOT_TOKEN=      # Токен от @BotFather (обязательно)
 OPENROUTER_API_KEY=      # Ключ OpenRouter — все AI запросы (обязательно)
 DATABASE_URL=            # PostgreSQL строка подключения (обязательно)
-SESSION_SECRET=          # Секрет сессий Express (обязательно)
 WEBHOOK_URL=             # HTTPS URL сервера для webhook (напр. https://example.com)
 WEBHOOK_SECRET=          # Секрет webhook-эндпоинта
 ADMIN_TELEGRAM_ID=       # Telegram ID администратора (опционально)
@@ -100,13 +98,53 @@ docker compose up -d --build
 
 Подробная инструкция по деплою на VPS — см. [DEPLOY.md](DEPLOY.md).
 
+## Mini App
+
+Дашборд внутри Telegram: дневник за сегодня, история, тренды, избранное,
+профиль. Раздаётся тем же сервером по `/app/` (сборка Vite в `dist/public`),
+в Telegram открывается кнопкой меню бота (Web App URL в BotFather —
+`https://<домен>/app/`). API — `/api/app/*`; запросы авторизуются подписанным
+`initData` Telegram в заголовке `Authorization: tma <initData>`, сервер
+проверяет подпись токеном бота и свежесть `auth_date`.
+
+## Быстрая запись с iPhone
+
+Команда `/quick` выдаёт личный токен и шорткат iOS: еду можно записать текстом
+или фото с домашнего экрана, не открывая Telegram (`POST /api/quick`).
+Подробности — [QUICK-ENTRY.md](QUICK-ENTRY.md).
+
+## Модели ИИ и лимиты
+
+- Модели по ролям (фото, штрихкод, текст, чат, голос), запасные модели и
+  уровень reasoning задаются переменными `AI_MODEL_*`, `AI_FALLBACK_*`,
+  `AI_REASONING_EFFORT`. Без них используются значения по умолчанию из
+  `server/lib/ai-models.ts`. Список — в [DEPLOY.md](DEPLOY.md), шаг 2.
+- Дневные лимиты AI в боте на пользователя: `AI_DAILY_LIMIT` (150),
+  `AI_DAILY_PHOTO_LIMIT` (40), длина голосового — `VOICE_MAX_SECONDS` (300).
+  Mini App и `/api/quick` ограничены отдельно, rate-limit на пользователя.
+- Перед сменой модели прогоните eval: [eval/README.md](eval/README.md).
+
+## Бэкапы
+
+Ежедневный `pg_dump` по cron скриптом `scripts/backup-db.sh`, восстановление —
+см. [DEPLOY.md](DEPLOY.md), раздел «Бэкапы БД».
+
 ## Локальная разработка
 
 ```bash
 npm install
-npm run db:push   # применить схему к базе
+npx drizzle-kit migrate   # применить миграции из migrations/
 npm run dev
 ```
+
+Схема БД версионируется: после правки `shared/schema.ts` —
+`npx drizzle-kit generate` (новый файл в `migrations/`), затем
+`npx drizzle-kit migrate`. В Docker миграции применяет `docker-entrypoint.sh`
+при старте. Подробнее — [DEPLOY.md](DEPLOY.md), раздел «Миграции БД».
+
+Проверки: `npm run check` (tsc), `npm test`, `npm run build`.
+SDK Telegram WebApp лежит в репозитории (`client/public/telegram-web-app.js`),
+сборка его не скачивает; обновить — `npm run update:tg-sdk`.
 
 ## Команды бота
 

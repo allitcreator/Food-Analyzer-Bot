@@ -1,6 +1,6 @@
 # Контекст сборки: Dockerfile делает `COPY . .`, поэтому всё лишнее и
 # секретное отрезаем здесь. Сборке нужны package*.json, client/, server/,
-# shared/, script/, migrations/, shortcuts/, конфиги в корне
+# shared/, scripts/build.ts, migrations/, shortcuts/, конфиги в корне
 # (vite, tailwind, postcss, tsconfig, drizzle) и docker-entrypoint.sh.
 
 # Секреты
@@ -13,7 +13,6 @@
 .github
 .claude
 .codex
-.replit
 .DS_Store
 **/.DS_Store
 
@@ -28,7 +27,9 @@ knowledge-base
 *.tar.gz
 docs
 tests
-scripts
+# Из scripts/ сборке нужен только build.ts (npm run build)
+scripts/*
+!scripts/build.ts
 # eval: личные фото, голосовые и результаты прогонов моделей
 eval
 **/*.md

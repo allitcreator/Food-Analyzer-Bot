@@ -7,7 +7,7 @@
  *
  * zxing-wasm is ESM-only while the server is bundled to CJS by esbuild, so the
  * import MUST stay dynamic (`await import(...)`) and the package MUST remain
- * external (do NOT add it to the allowlist in script/build.ts).
+ * external (do NOT add it to the allowlist in scripts/build.ts).
  */
 
 import { describeError } from "./lib/safe-log";

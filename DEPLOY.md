@@ -58,8 +58,6 @@ POSTGRES_USER=bot
 POSTGRES_PASSWORD=<придумать пароль>
 POSTGRES_DB=foodbot
 
-SESSION_SECRET=<openssl rand -hex 32>
-
 WEBHOOK_URL=https://alxforbot.online
 WEBHOOK_SECRET=<openssl rand -hex 32>
 
@@ -104,9 +102,8 @@ TZ=Europe/Moscow
 `docker compose up -d bot` (пересборка не нужна). Перед сменой модели
 прогоните eval (`eval/README.md`).
 
-Сгенерировать секреты:
+Сгенерировать секрет:
 ```bash
-openssl rand -hex 32   # SESSION_SECRET
 openssl rand -hex 32   # WEBHOOK_SECRET
 ```
 
@@ -187,6 +184,39 @@ curl -sI https://alxforbot.online/app/ | grep -iE 'content-security|nosniff|refe
 Открыть Mini App в Telegram iOS/Android, Desktop и web.telegram.org: экран
 грузится, нет ошибок CSP (в web — DevTools → Console), работают графики и
 фото еды.
+
+---
+
+## Миграции БД
+
+Контейнер при каждом старте выполняет `drizzle-kit migrate`: применяет из
+`migrations/meta/_journal.json` записи, которых ещё нет в
+`drizzle.__drizzle_migrations`. Уже применённые `.sql` и записи журнала не
+меняйте: migrate сверяет их по хэшу и дате.
+
+Новая миграция:
+
+1. Меняем `shared/schema.ts`.
+2. `DATABASE_URL=postgres://x@localhost/x npx drizzle-kit generate --name <что_меняем>`
+   (база для generate не нужна, переменную требует только конфиг). Появятся
+   `migrations/NNNN_<имя>.sql`, `migrations/meta/NNNN_snapshot.json` и запись
+   в `_journal.json`.
+3. Проверяем SQL. `scripts/migtest.sh` прогоняет цепочку дважды, поэтому
+   операторы делаем идемпотентными: `CREATE TABLE IF NOT EXISTS`,
+   `ADD COLUMN IF NOT EXISTS`, ограничения в `DO $$ ... IF NOT EXISTS (SELECT 1
+   FROM pg_constraint ...)` — как в 0004–0007. Править можно только `.sql`;
+   снапшот не трогаем, он описывает итоговую схему.
+4. Повторный `generate` должен ответить `No schema changes`, `npx drizzle-kit
+   check` — `Everything's fine`. Коммитим `.sql`, снапшот и `_journal.json`
+   вместе.
+
+Писать миграцию целиком руками, без `generate`, не нужно: без снапшота
+следующий `generate` сравнит схему со старым снапшотом и повторит уже
+применённые `CREATE TABLE`/`ADD COLUMN`, и миграция упадёт на старте
+контейнера. Так было с 0005–0007; их снапшоты восстановлены задним числом.
+Если миграция без изменения схемы всё же нужна (перенос данных), создавайте её
+через `npx drizzle-kit generate --custom --name <имя>`: drizzle-kit сам
+запишет снапшот и журнал.
 
 ---
 

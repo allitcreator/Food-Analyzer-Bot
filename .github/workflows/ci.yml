@@ -47,9 +47,17 @@ jobs:
       - name: Apply database migrations
         run: npx drizzle-kit migrate
 
+      - name: Typecheck
+        run: npm run check
+
       - name: Run unit tests (no DB required)
         run: npm test
 
-      # TODO: add `npm run check` (tsc) once the 14 known pre-existing
-      # type errors in server/bot.ts (downlevelIteration / implicit-any)
-      # are fixed. Skipped for now to keep CI green.
+      - name: Build
+        run: npm run build
+
+      # Уязвимости в production-зависимостях. Не блокирует CI (многие
+      # находки транзитивные и без фикса), но видна в логе и аннотациях.
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true

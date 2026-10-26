@@ -79,13 +79,14 @@
 - [x] Mini App: цели не обновляются после «Пересчитать нормы»; ошибки сохранения в Профиле молчат; Тренды — вечный скелетон при ошибке; «сегодня» в Истории по часам телефона; цвета темы Telegram сливают карточку и кнопки; `disableVerticalSwipes()`.
 
 ### 5. Сопровождение
-- [ ] `migrations/meta`: нет снапшотов 0005–0007, `drizzle-kit generate` сломает цепочку.
+- [x] `migrations/meta`: нет снапшотов 0005–0007, `drizzle-kit generate` сломает цепочку.
 - [x] Healthcheck контейнера бота, `SELECT 1` в `/api/health` (`e727a09`).
 - [ ] Внешний uptime-пинг.
 - [ ] Суточный потолок для `/api/app/analyze` (сейчас только 10/мин).
 - [ ] nginx для `/app/` дублирует `nosniff`, `Referrer-Policy` и шлёт свой CSP с `frame-ancestors` — убрать после проверки Mini App в Telegram.
-- [ ] CI: `npm run check` и `npm run build`; сборка не должна перекачивать `client/public/telegram-web-app.js`.
-- [ ] Удалить ~40 неиспользуемых зависимостей, `replit.md`, `DEPLOY_GUIDE.md`; README — Mini App, `/quick`, без `SESSION_SECRET`.
+- [x] CI: `npm run check` и `npm run build`; сборка не должна перекачивать `client/public/telegram-web-app.js`.
+- [x] Удалить ~40 неиспользуемых зависимостей, `replit.md`, `DEPLOY_GUIDE.md`; README — Mini App, `/quick`, без `SESSION_SECRET`.
+- [ ] `npm audit --omit=dev`: 3 critical, 14 high (proxy-addr, body-parser, path-to-regexp, drizzle-orm <0.45.2, request у node-telegram-bot-api, zod <4.6.6 — мажор).
 - [ ] Тесты на роуты `app-api.ts`, `storage.ts` и хендлеры бота перед дроблением `bot.ts`.
 
 ### 6. Функции (по конкурентам)
