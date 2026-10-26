@@ -139,3 +139,38 @@ curl -s "https://api.telegram.org/bot<TOKEN>/getWebhookInfo"
 # Подключиться к БД
 docker compose exec db psql -U bot -d foodbot
 ```
+
+---
+
+## Бэкапы БД
+
+Скрипт `scripts/backup-db.sh` делает `pg_dump` из контейнера `db` в
+`~/foodbot/backups/foodbot-YYYYMMDD-HHMM.sql.gz` (каталог 700, файлы 600) и
+удаляет дампы старше 14 дней (`KEEP_DAYS`). Пользователь и имя БД берёт из
+`POSTGRES_USER` / `POSTGRES_DB` в `.env`, а если их там нет — из контейнера.
+
+Установить cron (`crontab -e` под root):
+```cron
+20 4 * * * /root/foodbot/scripts/backup-db.sh >> /var/log/foodbot-backup.log 2>&1
+```
+
+Проверить вручную:
+```bash
+~/foodbot/scripts/backup-db.sh
+ls -lh ~/foodbot/backups/
+tail /var/log/foodbot-backup.log
+```
+
+Восстановить (только в пустую БД):
+```bash
+cd ~/foodbot
+docker compose stop bot
+docker compose exec -T db dropdb -U bot foodbot
+docker compose exec -T db createdb -U bot foodbot
+gunzip -c backups/foodbot-YYYYMMDD-HHMM.sql.gz \
+  | docker compose exec -T db psql -U bot -d foodbot -v ON_ERROR_STOP=1
+docker compose start bot
+```
+
+> **Открытый вопрос:** дампы лежат на том же VPS, копии вне сервера пока нет.
+> Если VPS или его диск пропадут, пропадут и бэкапы.
