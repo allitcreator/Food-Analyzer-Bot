@@ -46,9 +46,9 @@
 
 ### 1. Данные и прод
 - [x] logrotate на vps4: пакета не было вовсе (nginx access.log 59 МБ, error.log 29 МБ). Поставлен 2026-10-26, `logrotate.timer` включён.
-- [ ] Ежедневный дамп БД (`scripts/backup-db.sh` + cron). Сейчас бэкапа foodbot нет совсем.
+- [x] Ежедневный дамп БД: `scripts/backup-db.sh`, cron 04:20 на vps4, первый дамп 2026-10-26 проверен (10 таблиц с данными).
 - [ ] Копия дампов вне VPS — куда, решает владелец.
-- [ ] nginx: `access_log off` для `location = /api/quick` (подпись к фото едет в query), вырезать уже попавшие строки из access.log.
+- [x] nginx: `access_log off` для `location = /api/quick`, 9 строк с подписями вырезаны из access.log (2026-10-26, бэкап конфига `/root/nginx-bots.bak-*`).
 - [ ] Подпись в `/api/quick` перенести из query в заголовок или тело.
 
 ### 2. Устойчивость и безопасность
