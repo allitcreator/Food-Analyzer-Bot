@@ -57,9 +57,9 @@
 - [x] Двойной тап «✅ Да» пишет блюдо дважды (`bot.ts:2296`): снимать pending до первого `await`.
 - [x] `admin_reject_`/`admin_removeadmin_` без защиты главного админа.
 - [x] `/api/app/me` отдаёт `quickToken` и служебные поля: явный список полей.
-- [ ] Дневной лимит AI-вызовов на пользователя и лимит длины голосового.
-- [ ] Кэш штрихкодов из vision пишет правки пользователя в общий кэш.
-- [ ] `.env` в `.gitignore`, `.dockerignore`, `USER node`, runtime без devDependencies, CSP/`nosniff`.
+- [x] Дневной лимит AI-вызовов на пользователя и лимит длины голосового.
+- [x] Кэш штрихкодов из vision пишет правки пользователя в общий кэш.
+- [x] `.env` в `.gitignore`, `.dockerignore`, `USER node`, runtime без devDependencies, CSP/`nosniff`.
 
 ### 3. LLM (дедлайн 2027-01-14)
 `gpt-4o` и `gpt-4o-mini` отключаются 2027-01-14 (OpenAI deprecations, объявлено 2026-10-14), голос сидит на preview `gemini-3-flash-preview`.
@@ -78,7 +78,10 @@
 
 ### 5. Сопровождение
 - [ ] `migrations/meta`: нет снапшотов 0005–0007, `drizzle-kit generate` сломает цепочку.
-- [ ] Healthcheck контейнера бота, `SELECT 1` в `/api/health`, внешний uptime-пинг.
+- [x] Healthcheck контейнера бота, `SELECT 1` в `/api/health` (`e727a09`).
+- [ ] Внешний uptime-пинг.
+- [ ] Суточный потолок для `/api/app/analyze` (сейчас только 10/мин).
+- [ ] nginx для `/app/` дублирует `nosniff`, `Referrer-Policy` и шлёт свой CSP с `frame-ancestors` — убрать после проверки Mini App в Telegram.
 - [ ] CI: `npm run check` и `npm run build`; сборка не должна перекачивать `client/public/telegram-web-app.js`.
 - [ ] Удалить ~40 неиспользуемых зависимостей, `replit.md`, `DEPLOY_GUIDE.md`; README — Mini App, `/quick`, без `SESSION_SECRET`.
 - [ ] Тесты на роуты `app-api.ts`, `storage.ts` и хендлеры бота перед дроблением `bot.ts`.
