@@ -4,6 +4,9 @@ import { storage } from "./storage";
 import { setupBot } from "./bot";
 import { createAppApiRouter } from "./app-api";
 import { createQuickRouter } from "./quick-api";
+import type { QueryConfig } from "pg";
+import { pool } from "./db";
+import { createHealthHandler } from "./lib/health";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -16,9 +19,18 @@ export async function registerRoutes(
   // Start the bot (loads persisted session state before registering handlers)
   await setupBot(storage, app);
 
-  app.get("/api/health", (_req, res) => {
-    res.json({ status: "ok", timestamp: Date.now() });
-  });
+  // Живость процесса и базы: docker HEALTHCHECK и внешний мониторинг.
+  // query_timeout освобождает клиента пула, если Postgres завис (pg его
+  // поддерживает, но в @types/pg поля нет); общий таймаут хендлера покрывает
+  // ещё и ожидание свободного соединения.
+  const healthQuery: QueryConfig & { query_timeout: number } = {
+    text: "SELECT 1",
+    query_timeout: 2000,
+  };
+  app.get(
+    "/api/health",
+    createHealthHandler(() => pool.query(healthQuery), 3000),
+  );
 
   // Telegram Mini App REST API (auth + rate-limit are applied inside the router).
   app.use("/api/app", createAppApiRouter());

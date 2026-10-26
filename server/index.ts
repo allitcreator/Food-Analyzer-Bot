@@ -5,6 +5,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { describeError } from "./lib/safe-log";
+import { securityHeaders } from "./lib/security-headers";
 
 // Промис, отклонённый без обработчика (например, `bot.editMessageText` без
 // .catch, когда Telegram вернул 400), по умолчанию в Node завершает процесс.
@@ -18,6 +19,10 @@ const httpServer = createServer(app);
 
 // Trust nginx reverse proxy
 app.set("trust proxy", 1);
+
+// nosniff и Referrer-Policy на всё, включая 429 от лимитеров ниже.
+// CSP ставит serveStatic только на HTML Mini App.
+app.use(securityHeaders);
 
 declare module "http" {
   interface IncomingMessage {

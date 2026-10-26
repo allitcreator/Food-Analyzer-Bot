@@ -1,0 +1,33 @@
+# Контекст сборки: Dockerfile делает `COPY . .`, поэтому всё лишнее и
+# секретное отрезаем здесь. Сборке нужны package*.json, client/, server/,
+# shared/, script/, migrations/, shortcuts/, конфиги в корне
+# (vite, tailwind, postcss, tsconfig, drizzle) и docker-entrypoint.sh.
+
+# Секреты
+.env
+.env.*
+
+# VCS, CI, локальные агенты
+.git
+.gitignore
+.github
+.claude
+.codex
+.replit
+.DS_Store
+**/.DS_Store
+
+# Ставится и собирается внутри образа
+node_modules
+dist
+server/public
+
+# Данные и рабочие файлы, к образу отношения не имеют
+backups
+knowledge-base
+*.tar.gz
+docs
+tests
+scripts
+**/*.md
+docker-compose.yml

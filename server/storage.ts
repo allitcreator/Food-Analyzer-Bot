@@ -56,6 +56,11 @@ export interface IStorage {
 
   getBarcodeProduct(barcode: string): Promise<BarcodeProduct | undefined>;
   upsertBarcodeProduct(product: InsertBarcodeProduct): Promise<BarcodeProduct>;
+  /**
+   * Запись из vision: вставляет новую или обновляет только такую же vision-запись.
+   * Данные Open Food Facts (source != 'vision') не трогает. false — не записано.
+   */
+  upsertVisionBarcodeProduct(product: InsertBarcodeProduct): Promise<boolean>;
 
   getFavorites(userId: number): Promise<Favorite[]>;
   getVisibleFavorites(userId: number): Promise<VisibleFavorite[]>;
@@ -511,6 +516,21 @@ export class DatabaseStorage implements IStorage {
       .onConflictDoUpdate({ target: barcodeProducts.barcode, set: rest })
       .returning();
     return row;
+  }
+
+  async upsertVisionBarcodeProduct(product: InsertBarcodeProduct): Promise<boolean> {
+    const { barcode, ...rest } = product;
+    // Условие в самом upsert, а не чтение перед записью: так OFF-запись не
+    // затрётся, даже если она появилась между двумя запросами.
+    const rows = await db.insert(barcodeProducts)
+      .values({ ...product, source: "vision" })
+      .onConflictDoUpdate({
+        target: barcodeProducts.barcode,
+        set: { ...rest, source: "vision" },
+        setWhere: eq(barcodeProducts.source, "vision"),
+      })
+      .returning({ barcode: barcodeProducts.barcode });
+    return rows.length > 0;
   }
 
   async getFavorites(userId: number): Promise<Favorite[]> {

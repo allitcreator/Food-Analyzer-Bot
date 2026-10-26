@@ -21,6 +21,8 @@ import { safeHandler, handlerNameForPattern } from "./lib/safe-handler";
 import { createInFlightGuard, takePending, restorePending } from "./lib/callback-guard";
 import { checkAdminTarget, type AdminAction } from "./lib/admin-target";
 import { roundFoodLogField } from "./lib/food-log-fields";
+import { createAiQuota, msUntilNextDay, buildQuotaExceededMessage, checkVoiceDuration, buildVoiceTooLongMessage, type AiActionKind } from "./lib/ai-quota";
+import { tagVisionBarcode, markUserEdited, shouldCacheVisionBarcode } from "./lib/vision-barcode-cache";
 
 const LIQUID_PATTERN = /(сок|вода|чай|кофе|пиво|вино|молоко|кефир|напиток|бульон|суп|кола|пепси|лимонад|смузи|йогурт питьевой|латте|капучино|американо|раф|маккиато|флэт уайт|водка|виски|ром|джин|коньяк|сидр|шампанское|какао|морс|компот|энергетик|квас|мартини|текила|ликёр|абсент|настойка)/i;
 
@@ -404,6 +406,27 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     return user;
   };
 
+  // Дневной лимит AI-действий (server/lib/ai-quota.ts). Вызывать один раз на
+  // действие пользователя, до скачивания файлов и до вызова модели. Фоновые
+  // отчёты планировщика сюда не ходят.
+  const aiQuota = createAiQuota({ dailyRequests: config.aiDailyLimit, dailyPhotos: config.aiDailyPhotoLimit });
+  function allowAiAction(chatId: number, user: User, kind: AiActionKind = "request", opts: { quiet?: boolean } = {}): boolean {
+    const tz = user.timezone ?? 'Europe/Moscow';
+    const check = aiQuota.tryConsume(String(user.id), tz, kind);
+    if (check.allowed) return true;
+    console.warn(`[ai-quota] limit reached: userId=${user.id} reason=${check.reason}`);
+    if (!opts.quiet) {
+      bot.sendMessage(chatId, buildQuotaExceededMessage(check, msUntilNextDay(new Date(), tz))).catch(() => {});
+    }
+    // Админу — не чаще раза в сутки на пользователя и не про самого себя.
+    const isMainAdmin = ADMIN_TELEGRAM_ID && String(user.telegramId ?? '').trim() === String(ADMIN_TELEGRAM_ID).trim();
+    if (check.firstDenialToday && ADMIN_TELEGRAM_ID && !isMainAdmin) {
+      const what = check.reason === 'photos' ? 'фото' : 'AI-запросов';
+      bot.sendMessage(ADMIN_TELEGRAM_ID, `⚠️ Пользователь id=${user.id} упёрся в дневной лимит ${what} (${check.limit}).`).catch(() => {});
+    }
+    return false;
+  }
+
   onText(/^\/help(@\w+)?$/, async (msg) => {
     const chatId = msg.chat.id;
     const helpText = [
@@ -464,6 +487,8 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
       );
       return;
     }
+
+    if (!allowAiAction(chatId, user)) return;
 
     const thinking = await bot.sendMessage(chatId, "🤔 Думаю...");
 
@@ -609,18 +634,18 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     };
   }
 
-  // Persist a confirmed, vision-analyzed packaged product into the global
-  // barcode cache. `item` may carry `barcode` + `barcodeSource="vision"` (set in
-  // the photo handler when a barcode was decoded but cache/OFF missed). Values
-  // are normalized to per-100 from the FINAL (possibly user-corrected) card.
+  // Подтверждённую карточку из vision кладём в общий кэш штрихкодов, только
+  // если это сырой ответ модели по одной позиции (правки пользователя не
+  // становятся ответом для всех) и под этим штрихкодом нет записи OFF —
+  // см. server/lib/vision-barcode-cache.ts.
   async function maybeCacheVisionBarcode(item: any) {
-    if (!item || item.barcodeSource !== "vision" || !item.barcode) return;
+    if (!shouldCacheVisionBarcode(item)) return;
     const rec = foodItemToBarcodeCache(item, item.barcode, "vision");
     if (!rec) return;
     try {
-      await storage.upsertBarcodeProduct(rec);
+      const written = await storage.upsertVisionBarcodeProduct(rec);
       // Название продукта в лог не идёт: это то, что ест пользователь.
-      console.log("Barcode cached from vision");
+      console.log(written ? "Barcode cached from vision" : "Barcode cache kept (non-vision record)");
     } catch (e) {
       console.error("Barcode cache write (vision) error:", describeError(e));
     }
@@ -943,6 +968,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     const weightEnd   = weightLogs.length > 0 ? weightLogs[weightLogs.length - 1].weight : null;
 
     if (user.aiWeekAnalysis === false) return;
+    if (!allowAiAction(chatId, user)) return;
     bot.sendMessage(chatId, "⏳ Готовлю AI-анализ...");
     const analysis = await generatePeriodAnalysis({
       period: 'week',
@@ -1337,6 +1363,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     const weightEnd   = weightLogs.length > 0 ? weightLogs[weightLogs.length - 1].weight : null;
 
     if (user.aiMonthAnalysis === false) return;
+    if (!allowAiAction(chatId, user)) return;
     bot.sendMessage(chatId, "⏳ Готовлю AI-анализ...");
     const analysis = await generatePeriodAnalysis({
       period: 'month',
@@ -1552,6 +1579,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     const user = await isUserAllowed(chatId, telegramId);
     if (!user) return;
 
+    if (!allowAiAction(chatId, user)) return;
     bot.sendMessage(chatId, "Готовлю отчёт за сегодня...");
     await sendEveningReport(user, true);
   });
@@ -2165,7 +2193,8 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
     const uniqueNames = Array.from(new Set(logs.map(l => l.foodName)));
     let nameToGroup: Record<string, string> = {};
 
-    if (user.smartFoodGrouping !== false && uniqueNames.length > 1) {
+    // Без квоты — молча простая группировка: Excel важнее умного свода.
+    if (user.smartFoodGrouping !== false && uniqueNames.length > 1 && allowAiAction(chatId, user, "request", { quiet: true })) {
       nameToGroup = await groupFoodNames(uniqueNames);
     }
 
@@ -2397,6 +2426,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
 
       // Recalculate nutrients based on new weight
       const ratio = newWeight / oldWeight;
+      markUserEdited(pending);
       pending.weight = newWeight;
       pending.calories = Math.round(pending.calories * ratio);
       pending.protein = Math.round(pending.protein * ratio);
@@ -2992,6 +3022,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
           await bot.sendMessage(chatId, "Нужно хотя бы 2 замера веса для анализа. Записывайте вес командой /weight 75.0");
           return;
         }
+        if (!allowAiAction(chatId, user)) return;
         const weekWorkouts = await storage.getWorkoutLogs(user.id, 20);
         const analysis = await generateWeightAnalysis(wLogs, weekStats, user,
           weekWorkouts.map(w => ({ description: w.description, caloriesBurned: w.caloriesBurned })));
@@ -3610,6 +3641,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
           return;
         }
         (pending as any)[field] = rounded;
+        markUserEdited(pending);
         // touch: вложенные мутации не триггерят персист — переприсваиваем верхний ключ
         (bot as any).pendingLogs[telegramId] = pending;
         delete userStates[telegramId];
@@ -3729,6 +3761,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
           return;
         }
         (item as any)[field] = rounded;
+        markUserEdited(item);
         // touch: мутация items[idx] — вложенная, персист триггерит только переприсваивание ключа
         pendingMulti[telegramId] = items;
         delete userStates[telegramId];
@@ -3916,6 +3949,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
 
     // Handle Text
     if (msg.text) {
+      if (!allowAiAction(chatId, user)) return;
       // Длина, а не текст: сообщение пользователя — это его еда и его планы.
       const textLen = msg.text.length;
       console.log(`Text received: len=${textLen}`);
@@ -3971,6 +4005,9 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
 
     // Handle Photo
     if (msg.photo) {
+      // Квота до скачивания: фото с найденным в кэше штрихкодом AI не трогает,
+      // но заранее этого не узнать, а лишнее списание дешевле лишнего vision.
+      if (!allowAiAction(chatId, user, "photo")) return;
       console.log("Photo received, processing...");
       const statusMsg = await bot.sendMessage(chatId, "📷 Анализирую фото...");
       const fileId = msg.photo[msg.photo.length - 1].file_id;
@@ -4070,10 +4107,7 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
 
           if (visionItems && visionItems.length > 0) {
             // Only a single, unambiguous packaged product maps 1:1 to the barcode.
-            if (cacheBarcode && visionItems.length === 1) {
-              (visionItems[0] as any).barcode = cacheBarcode;
-              (visionItems[0] as any).barcodeSource = "vision";
-            }
+            tagVisionBarcode(visionItems, cacheBarcode);
             await processFoodItems(chatId, telegramId, visionItems);
           } else {
             bot.sendMessage(chatId, "Не удалось распознать еду на фото. Попробуйте более чёткий снимок.");
@@ -4102,6 +4136,13 @@ export async function setupBot(storage: IStorage, app?: import("express").Expres
 
     // Handle Voice
     if (msg.voice) {
+      // Обе проверки до скачивания: длинное голосовое квоту не тратит.
+      const voiceCheck = checkVoiceDuration(msg.voice.duration, config.voiceMaxSeconds);
+      if (!voiceCheck.ok) {
+        bot.sendMessage(chatId, buildVoiceTooLongMessage(voiceCheck.maxSec));
+        return;
+      }
+      if (!allowAiAction(chatId, user)) return;
       bot.sendMessage(chatId, "🎤 Распознаю голосовое сообщение...");
       try {
         const file = await bot.getFile(msg.voice.file_id);

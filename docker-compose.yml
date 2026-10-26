@@ -31,6 +31,15 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-bot}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-foodbot}
     ports:
       - "127.0.0.1:8082:5000"
+    # Процесс жив и база отвечает (/api/health делает SELECT 1, иначе 503).
+    # wget есть в alpine (busybox), curl в образе нет. start_period покрывает
+    # миграции и старт бота.
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:5000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     logging:
       driver: json-file
       options:

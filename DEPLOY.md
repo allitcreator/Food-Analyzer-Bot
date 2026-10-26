@@ -64,6 +64,12 @@ WEBHOOK_URL=https://alxforbot.online
 WEBHOOK_SECRET=<openssl rand -hex 32>
 
 TZ=Europe/Moscow
+
+# Необязательно: дневные лимиты AI в боте на пользователя (сброс в полночь
+# по его часовому поясу и при рестарте) и максимальная длина голосового.
+# AI_DAILY_LIMIT=150
+# AI_DAILY_PHOTO_LIMIT=40
+# VOICE_MAX_SECONDS=300
 ```
 
 Сгенерировать секреты:
@@ -118,6 +124,37 @@ cd ~/foodbot
 git pull origin main
 docker compose up -d --build
 ```
+
+---
+
+## Контейнер: healthcheck, пользователь, заголовки
+
+- Контейнер `bot` работает от пользователя `node` (uid 1000), не от root.
+  Миграции в `docker-entrypoint.sh` идут от него же. Файлы в `/app` — только
+  чтение; писать приложение может в `/tmp` (голосовые режет ffmpeg).
+- В рантайме только production-зависимости; `drizzle-kit` для миграций лежит
+  в `dependencies`.
+- Healthcheck в `docker-compose.yml`: раз в 30 с `wget` на `/api/health`.
+  Ручка делает `SELECT 1` и отвечает 503, если база не ответила за 3 с.
+- Приложение ставит `X-Content-Type-Options: nosniff` и
+  `Referrer-Policy: no-referrer` на все ответы, а на HTML Mini App ещё и
+  `Content-Security-Policy` (хэш inline-скрипта считается при старте из
+  `dist/public/index.html`). HSTS ставит nginx. Если nginx для `/app/` ставит
+  свои `X-Frame-Options` или CSP, они конфликтуют с CSP приложения: Telegram
+  Web открывает Mini App в iframe.
+
+Что проверить после деплоя:
+```bash
+docker compose ps                                   # bot: Up (healthy) через ~1 мин
+docker compose logs bot | head -20                  # миграции прошли, нет EACCES
+docker compose exec bot id                          # uid=1000(node)
+docker compose exec bot sh -c 'touch /tmp/x && rm /tmp/x && echo tmp ok'
+curl -s https://alxforbot.online/api/health         # {"status":"ok",...}
+curl -sI https://alxforbot.online/app/ | grep -iE 'content-security|nosniff|referrer|frame-options'
+```
+Открыть Mini App в Telegram iOS/Android, Desktop и web.telegram.org: экран
+грузится, нет ошибок CSP (в web — DevTools → Console), работают графики и
+фото еды.
 
 ---
 

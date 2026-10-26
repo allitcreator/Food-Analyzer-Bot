@@ -5,6 +5,7 @@ import {
   cacheControlForFile,
   shouldFallbackToIndex,
 } from "./lib/static-headers";
+import { inlineScriptHashes, miniAppCsp } from "./lib/security-headers";
 
 /**
  * Serve the built Mini App (dist/public) under `/app` with an SPA fallback,
@@ -28,6 +29,9 @@ export function serveStatic(
   }
 
   const indexHtml = path.resolve(distPath, "index.html");
+  // CSP считается из реально отдаваемого index.html: хэши inline-скриптов
+  // (оверлей ошибок) всегда совпадают с собранным файлом.
+  const csp = miniAppCsp(inlineScriptHashes(fs.readFileSync(indexHtml, "utf8")));
 
   // Root → Mini App.
   app.get("/", (_req, res) => res.redirect("/app/"));
@@ -41,6 +45,9 @@ export function serveStatic(
       index: false,
       setHeaders: (res, filePath) => {
         res.setHeader("Cache-Control", cacheControlForFile(filePath));
+        if (filePath.endsWith(".html")) {
+          res.setHeader("Content-Security-Policy", csp);
+        }
       },
     }),
   );
@@ -67,7 +74,7 @@ export function serveStatic(
       cacheControl: false,
       etag: false,
       lastModified: false,
-      headers: { "Cache-Control": "no-store" },
+      headers: { "Cache-Control": "no-store", "Content-Security-Policy": csp },
     });
   });
 }
