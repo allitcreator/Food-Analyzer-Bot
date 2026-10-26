@@ -25,7 +25,8 @@ export interface IStorage {
   getFoodLogsInRange(userId: number, startDate: Date, endDate: Date): Promise<FoodLog[]>;
   deleteFoodLogsInRange(userId: number, startDate: Date, endDate: Date): Promise<void>;
   deleteFoodLog(id: number, userId: number): Promise<void>;
-  updateFoodLog(id: number, userId: number, data: Partial<InsertFoodLog>): Promise<FoodLog>;
+  /** undefined — записи нет или она чужая (владение в WHERE). */
+  updateFoodLog(id: number, userId: number, data: Partial<InsertFoodLog>): Promise<FoodLog | undefined>;
   getFoodLogById(id: number, userId: number): Promise<FoodLog | undefined>;
 
   /** Дневные методы: `dayKey` — "YYYY-MM-DD", границы суток — в зоне `tz`. */
@@ -44,7 +45,8 @@ export interface IStorage {
   getWaterLogsInRange(userId: number, startDate: Date, endDate: Date): Promise<WaterLog[]>;
   getDailyWaterLogs(userId: number, dayKey: string, tz: Tz): Promise<WaterLog[]>;
   updateWaterLog(id: number, userId: number, amount: number): Promise<WaterLog>;
-  deleteWaterLog(id: number, userId: number): Promise<void>;
+  /** false — записи нет или она чужая (владение в WHERE). */
+  deleteWaterLog(id: number, userId: number): Promise<boolean>;
 
   logWeight(userId: number, weight: number): Promise<WeightLog>;
   getWeightLogs(userId: number, limit?: number): Promise<WeightLog[]>;
@@ -74,7 +76,8 @@ export interface IStorage {
   getVisibleFavoriteById(userId: number, id: number): Promise<VisibleFavorite | undefined>;
   createFavorite(fav: { userId: number; title: string; items: FavoriteItem[] }): Promise<Favorite>;
   setFavoriteShared(userId: number, id: number, isShared: boolean): Promise<Favorite | undefined>;
-  deleteFavorite(userId: number, id: number): Promise<void>;
+  /** false — записи нет или она чужая (владение в WHERE). */
+  deleteFavorite(userId: number, id: number): Promise<boolean>;
   countRecentFoodName(userId: number, foodName: string, days: number): Promise<number>;
 
   // Умные напоминания: время+тип записей еды за N дней (лёгкая выборка) и самое
@@ -304,7 +307,7 @@ export class DatabaseStorage implements IStorage {
     await db.delete(foodLogs).where(and(eq(foodLogs.id, id), eq(foodLogs.userId, userId)));
   }
 
-  async updateFoodLog(id: number, userId: number, data: Partial<InsertFoodLog>): Promise<FoodLog> {
+  async updateFoodLog(id: number, userId: number, data: Partial<InsertFoodLog>): Promise<FoodLog | undefined> {
     const [updated] = await db.update(foodLogs).set(data).where(and(eq(foodLogs.id, id), eq(foodLogs.userId, userId))).returning();
     return updated;
   }
@@ -345,8 +348,11 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
-  async deleteWaterLog(id: number, userId: number): Promise<void> {
-    await db.delete(waterLogs).where(and(eq(waterLogs.id, id), eq(waterLogs.userId, userId)));
+  async deleteWaterLog(id: number, userId: number): Promise<boolean> {
+    const rows = await db.delete(waterLogs)
+      .where(and(eq(waterLogs.id, id), eq(waterLogs.userId, userId)))
+      .returning({ id: waterLogs.id });
+    return rows.length > 0;
   }
 
   async updateUserReportTime(userId: number, time: string): Promise<void> {
@@ -557,9 +563,12 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
-  async deleteFavorite(userId: number, id: number): Promise<void> {
+  async deleteFavorite(userId: number, id: number): Promise<boolean> {
     // Ownership check baked into the WHERE — a user can only delete their own.
-    await db.delete(favorites).where(and(eq(favorites.id, id), eq(favorites.userId, userId)));
+    const rows = await db.delete(favorites)
+      .where(and(eq(favorites.id, id), eq(favorites.userId, userId)))
+      .returning({ id: favorites.id });
+    return rows.length > 0;
   }
 
   // How many times a dish with this exact name (case-insensitive) was logged

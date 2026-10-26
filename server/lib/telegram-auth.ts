@@ -10,6 +10,7 @@
 import crypto from "node:crypto";
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import type { User } from "@shared/schema";
+import type { IStorage } from "../storage";
 
 // `storage` and `config` are imported lazily inside the middleware so this
 // module (and `validateInitData` in particular) can be unit-tested without a
@@ -127,54 +128,70 @@ function extractInitData(req: Request): string | null {
   return match ? match[1] : null;
 }
 
+/** Что нужно middleware: токен бота для проверки подписи и поиск пользователя. */
+export type TelegramAuthDeps = {
+  botToken: string;
+  storage: Pick<IStorage, "getUserByTelegramId">;
+};
+
 /**
  * Express middleware: validate initData, load the DB user by Telegram id,
  * enforce access, and attach the user to `req.appUser`.
  *
  * - 401 — missing/invalid initData;
  * - 403 — user not found, blocked, or not approved (unless admin).
+ *
+ * `resolveDeps` вызывается на каждый запрос: прод берёт config и storage
+ * ленивым импортом (см. `telegramAuth`), тесты подставляют свой токен и
+ * in-memory storage.
  */
-export const telegramAuth: RequestHandler = async (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-): Promise<void> => {
-  const initData = extractInitData(req);
-  if (!initData) {
-    res.status(401).json({ error: "unauthorized", reason: "missing_init_data" });
-    return;
-  }
+export function createTelegramAuth(
+  resolveDeps: () => TelegramAuthDeps | Promise<TelegramAuthDeps>,
+): RequestHandler {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const initData = extractInitData(req);
+    if (!initData) {
+      res.status(401).json({ error: "unauthorized", reason: "missing_init_data" });
+      return;
+    }
 
+    const { botToken, storage } = await resolveDeps();
+
+    const result = validateInitData(initData, botToken);
+    if (!result.ok) {
+      res.status(401).json({ error: "unauthorized", reason: result.error });
+      return;
+    }
+
+    let user: User | undefined;
+    try {
+      user = await storage.getUserByTelegramId(String(result.user.id));
+    } catch (err) {
+      next(err);
+      return;
+    }
+
+    if (!user) {
+      res.status(403).json({ error: "forbidden", reason: "not_registered" });
+      return;
+    }
+    if (user.isBlocked) {
+      res.status(403).json({ error: "forbidden", reason: "blocked" });
+      return;
+    }
+    if (!user.isApproved && !user.isAdmin) {
+      res.status(403).json({ error: "forbidden", reason: "not_approved" });
+      return;
+    }
+
+    req.appUser = user;
+    next();
+  };
+}
+
+/** Боевой middleware: токен из config, пользователи из Postgres. */
+export const telegramAuth: RequestHandler = createTelegramAuth(async () => {
   const { config } = await import("../config");
   const { storage } = await import("../storage");
-
-  const result = validateInitData(initData, config.telegramBotToken);
-  if (!result.ok) {
-    res.status(401).json({ error: "unauthorized", reason: result.error });
-    return;
-  }
-
-  let user: User | undefined;
-  try {
-    user = await storage.getUserByTelegramId(String(result.user.id));
-  } catch (err) {
-    next(err);
-    return;
-  }
-
-  if (!user) {
-    res.status(403).json({ error: "forbidden", reason: "not_registered" });
-    return;
-  }
-  if (user.isBlocked) {
-    res.status(403).json({ error: "forbidden", reason: "blocked" });
-    return;
-  }
-  if (!user.isApproved && !user.isAdmin) {
-    res.status(403).json({ error: "forbidden", reason: "not_approved" });
-    return;
-  }
-
-  req.appUser = user;
-  next();
-};
+  return { botToken: config.telegramBotToken, storage };
+});

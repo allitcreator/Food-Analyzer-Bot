@@ -19,6 +19,8 @@
  * в самом `message` (см. `isParseFailure`).
  */
 
+import { DrizzleQueryError } from "drizzle-orm";
+
 /** Значение, которое можно безопасно подставить в строку лога. */
 function isScalar(value: unknown): value is string | number | boolean {
   return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
@@ -55,7 +57,23 @@ function isParseFailure(err: unknown, e: Record<string, unknown>): boolean {
   return err instanceof SyntaxError || e.type === "entity.parse.failed";
 }
 
+/**
+ * Обёртка drizzle-orm (с 0.44) над ошибкой драйвера БД. Её message — это
+ * `Failed query: <sql>\nparams: <значения>`, а в значениях лежит то, что ввёл
+ * пользователь (название еды, профиль). Поэтому печатаем только имя и причину
+ * (ошибку pg: message, code), SQL и параметры — никогда.
+ */
+function isDrizzleQueryError(err: unknown): boolean {
+  return err instanceof DrizzleQueryError;
+}
+
 export function describeError(err: unknown): string {
+  if (isDrizzleQueryError(err)) {
+    const cause = (err as { cause?: unknown }).cause;
+    const causeText = cause === undefined ? "" : ` cause=[${describeError(cause).split("\n")[0]}]`;
+    return `DrizzleQueryError${causeText}` + stackFrames(err);
+  }
+
   // Не-объекты (строка, число, undefined) — сами себе описание.
   if (err === null || typeof err !== "object") return String(err);
 

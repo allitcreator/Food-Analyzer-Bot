@@ -9,14 +9,14 @@
 import { Router, type Request, type Response, type NextFunction, type RequestHandler } from "express";
 import rateLimit from "express-rate-limit";
 import { z, ZodError } from "zod";
-import { storage } from "./storage";
+import { storage as defaultStorage, type IStorage } from "./storage";
 import { telegramAuth } from "./lib/telegram-auth";
 import { computeEnergyBalance } from "./lib/energy";
 import { describeError } from "./lib/safe-log";
 import { publicUser } from "./lib/public-user";
 import { mealTypeByTime, sameTitle } from "./lib/favorites";
 import { dayBoundsUtc, isValidDayKey, resolveTz, todayKey, wallClockDate } from "./lib/tz";
-import { analyzeFoodImage, analyzeFoodText } from "./openai";
+import { analyzeFoodImage as defaultAnalyzeImage, analyzeFoodText as defaultAnalyzeText } from "./openai";
 import type { User, FoodLog, FavoriteItem, VisibleFavorite } from "@shared/schema";
 import {
   dayQuerySchema,
@@ -32,6 +32,48 @@ import {
   createLogsSchema,
   idParam,
 } from "@shared/routes";
+
+// ─── Dependencies ────────────────────────────────────────────────────────────
+
+/** Методы storage, которыми пользуется Mini App API. */
+export type AppApiStorage = Pick<
+  IStorage,
+  | "getDailyStats"
+  | "getDailyWater"
+  | "getDailyWaterLogs"
+  | "getDailyWorkouts"
+  | "getFoodLogsInRange"
+  | "logWater"
+  | "createFoodLog"
+  | "getMonthlyStats"
+  | "getWeeklyFullStats"
+  | "getStreak"
+  | "getWeightLogs"
+  | "updateFoodLog"
+  | "getFoodLogById"
+  | "deleteFoodLog"
+  | "deleteWaterLog"
+  | "getVisibleFavorites"
+  | "getFavorites"
+  | "createFavorite"
+  | "getVisibleFavoriteById"
+  | "setFavoriteShared"
+  | "deleteFavorite"
+  | "updateUser"
+  | "calculateAndSetGoals"
+>;
+
+/**
+ * Зависимости роутера. В проде все по умолчанию (Postgres, боевой
+ * telegramAuth, OpenRouter); тесты подставляют in-memory storage, auth со
+ * своим токеном и анализатор без LLM.
+ */
+export type AppApiDeps = {
+  storage: AppApiStorage;
+  auth: RequestHandler;
+  analyzeFoodImage: typeof defaultAnalyzeImage;
+  analyzeFoodText: typeof defaultAnalyzeText;
+};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -94,7 +136,7 @@ function mealBoundaries(user: User) {
 }
 
 /** The full day payload (same shape GET /day returns) — reused after writes. */
-async function buildDayPayload(user: User, day: string) {
+async function buildDayPayload(storage: AppApiStorage, user: User, day: string) {
   const tz = userTz(user);
   const { start, end } = dayBoundsUtc(day, tz);
   const [totals, waterTotal, waterLogs, workouts, foodLogs] = await Promise.all([
@@ -124,6 +166,7 @@ async function buildDayPayload(user: User, day: string) {
  * Mirrors `applyItemsToToday` in server/bot.ts.
  */
 async function applyItemsToToday(
+  storage: AppApiStorage,
   user: User,
   items: FavoriteItem[],
 ): Promise<{ createdFood: FoodLog[]; waterAdded: number }> {
@@ -164,11 +207,17 @@ async function applyItemsToToday(
 
 // ─── Router ──────────────────────────────────────────────────────────────────
 
-export function createAppApiRouter(): Router {
+export function createAppApiRouter(overrides: Partial<AppApiDeps> = {}): Router {
+  const {
+    storage = defaultStorage,
+    auth = telegramAuth,
+    analyzeFoodImage = defaultAnalyzeImage,
+    analyzeFoodText = defaultAnalyzeText,
+  } = overrides;
   const router = Router();
 
   // Auth first — so the rate-limit key can use the resolved user id.
-  router.use(telegramAuth);
+  router.use(auth);
 
   // ~120 requests/min per user (keyed by user id, not IP).
   router.use(
@@ -258,7 +307,7 @@ export function createAppApiRouter(): Router {
         });
         createdFood.push(log);
       }
-      const day = await buildDayPayload(user, todayKey(new Date(), userTz(user)));
+      const day = await buildDayPayload(storage, user, todayKey(new Date(), userTz(user)));
       res.status(201).json({ ok: true, createdFood, waterAdded, day });
     }),
   );
@@ -286,7 +335,7 @@ export function createAppApiRouter(): Router {
         return;
       }
       const day = resolveDay(date, tz);
-      res.json(await buildDayPayload(user, day));
+      res.json(await buildDayPayload(storage, user, day));
     }),
   );
 
@@ -378,7 +427,11 @@ export function createAppApiRouter(): Router {
     asyncHandler(async (req, res) => {
       const user = currentUser(req);
       const id = idParam.parse(req.params.id);
-      await storage.deleteWaterLog(id, user.id);
+      // Чужая или уже удалённая запись — 404, как у DELETE /logs/:id.
+      if (!(await storage.deleteWaterLog(id, user.id))) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
       res.json({ ok: true });
     }),
   );
@@ -396,7 +449,7 @@ export function createAppApiRouter(): Router {
         res.status(404).json({ error: "not_found" });
         return;
       }
-      const { createdFood } = await applyItemsToToday(user, [
+      const { createdFood } = await applyItemsToToday(storage, user, [
         {
           foodName: log.foodName,
           calories: log.calories,
@@ -406,7 +459,7 @@ export function createAppApiRouter(): Router {
           weight: log.weight,
         },
       ]);
-      const day = await buildDayPayload(user, todayKey(new Date(), userTz(user)));
+      const day = await buildDayPayload(storage, user, todayKey(new Date(), userTz(user)));
       res.status(201).json({ ok: true, createdFood, waterAdded: 0, day });
     }),
   );
@@ -477,7 +530,11 @@ export function createAppApiRouter(): Router {
     asyncHandler(async (req, res) => {
       const user = currentUser(req);
       const id = idParam.parse(req.params.id);
-      await storage.deleteFavorite(user.id, id);
+      // Чужое (в том числе общее) или уже удалённое — 404, а не «ok» без удаления.
+      if (!(await storage.deleteFavorite(user.id, id))) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
       res.json({ ok: true });
     }),
   );
@@ -495,8 +552,8 @@ export function createAppApiRouter(): Router {
         res.status(404).json({ error: "not_found" });
         return;
       }
-      const { createdFood, waterAdded } = await applyItemsToToday(user, fav.items);
-      const day = await buildDayPayload(user, todayKey(new Date(), userTz(user)));
+      const { createdFood, waterAdded } = await applyItemsToToday(storage, user, fav.items);
+      const day = await buildDayPayload(storage, user, todayKey(new Date(), userTz(user)));
       res.status(201).json({ ok: true, createdFood, waterAdded, day });
     }),
   );

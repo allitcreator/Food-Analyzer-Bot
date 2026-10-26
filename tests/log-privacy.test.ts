@@ -28,6 +28,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { DrizzleQueryError } from "drizzle-orm";
 import { describeError } from "../server/lib/safe-log";
 
 describe("describeError", () => {
@@ -107,6 +108,26 @@ describe("describeError", () => {
 
   test("undefined не роняет и не превращается в пустоту", () => {
     assert.equal(describeError(undefined), "undefined");
+  });
+
+  test("DrizzleQueryError: ни SQL, ни параметры запроса не печатаются", () => {
+    // С drizzle-orm 0.44 ошибки драйвера оборачиваются в DrizzleQueryError, у
+    // которого message = "Failed query: <sql>\nparams: <значения>". В params —
+    // то, что пользователь ввёл: название еды, заметки, профиль.
+    const cause = Object.assign(new Error('duplicate key value violates unique constraint "users_pkey"'), {
+      code: "23505",
+    });
+    const err = new DrizzleQueryError(
+      'insert into "food_logs" ("food_name") values ($1)',
+      ["СЕКРЕТНАЯ ЕДА"],
+      cause,
+    );
+    const out = describeError(err);
+    assert.match(out, /DrizzleQueryError/);
+    assert.match(out, /code=23505/);
+    assert.match(out, /duplicate key value/);
+    assert.ok(!out.includes("СЕКРЕТНАЯ ЕДА"), `параметры запроса утекли в лог: ${out}`);
+    assert.ok(!out.includes("Failed query"), `SQL утёк в лог: ${out}`);
   });
 
   test("объект без message не сериализуется целиком", () => {
